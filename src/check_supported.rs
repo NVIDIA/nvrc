@@ -31,13 +31,16 @@ pub fn check_gpu_supported(context: &mut NVRC, supported: Option<&Path>) -> Resu
     let supported_ids: Vec<String> = reader
         .lines()
         .map(|line| line.expect("Could not read line"))
+        .map(|line| line.to_lowercase())
         .collect();
 
     for devid in context.gpu_devids.iter() {
-        if !supported_ids.contains(devid) {
+        let devid_lowercase = devid.to_lowercase();
+        if !supported_ids.contains(&devid_lowercase) {
             return Err(anyhow::anyhow!("GPU {} is not supported", devid));
         }
     }
+
     context.gpu_supported = true;
     Ok(())
 }
@@ -52,4 +55,5 @@ mod tests {
         check_gpu_supported(&mut context, None).unwrap();
         assert_eq!(context.gpu_supported, true);
     }
+
 }

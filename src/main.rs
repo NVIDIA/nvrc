@@ -71,8 +71,9 @@ fn hot_plug(context: &mut NVRC) {
         Ok(ForkResult::Child) => {
             loop {
                 udev();
-                setup_gpu(context);
                 get_gpu_devices(context, None).unwrap();
+                setup_gpu(context);
+
             }
         }
         Err(e) => {
