@@ -5,6 +5,8 @@ use nix::unistd::symlinkat;
 use std::fs;
 use std::path::Path;
 
+use super::NVRC;
+
 fn is_mounted(path: &str) -> bool {
     let proc_mounts_path = Path::new("/proc/mounts");
     if proc_mounts_path.exists() {
@@ -48,82 +50,82 @@ fn fs_available(fs: &str) -> bool {
     }
     false
 }
-
-pub fn mount_setup() {
-    mount(
-        "proc",
-        "/proc",
-        "proc",
-        MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
-        None,
-    );
-    mount(
-        "dev",
-        "/dev",
-        "devtmpfs",
-        MsFlags::MS_NOSUID,
-        Some("mode=0755"),
-    );
-    mount(
-        "sysfs",
-        "/sys",
-        "sysfs",
-        MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
-        None,
-    );
-    mount(
-        "run",
-        "/run",
-        "tmpfs",
-        MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
-        Some("mode=0755"),
-    );
-    mount(
-        "tmpfs",
-        "/tmp",
-        "tmpfs",
-        MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
-        None,
-    );
-
-    if fs_available("securityfs")
-        && Path::new("/sys/kernel/security").exists()
-        && !is_mounted("/sys/kernel/security")
-    {
+impl NVRC {
+    pub fn mount_setup(&self) {
         mount(
-            "securityfs",
-            "/sys/kernel/security",
-            "securityfs",
-            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME,
+            "proc",
+            "/proc",
+            "proc",
+            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
             None,
         );
-    }
-
-    if fs_available("efivarfs")
-        && Path::new("/sys/firmware/efi/efivars").exists()
-        && !is_mounted("/sys/firmware/efi/efivars")
-    {
         mount(
-            "efivarfs",
-            "/sys/firmware/efi/efivars",
-            "efivarfs",
-            MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC,
+            "dev",
+            "/dev",
+            "devtmpfs",
+            MsFlags::MS_NOSUID,
+            Some("mode=0755"),
+        );
+        mount(
+            "sysfs",
+            "/sys",
+            "sysfs",
+            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
             None,
         );
+        mount(
+            "run",
+            "/run",
+            "tmpfs",
+            MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+            Some("mode=0755"),
+        );
+        mount(
+            "tmpfs",
+            "/tmp",
+            "tmpfs",
+            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
+            None,
+        );
+
+        if fs_available("securityfs")
+            && Path::new("/sys/kernel/security").exists()
+            && !is_mounted("/sys/kernel/security")
+        {
+            mount(
+                "securityfs",
+                "/sys/kernel/security",
+                "securityfs",
+                MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME,
+                None,
+            );
+        }
+
+        if fs_available("efivarfs")
+            && Path::new("/sys/firmware/efi/efivars").exists()
+            && !is_mounted("/sys/firmware/efi/efivars")
+        {
+            mount(
+                "efivarfs",
+                "/sys/firmware/efi/efivars",
+                "efivarfs",
+                MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC,
+                None,
+            );
+        }
+
+        ln("/proc/kcore", "/dev/core");
+        ln("/proc/self/fd", "/dev/fd");
+        ln("/proc/self/fd/0", "/dev/stdin");
+        ln("/proc/self/fd/1", "/dev/stdout");
+        ln("/proc/self/fd/2", "/dev/stderr");
+
+        mknod("/dev/null", stat::SFlag::S_IFCHR, 1, 3);
+        mknod("/dev/zero", stat::SFlag::S_IFCHR, 1, 5);
+        mknod("/dev/random", stat::SFlag::S_IFCHR, 1, 8);
+        mknod("/dev/urandom", stat::SFlag::S_IFCHR, 1, 9);
     }
-
-    ln("/proc/kcore", "/dev/core");
-    ln("/proc/self/fd", "/dev/fd");
-    ln("/proc/self/fd/0", "/dev/stdin");
-    ln("/proc/self/fd/1", "/dev/stdout");
-    ln("/proc/self/fd/2", "/dev/stderr");
-
-    mknod("/dev/null", stat::SFlag::S_IFCHR, 1, 3);
-    mknod("/dev/zero", stat::SFlag::S_IFCHR, 1, 5);
-    mknod("/dev/random", stat::SFlag::S_IFCHR, 1, 8);
-    mknod("/dev/urandom", stat::SFlag::S_IFCHR, 1, 9);
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -30,33 +30,55 @@ pub struct NVRC {
     pub gpu_supported: bool,
     pub gpu_cc_mode: Option<String>,
     pub cold_plug: bool,
+    pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC)>,
 }
 
 pub type ParamHandler = fn(&str, &mut NVRC) -> Result<()>;
 
-pub fn process_kernel_params(context: &mut NVRC, cmdline: Option<&str>) -> Result<()> {
-    let content = match cmdline {
-        Some(custom) => custom.to_string(),
-        None => {
-            let mut file = File::open("/proc/cmdline").context("Failed to open /proc/cmdline")?;
-            let mut content = String::new();
-            file.read_to_string(&mut content)
-                .context("Failed to read /proc/cmdline")?;
-            content
-        }
-    };
-    // Split the content into key-value pairs
-    for param in content.split_whitespace() {
-        if let Some((key, value)) = param.split_once('=') {
-            if let Some(handler) = PARAM_HANDLER.get(key) {
-                handler(value, context)?;
-            }
-        }
+impl NVRC {
+    pub fn init() -> Self {
+        let mut init = NVRC {
+            nvidia_smi_lgc: None,
+            uvm_persistence_mode: None,
+            cpu_vendor: None,
+            gpu_bdfs: Vec::new(),
+            gpu_devids: Vec::new(),
+            gpu_supported: false,
+            gpu_cc_mode: None,
+            cold_plug: false,
+            hot_or_cold_plug: HashMap::new(),
+        };
+
+        init.hot_or_cold_plug.insert(true, NVRC::cold_plug);
+        init.hot_or_cold_plug.insert(false, NVRC::hot_plug);
+
+        init
     }
 
-    Ok(())
-}
+    pub fn process_kernel_params(&mut self, cmdline: Option<&str>) -> Result<()> {
+        let content = match cmdline {
+            Some(custom) => custom.to_string(),
+            None => {
+                let mut file =
+                    File::open("/proc/cmdline").context("Failed to open /proc/cmdline")?;
+                let mut content = String::new();
+                file.read_to_string(&mut content)
+                    .context("Failed to read /proc/cmdline")?;
+                content
+            }
+        };
+        // Split the content into key-value pairs
+        for param in content.split_whitespace() {
+            if let Some((key, value)) = param.split_once('=') {
+                if let Some(handler) = PARAM_HANDLER.get(key) {
+                    handler(value, self)?;
+                }
+            }
+        }
 
+        Ok(())
+    }
+}
 pub fn nvrc_log(value: &str, _context: &mut NVRC) -> Result<()> {
     let level = match value.to_lowercase().as_str() {
         "off" => log::LevelFilter::Off,
@@ -100,36 +122,31 @@ mod tests {
 
     #[test]
     fn test_process_kernel_params_nvrc_log_debug() {
-        let mut context = NVRC::default();
-        process_kernel_params(
-            &mut context,
-            Some(format!("nvidia.smi.lgc=1500 {}=debug nvidia.smi.lgc=1500", NVRC_LOG).as_str()),
-        )
+        let mut init = NVRC::default();
+        init.process_kernel_params(Some(
+            format!("nvidia.smi.lgc=1500 {}=debug nvidia.smi.lgc=1500", NVRC_LOG).as_str(),
+        ))
         .unwrap();
         let kernlog_level = env::var("KERNLOG_LEVEL").unwrap();
         assert_eq!(kernlog_level, "7".to_string());
     }
     #[test]
     fn test_process_kernel_params_nvrc_log_0() {
-        let mut context = NVRC::default();
+        let mut init = NVRC::default();
 
-        process_kernel_params(
-            &mut context,
-            Some(format!("nvidia.smi.lgc=1500 {}=0 nvidia.smi.lgc=1500", NVRC_LOG).as_str()),
-        )
+        init.process_kernel_params(Some(
+            format!("nvidia.smi.lgc=1500 {}=0 nvidia.smi.lgc=1500", NVRC_LOG).as_str(),
+        ))
         .unwrap();
         let kernlog_level = env::var("KERNLOG_LEVEL").unwrap();
         assert_eq!(kernlog_level, "1".to_string());
     }
     #[test]
     fn test_process_kernel_params_nvrc_log_none() {
-        let mut context = NVRC::default();
+        let mut init = NVRC::default();
 
-        process_kernel_params(
-            &mut context,
-            Some(format!("nvidia.smi.lgc=1500 {}= ", NVRC_LOG).as_str()),
-        )
-        .unwrap();
+        init.process_kernel_params(Some(format!("nvidia.smi.lgc=1500 {}= ", NVRC_LOG).as_str()))
+            .unwrap();
         let kernlog_level = env::var("KERNLOG_LEVEL").unwrap();
         assert_eq!(kernlog_level, "1".to_string());
     }
