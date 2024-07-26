@@ -5,6 +5,8 @@ use std::path::Path;
 
 use super::NVRC;
 
+
+
 impl NVRC {
     pub fn check_gpu_supported(&mut self, supported: Option<&Path>) -> Result<()> {
         if self.gpu_devids.is_empty() {
@@ -36,6 +38,7 @@ impl NVRC {
         for devid in self.gpu_devids.iter() {
             let devid_lowercase = devid.to_lowercase();
             if !supported_ids.contains(&devid_lowercase) {
+                self.gpu_supported = false;
                 return Err(anyhow::anyhow!("GPU {} is not supported", devid));
             }
         }
@@ -48,16 +51,32 @@ impl NVRC {
 mod tests {
     use super::*;
     use std::io::Write;
+    use tempfile::tempdir;
     #[test]
     fn test_check_gpu_supported() {
+
+        let suppported_dir = tempdir().unwrap();
         // create temporary file in /tmp and populate it with 0x2330
-        let supported = Path::new("/tmp/supported-gpu.devids");
-        let mut file = File::create(supported).unwrap();
+        let supported = suppported_dir.path().join("supported-gpu.devids");
+        let mut file = File::create(&supported).unwrap();
         file.write_all(b"0x2330\n").unwrap();
 
         let mut init = NVRC::default();
         init.gpu_devids = vec!["0x2330".to_string()];
-        init.check_gpu_supported(None).unwrap();
+        init.check_gpu_supported(Some(&supported.as_path())).unwrap();
         assert_eq!(init.gpu_supported, true);
+
+
+
+        let not_supported_dir = tempdir().unwrap();
+        let not_supported = not_supported_dir.path().join("supported-gpu.devids");
+        let mut file = File::create(&not_supported).unwrap();
+        file.write_all(b"0x2331\n").unwrap();
+
+        match init.check_gpu_supported(Some(&not_supported.as_path())) {
+            Ok(_) => panic!("Expected an error"),
+            _ => assert_ne!(init.gpu_supported, true),
+        }
+
     }
 }
