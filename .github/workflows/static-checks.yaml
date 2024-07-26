@@ -5,11 +5,11 @@ on:
       - edited
       - reopened
       - synchronize
-      
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
-      
+
 name: Static checks
 jobs:
   test:
@@ -17,10 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: if ! command -v rustup > /dev/null; then; curl https://sh.rustup.rs -sSf | sh -s -- -y; fi
-      - run: echo PATH="$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
-      - run: rustup update
-      - run: rustup target add x86_64-unknown-linux-musl
+      - run: ./tests/install_rust.sh
       - run: cargo test --all-features
 
   formatting:
@@ -28,11 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: if ! command -v rustup > /dev/null; then; curl https://sh.rustup.rs -sSf | sh -s -- -y; fi
-      - run: echo PATH="$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
-      - run: rustup update
-      - run: rustup target add x86_64-unknown-linux-musl
-      - run: rustup component add rustfmt
+      - run: ./tests/install_rust.sh
       - run: cargo fmt --all -- --check
 
 
@@ -41,11 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: if ! command -v rustup > /dev/null; then; curl https://sh.rustup.rs -sSf | sh -s -- -y; fi
-      - run: echo PATH="$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
-      - run: rustup update
-      - run: rustup target add x86_64-unknown-linux-musl
-      - run: rustup component add clippy
+      - run: ./tests/install_rust.sh
       - run: cargo clippy --all-features -- -D warnings
 
   security:
@@ -53,10 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: if ! command -v rustup > /dev/null; then; curl https://sh.rustup.rs -sSf | sh -s -- -y; fi
-      - run: echo PATH="$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
-      - run: rustup update
-      - run: rustup target add x86_64-unknown-linux-musl
+      - run: ./tests/install_rust.sh
       - run: cargo install cargo-audit
       - run: cargo audit
 
@@ -65,8 +51,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: if ! command -v rustup > /dev/null; then; curl https://sh.rustup.rs -sSf | sh -s -- -y; fi
-      - run: echo PATH="$HOME/.cargo/bin:$PATH" >> $GITHUB_ENV
-      - run: rustup toolchain install nightly
-      - run: rustup default nightly
+      - run: ./tests/install_rust.sh nightly
       - run: cargo miri test
