@@ -36,11 +36,6 @@ pub fn nvidia_ctk_system() -> Result<()> {
 pub fn nvidia_ctk_cdi() -> Result<()> {
     debug!("nvidia-ctk cdi generate --output=/var/run/cdi/nvidia.yaml");
     let command = "/bin/nvidia-ctk";
-    let args = [
-        "-d",
-        "cdi",
-        "generate",
-        "--output=/var/run/cdi/nvidia.yaml"
-    ];
+    let args = ["-d", "cdi", "generate", "--output=/var/run/cdi/nvidia.yaml"];
     foreground(command, &args)
 }

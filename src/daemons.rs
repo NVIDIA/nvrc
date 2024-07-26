@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::proc_cmdline::NVRC;
 
-use super::start_stop_daemon::{foreground, background};
+use super::start_stop_daemon::{background, foreground};
 
 impl NVRC {
     pub fn nvidia_persistenced(&self) -> Result<()> {
@@ -41,9 +41,7 @@ impl NVRC {
             return Ok(());
         }
         let command = "/bin/dcgm-exporter";
-        let args = [
-            "-k",
-        ];
+        let args = ["-k"];
         background(command, &args)
     }
 }

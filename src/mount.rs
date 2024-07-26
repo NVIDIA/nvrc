@@ -60,8 +60,8 @@ impl NVRC {
             // TODO how to mount it MsFlags::MS_NOEXEC
             //MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY,
             MsFlags::MS_RDONLY,
-            None::<&str>)
-        {
+            None::<&str>,
+        ) {
             Ok(_) => {}
             Err(e) => panic!("failed to remount {} readonly: {}", target, e),
         }
@@ -141,8 +141,6 @@ impl NVRC {
         mknod("/dev/zero", stat::SFlag::S_IFCHR, 1, 5);
         mknod("/dev/random", stat::SFlag::S_IFCHR, 1, 8);
         mknod("/dev/urandom", stat::SFlag::S_IFCHR, 1, 9);
-
-
     }
 }
 #[cfg(test)]
