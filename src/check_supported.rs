@@ -47,8 +47,14 @@ impl NVRC {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     #[test]
     fn test_check_gpu_supported() {
+        // create temporary file in /tmp and populate it with 0x2330
+        let supported = Path::new("/tmp/supported-gpu.devids");
+        let mut file = File::create(supported).unwrap();
+        file.write_all(b"0x2330\n").unwrap();
+
         let mut init = NVRC::default();
         init.gpu_devids = vec!["0x2330".to_string()];
         init.check_gpu_supported(None).unwrap();
