@@ -8,6 +8,7 @@ use lazy_static::lazy_static;
 
 pub const NVRC_LOG: &str = "nvrc.log";
 pub const NVRC_UVM_PERISTENCE_MODE: &str = "nvrc.uvm_persistence_mode";
+pub const NVRC_DCGM: &str = "nvrc.dcgm";
 
 lazy_static! {
     static ref PARAM_HANDLER: HashMap<&'static str, ParamHandler> = {
@@ -17,6 +18,7 @@ lazy_static! {
             NVRC_UVM_PERISTENCE_MODE,
             uvm_persistenced_mode as ParamHandler,
         );
+        m.insert(NVRC_DCGM, nvrc_dcgm as ParamHandler);
         m
     };
 }
@@ -31,6 +33,7 @@ pub struct NVRC {
     pub gpu_cc_mode: Option<String>,
     pub cold_plug: bool,
     pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC)>,
+    pub dcgm_enabled: Option<bool>,
 }
 
 pub type ParamHandler = fn(&str, &mut NVRC) -> Result<()>;
@@ -47,6 +50,7 @@ impl NVRC {
             gpu_cc_mode: None,
             cold_plug: false,
             hot_or_cold_plug: HashMap::new(),
+            dcgm_enabled: None,
         };
 
         init.hot_or_cold_plug.insert(true, NVRC::cold_plug);
@@ -79,6 +83,18 @@ impl NVRC {
         Ok(())
     }
 }
+
+pub fn nvrc_dcgm(value: &str, context: &mut NVRC) -> Result<()> {
+    let dcgm = match value.to_lowercase().as_str() {
+        "on" => true,
+        "off" => false,
+        _ => false,
+    };
+    context.dcgm_enabled = Some(dcgm);
+    debug!("nvrc.dcgm: {}", context.dcgm_enabled.unwrap());
+    Ok(())
+}
+
 pub fn nvrc_log(value: &str, _context: &mut NVRC) -> Result<()> {
     let level = match value.to_lowercase().as_str() {
         "off" => log::LevelFilter::Off,
@@ -90,7 +106,7 @@ pub fn nvrc_log(value: &str, _context: &mut NVRC) -> Result<()> {
         _ => log::LevelFilter::Off,
     };
     log::set_max_level(level);
-
+    debug!("nvrc.log: {}", log::max_level());
     Ok(())
 }
 
@@ -102,6 +118,10 @@ pub fn nvidia_smi_lgc(value: &str, context: &mut NVRC) -> Result<()> {
 
 pub fn uvm_persistenced_mode(value: &str, context: &mut NVRC) -> Result<()> {
     context.uvm_persistence_mode = Some(value.to_string());
+    debug!(
+        "nvrc.uvm_persistence_mode {}",
+        context.uvm_persistence_mode.as_ref().unwrap()
+    );
     Ok(())
 }
 

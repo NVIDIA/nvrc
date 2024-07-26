@@ -1,7 +1,8 @@
-use anyhow::{anyhow, Context, Result};
-use std::process::Command;
+use anyhow::Result;
 
 use crate::proc_cmdline::NVRC;
+
+use super::start_stop_daemon::{foreground, background};
 
 impl NVRC {
     pub fn nvidia_persistenced(&self) -> Result<()> {
@@ -20,22 +21,29 @@ impl NVRC {
             }
         }
 
-        info!("nvidia-persistenced {}", uvm_persistence_mode);
+        let command = "/bin/nvidia-persistenced";
+        let args = [uvm_persistence_mode];
 
-        let output = Command::new("/bin/nvidia-persistenced")
-            .args([uvm_persistence_mode])
-            .output()
-            .context("failed to execute /bin/nvidia-persistenced")?;
+        foreground(command, &args)
+    }
 
-        if !output.status.success() {
-            return Err(anyhow!(
-                "nvidia-persistenced failed with status: {}\n error:{}\n{}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr),
-                String::from_utf8_lossy(&output.stdout)
-            ));
+    pub fn nv_hostengine(&self) -> Result<()> {
+        if !self.dcgm_enabled.unwrap_or(false) {
+            return Ok(());
         }
+        let command = "/bin/nv-hostengine";
+        let args = ["--service-account", "nvidia-dcgm", "--home-dir", "/tmp"];
+        foreground(command, &args)
+    }
 
-        Ok(())
+    pub fn dcgm_exporter(&self) -> Result<()> {
+        if !self.dcgm_enabled.unwrap_or(false) {
+            return Ok(());
+        }
+        let command = "/bin/dcgm-exporter";
+        let args = [
+            "-k",
+        ];
+        background(command, &args)
     }
 }

@@ -14,6 +14,7 @@ mod mount;
 mod ndev;
 mod proc_cmdline;
 mod query_cc_mode;
+mod start_stop_daemon;
 
 #[macro_use]
 extern crate log;
@@ -24,10 +25,10 @@ use ndev::udev;
 use proc_cmdline::NVRC;
 
 fn main() {
-    panic::set_hook(Box::new(|panic_info| {
-        error!("{}", panic_info);
-        reboot(RebootMode::RB_POWER_OFF).unwrap();
-    }));
+    //panic::set_hook(Box::new(|panic_info| {
+    //    error!("{}", panic_info);
+    //    reboot(RebootMode::RB_POWER_OFF).unwrap();
+    //}));
 
     let mut init = NVRC::init();
 
@@ -72,12 +73,15 @@ impl NVRC {
         // If we're running in a confidential environment we may need to set
         // specific kernel module parameters. Check those first and then load
         // the modules.
-        self.process_kernel_params(None).unwrap();
         nvidia_ctk_system().unwrap();
         // Once we have loaded the driver we can start persistenced
         // CDI will not pick up the daemon if it is not created
         self.nvidia_persistenced().unwrap();
         // Create the CDI spec for the GPUs including persistenced
         nvidia_ctk_cdi().unwrap();
+        // If user has enabled nvrc.dcgm=on in the kernel command line
+        // we're starting the DCGM exporter
+        self.nv_hostengine().unwrap();
+        self.dcgm_exporter().unwrap();
     }
 }
