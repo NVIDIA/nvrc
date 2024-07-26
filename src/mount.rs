@@ -51,6 +51,21 @@ fn fs_available(fs: &str) -> bool {
     false
 }
 impl NVRC {
+    #[allow(dead_code)]
+    pub fn mount_readonly(&self, target: &str) {
+        match mount::mount(
+            None::<&str>,
+            target,
+            None::<&str>,
+            // TODO how to mount it MsFlags::MS_NOEXEC
+            //MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY,
+            MsFlags::MS_RDONLY,
+            None::<&str>)
+        {
+            Ok(_) => {}
+            Err(e) => panic!("failed to remount {} readonly: {}", target, e),
+        }
+    }
     pub fn mount_setup(&self) {
         mount(
             "proc",
@@ -114,6 +129,8 @@ impl NVRC {
             );
         }
 
+        //self.mount_readonly("/");
+
         ln("/proc/kcore", "/dev/core");
         ln("/proc/self/fd", "/dev/fd");
         ln("/proc/self/fd/0", "/dev/stdin");
@@ -124,6 +141,8 @@ impl NVRC {
         mknod("/dev/zero", stat::SFlag::S_IFCHR, 1, 5);
         mknod("/dev/random", stat::SFlag::S_IFCHR, 1, 8);
         mknod("/dev/urandom", stat::SFlag::S_IFCHR, 1, 9);
+
+
     }
 }
 #[cfg(test)]

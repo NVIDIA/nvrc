@@ -25,15 +25,17 @@ use ndev::udev;
 use proc_cmdline::NVRC;
 
 fn main() {
-    //panic::set_hook(Box::new(|panic_info| {
-    //    error!("{}", panic_info);
-    //    reboot(RebootMode::RB_POWER_OFF).unwrap();
-    //}));
+    panic::set_hook(Box::new(|panic_info| {
+        error!("{}", panic_info);
+        reboot(RebootMode::RB_POWER_OFF).unwrap();
+    }));
 
     let mut init = NVRC::init();
 
     init.mount_setup();
     kernlog::init().unwrap();
+    // TODO: mount root readonly
+    //init.mount_readonly("/");
     init.process_kernel_params(None).unwrap();
     init.query_cpu_vendor().unwrap();
     init.get_gpu_devices(None).unwrap();

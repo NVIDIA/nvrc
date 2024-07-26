@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use std::process::Command;
 
 use super::start_stop_daemon::foreground;
