@@ -5,8 +5,6 @@ use std::path::Path;
 
 use super::NVRC;
 
-
-
 impl NVRC {
     pub fn check_gpu_supported(&mut self, supported: Option<&Path>) -> Result<()> {
         if self.gpu_devids.is_empty() {
@@ -54,7 +52,6 @@ mod tests {
     use tempfile::tempdir;
     #[test]
     fn test_check_gpu_supported() {
-
         let suppported_dir = tempdir().unwrap();
         // create temporary file in /tmp and populate it with 0x2330
         let supported = suppported_dir.path().join("supported-gpu.devids");
@@ -63,10 +60,9 @@ mod tests {
 
         let mut init = NVRC::default();
         init.gpu_devids = vec!["0x2330".to_string()];
-        init.check_gpu_supported(Some(&supported.as_path())).unwrap();
+        init.check_gpu_supported(Some(&supported.as_path()))
+            .unwrap();
         assert_eq!(init.gpu_supported, true);
-
-
 
         let not_supported_dir = tempdir().unwrap();
         let not_supported = not_supported_dir.path().join("supported-gpu.devids");
@@ -77,6 +73,5 @@ mod tests {
             Ok(_) => panic!("Expected an error"),
             _ => assert_ne!(init.gpu_supported, true),
         }
-
     }
 }

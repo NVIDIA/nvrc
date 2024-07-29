@@ -18,10 +18,10 @@ pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
             String::from_utf8_lossy(&output.stdout)
         ));
     }
-    if output.stdout.len() > 0 {
+    if !output.stdout.is_empty() {
         debug!("{}", String::from_utf8_lossy(&output.stdout));
     }
-    if output.stderr.len() > 0 {
+    if !output.stderr.is_empty() {
         debug!("{}", String::from_utf8_lossy(&output.stderr));
     }
 
@@ -36,11 +36,11 @@ pub fn background(command: &str, args: &[&str]) -> Result<()> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
-        .expect(format!("failed to start {}", command).as_str());
+        .unwrap_or_else(|_| panic!("failed to start {}", command));
 
     match child.try_wait() {
-        Ok(Some(status)) => return Err(anyhow!("{} exited with status: {}", command, status)),
-        Ok(None) => return Ok(()),
-        Err(e) => return Err(anyhow!("error attempting to wait: {}", e)),
+        Ok(Some(status)) => Err(anyhow!("{} exited with status: {}", command, status)),
+        Ok(None) => Ok(()),
+        Err(e) => Err(anyhow!("error attempting to wait: {}", e)),
     }
 }

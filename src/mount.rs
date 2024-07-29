@@ -191,8 +191,11 @@ mod tests {
 
         fs::write(&target, "test").expect("Failed to create test file");
 
+        fs::remove_file(&linkpath).expect("Failed to remove test directory");
+
         let src = target.to_str().unwrap();
         let dst = linkpath.to_str().unwrap();
+
         ln(src, dst);
 
         assert!(Path::new(dst).exists());
@@ -207,10 +210,13 @@ mod tests {
             return rerun_with_sudo();
         }
 
-        let path = "/tmp/test_node";
-        mknod(path, stat::SFlag::S_IFCHR, 1, 3);
-        assert!(Path::new(path).exists());
-        fs::remove_file(path).expect("Failed to remove test node");
+        let device = "/tmp/test_node";
+        if Path::new(device).exists() {
+            fs::remove_file(device).expect("Failed to remove test node");
+        }
+        mknod(device, stat::SFlag::S_IFCHR, 1, 3);
+        assert!(Path::new(device).exists());
+        fs::remove_file(device).expect("Failed to remove test node");
     }
 
     #[test]

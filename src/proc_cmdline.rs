@@ -23,6 +23,7 @@ lazy_static! {
     };
 }
 #[derive(Debug, Default)]
+#[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
     pub nvidia_smi_lgc: Option<String>,
     pub uvm_persistence_mode: Option<String>,
@@ -128,46 +129,120 @@ pub fn uvm_persistenced_mode(value: &str, context: &mut NVRC) -> Result<()> {
 #[cfg(test)]
 
 mod tests {
+    //#[macro_use]
+    //extern crate log;
+    //extern crate kernlog;
+
     use super::*;
+    use lazy_static::lazy_static;
+    use nix::unistd::Uid;
     use std::env;
+    use std::process::Command;
+    use std::sync::Once;
+
+    lazy_static! {
+        static ref LOG: Once = Once::new();
+    }
+
+    fn log_setup() {
+        LOG.call_once(|| {
+            kernlog::init().unwrap();
+        });
+    }
+
+    fn rerun_with_sudo() {
+        let args: Vec<String> = env::args().collect();
+        let output = Command::new("sudo").args(&args).status();
+
+        match output {
+            Ok(output) => {
+                if output.success() {
+                    println!("running with sudo")
+                } else {
+                    panic!("not running with sudo")
+                }
+            }
+            Err(e) => {
+                panic!("Failed to escalate privileges: {:?}", e)
+            }
+        }
+    }
 
     #[test]
     fn test_nvrc_log_debug() {
+        if !Uid::effective().is_root() {
+            return rerun_with_sudo();
+        }
+
+        log_setup();
         let mut context = NVRC::default();
 
         nvrc_log("debug", &mut context).unwrap();
-        let kernlog_level = env::var("KERNLOG_LEVEL").unwrap();
-        assert_eq!(kernlog_level, "7".to_string());
+        assert_eq!(log_enabled!(log::Level::Debug), true);
     }
 
     #[test]
     fn test_process_kernel_params_nvrc_log_debug() {
+        if !Uid::effective().is_root() {
+            return rerun_with_sudo();
+        }
+
+        log_setup();
         let mut init = NVRC::default();
+
         init.process_kernel_params(Some(
             format!("nvidia.smi.lgc=1500 {}=debug nvidia.smi.lgc=1500", NVRC_LOG).as_str(),
         ))
         .unwrap();
-        let kernlog_level = env::var("KERNLOG_LEVEL").unwrap();
-        assert_eq!(kernlog_level, "7".to_string());
+
+        assert_eq!(log::max_level(), log::LevelFilter::Debug);
+        assert_eq!(log_enabled!(log::Level::Trace), false);
     }
+
+    #[test]
+    fn test_process_kernel_params_nvrc_log_info() {
+        if !Uid::effective().is_root() {
+            return rerun_with_sudo();
+        }
+
+        log_setup();
+        let mut init = NVRC::default();
+
+        init.process_kernel_params(Some(
+            format!("nvidia.smi.lgc=1500 {}=info nvidia.smi.lgc=1500", NVRC_LOG).as_str(),
+        ))
+        .unwrap();
+
+        assert_eq!(log::max_level(), log::LevelFilter::Info);
+        assert_eq!(log_enabled!(log::Level::Debug), false);
+    }
+
     #[test]
     fn test_process_kernel_params_nvrc_log_0() {
+        if !Uid::effective().is_root() {
+            return rerun_with_sudo();
+        }
+
+        log_setup();
         let mut init = NVRC::default();
 
         init.process_kernel_params(Some(
             format!("nvidia.smi.lgc=1500 {}=0 nvidia.smi.lgc=1500", NVRC_LOG).as_str(),
         ))
         .unwrap();
-        let kernlog_level = env::var("KERNLOG_LEVEL").unwrap();
-        assert_eq!(kernlog_level, "1".to_string());
+        assert_eq!(log::max_level(), log::LevelFilter::Off);
     }
     #[test]
     fn test_process_kernel_params_nvrc_log_none() {
+        if !Uid::effective().is_root() {
+            return rerun_with_sudo();
+        }
+
+        log_setup();
         let mut init = NVRC::default();
 
         init.process_kernel_params(Some(format!("nvidia.smi.lgc=1500 {}= ", NVRC_LOG).as_str()))
             .unwrap();
-        let kernlog_level = env::var("KERNLOG_LEVEL").unwrap();
-        assert_eq!(kernlog_level, "1".to_string());
+        assert_eq!(log::max_level(), log::LevelFilter::Off);
     }
 }
