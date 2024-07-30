@@ -7,6 +7,7 @@ use std::process::Command;
 
 mod check_supported;
 mod container_toolkit;
+mod coreutils;
 mod cpu_vendor;
 mod daemons;
 mod get_devices;
@@ -15,6 +16,7 @@ mod ndev;
 mod proc_cmdline;
 mod query_cc_mode;
 mod start_stop_daemon;
+mod user_group;
 
 #[macro_use]
 extern crate log;
@@ -24,7 +26,9 @@ use container_toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
 use ndev::udev;
 use proc_cmdline::NVRC;
 
+//use start_stop_daemon::io_setup;
 fn main() {
+    //io_setup();
     panic::set_hook(Box::new(|panic_info| {
         error!("{}", panic_info);
         reboot(RebootMode::RB_POWER_OFF).unwrap();
@@ -33,7 +37,9 @@ fn main() {
     let mut init = NVRC::init();
 
     init.mount_setup();
+
     kernlog::init().unwrap();
+    log::set_max_level(log::LevelFilter::Off);
     // TODO: mount root readonly
     //init.mount_readonly("/");
     init.process_kernel_params(None).unwrap();

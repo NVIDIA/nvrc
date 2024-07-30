@@ -1,6 +1,7 @@
-use anyhow::Context;
 use anyhow::Result;
+use anyhow::{anyhow, Context};
 use std::collections::HashMap;
+use std::fs::write;
 use std::fs::File;
 use std::io::Read;
 
@@ -108,6 +109,13 @@ pub fn nvrc_log(value: &str, _context: &mut NVRC) -> Result<()> {
     };
     log::set_max_level(level);
     debug!("nvrc.log: {}", log::max_level());
+    // Do not ratelimit userspace to /dev/kmsg if we have debug enabled
+    if let Err(e) = write("/proc/sys/kernel/printk_devkmsg", b"on\n") {
+        return Err(anyhow!(
+            "failed to write to /proc/sys/kernel/printk_devkmsg: {}",
+            e
+        ));
+    }
     Ok(())
 }
 
@@ -129,10 +137,6 @@ pub fn uvm_persistenced_mode(value: &str, context: &mut NVRC) -> Result<()> {
 #[cfg(test)]
 
 mod tests {
-    //#[macro_use]
-    //extern crate log;
-    //extern crate kernlog;
-
     use super::*;
     use lazy_static::lazy_static;
     use nix::unistd::Uid;

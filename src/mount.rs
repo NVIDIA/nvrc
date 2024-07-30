@@ -1,11 +1,22 @@
 use nix::mount; //::{mount, MsFlags};
 use nix::mount::MsFlags;
 use nix::sys::stat;
-use nix::unistd::symlinkat;
+
 use std::fs;
 use std::path::Path;
 
 use super::NVRC;
+
+use crate::coreutils::{ln, mknod};
+
+fn mount(source: &str, target: &str, fstype: &str, flags: MsFlags, data: Option<&str>) {
+    if !is_mounted(target) {
+        match mount::mount(Some(source), target, Some(fstype), flags, data) {
+            Ok(_) => {}
+            Err(e) => panic!("Failed to mount {} on {}: {}", source, target, e),
+        }
+    }
+}
 
 fn is_mounted(path: &str) -> bool {
     let proc_mounts_path = Path::new("/proc/mounts");
@@ -17,30 +28,6 @@ fn is_mounted(path: &str) -> bool {
     false
 }
 
-fn mount(source: &str, target: &str, fstype: &str, flags: MsFlags, data: Option<&str>) {
-    if !is_mounted(target) {
-        match mount::mount(Some(source), target, Some(fstype), flags, data) {
-            Ok(_) => {}
-            Err(e) => panic!("Failed to mount {} on {}: {}", source, target, e),
-        }
-    }
-}
-
-fn ln(target: &str, linkpath: &str) {
-    if let Err(e) = symlinkat(target, None, linkpath) {
-        panic!("Failed to create symlink {} -> {}: {}", linkpath, target, e);
-    }
-}
-
-fn mknod(path: &str, kind: stat::SFlag, major: u64, minor: u64) {
-    if !Path::new(path).exists() {
-        let dev = nix::sys::stat::makedev(major, minor);
-        if let Err(e) = stat::mknod(path, kind, stat::Mode::from_bits_truncate(0o666), dev) {
-            panic!("Failed to create device node {}: {}", path, e);
-        }
-    }
-}
-
 fn fs_available(fs: &str) -> bool {
     let path = Path::new("/proc/filesystems");
     if path.exists() {
@@ -50,6 +37,7 @@ fn fs_available(fs: &str) -> bool {
     }
     false
 }
+
 impl NVRC {
     #[allow(dead_code)]
     pub fn mount_readonly(&self, target: &str) {
@@ -67,41 +55,15 @@ impl NVRC {
         }
     }
     pub fn mount_setup(&self) {
-        mount(
-            "proc",
-            "/proc",
-            "proc",
-            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
-            None,
-        );
-        mount(
-            "dev",
-            "/dev",
-            "devtmpfs",
-            MsFlags::MS_NOSUID,
-            Some("mode=0755"),
-        );
-        mount(
-            "sysfs",
-            "/sys",
-            "sysfs",
-            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
-            None,
-        );
-        mount(
-            "run",
-            "/run",
-            "tmpfs",
-            MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
-            Some("mode=0755"),
-        );
-        mount(
-            "tmpfs",
-            "/tmp",
-            "tmpfs",
-            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV,
-            None,
-        );
+        let common_flags =
+            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
+        let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
+
+        mount("proc", "/proc", "proc", common_flags, None);
+        mount("dev", "/dev", "devtmpfs", dev_flags, Some("mode=0755"));
+        mount("sysfs", "/sys", "sysfs", common_flags, None);
+        mount("run", "/run", "tmpfs", common_flags, Some("mode=0755"));
+        mount("tmpfs", "/tmp", "tmpfs", common_flags, None);
 
         if fs_available("securityfs")
             && Path::new("/sys/kernel/security").exists()
@@ -111,7 +73,7 @@ impl NVRC {
                 "securityfs",
                 "/sys/kernel/security",
                 "securityfs",
-                MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME,
+                common_flags,
                 None,
             );
         }
@@ -124,7 +86,7 @@ impl NVRC {
                 "efivarfs",
                 "/sys/firmware/efi/efivars",
                 "efivarfs",
-                MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC,
+                common_flags,
                 None,
             );
         }
