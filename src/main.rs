@@ -1,9 +1,9 @@
 use nix::sys::reboot::{reboot, RebootMode};
 use nix::unistd::{fork, ForkResult};
 
-use std::os::unix::process::CommandExt;
+
 use std::panic;
-use std::process::Command;
+
 
 mod check_supported;
 mod container_toolkit;
@@ -17,6 +17,7 @@ mod proc_cmdline;
 mod query_cc_mode;
 mod start_stop_daemon;
 mod user_group;
+mod sbin_init;
 
 #[macro_use]
 extern crate log;
@@ -25,6 +26,7 @@ extern crate kernlog;
 use container_toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
 use ndev::udev;
 use proc_cmdline::NVRC;
+use sbin_init::kata_agent;
 
 //use start_stop_daemon::io_setup;
 fn main() {
@@ -54,15 +56,14 @@ impl NVRC {
     fn cold_plug(&mut self) {
         debug!("cold-plug mode detected, starting GPU setup");
         self.setup_gpu();
-        // /sbin/init is the kata-agent
-        Command::new("/sbin/init").exec();
+        kata_agent().unwrap();
     }
 
     fn hot_plug(&mut self) {
         debug!("hot-plug mode detected, starting udev and GPU setup");
         match unsafe { fork() } {
             Ok(ForkResult::Parent { child: _ }) => {
-                Command::new("/sbin/init").exec();
+                kata_agent().unwrap();
             }
             Ok(ForkResult::Child) => loop {
                 udev();
@@ -74,6 +75,7 @@ impl NVRC {
             }
         }
     }
+
 
     fn setup_gpu(&mut self) {
         self.query_gpu_cc_mode().unwrap();
@@ -91,5 +93,8 @@ impl NVRC {
         // we're starting the DCGM exporter
         self.nv_hostengine().unwrap();
         self.dcgm_exporter().unwrap();
+        // If user has enabled nvidia_smi_srs in the kernel command line
+        // we can optionally set the GPU to Ready
+        self.nvidia_smi_srs().unwrap();
     }
 }

@@ -23,9 +23,15 @@ impl NVRC {
                 .output()
                 .with_context(|| format!("Failed to execute nvidia_gpu_tools for BDF: {}", bdf))?;
 
-            let output_str = String::from_utf8_lossy(&output.stdout);
+            let combined_output = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
 
-            let current_mode = if output_str.contains("CC mode is on") {
+            debug!("{}", combined_output);
+
+            let current_mode = if combined_output.contains("CC mode is on") {
                 "on".to_string()
             } else {
                 "off".to_string()

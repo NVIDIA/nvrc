@@ -28,10 +28,10 @@ impl NVRC {
         let args = [
             "--verbose",
             uvm_persistence_mode,
-            //            "-u",
-            //            &user_group.user_name,
-            //            "-g",
-            //            &user_group.group_name,
+             //           "-u",
+              //          &user_group.user_name,
+                //        "-g",
+                  //      &user_group.group_name,
         ];
 
         foreground(command, &args)
@@ -53,5 +53,15 @@ impl NVRC {
         let command = "/bin/dcgm-exporter";
         let args = ["-k"];
         background(command, &args)
+    }
+
+    pub fn nvidia_smi_srs(&self) -> Result<()> {
+        if self.gpu_cc_mode != Some("on".to_string()) {
+            debug!("CC mode is off, skipping nvidia-smi conf-compute -srs");
+            return Ok(());
+        }
+        let command = "/bin/nvidia-smi";
+        let args = ["conf-compute", "-srs", self.nvidia_smi_srs.as_deref().unwrap_or("0")];
+        foreground(command, &args)
     }
 }

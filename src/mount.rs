@@ -58,12 +58,13 @@ impl NVRC {
         let common_flags =
             MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
         let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
+        let tmp_flags: MsFlags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
 
         mount("proc", "/proc", "proc", common_flags, None);
         mount("dev", "/dev", "devtmpfs", dev_flags, Some("mode=0755"));
         mount("sysfs", "/sys", "sysfs", common_flags, None);
         mount("run", "/run", "tmpfs", common_flags, Some("mode=0755"));
-        mount("tmpfs", "/tmp", "tmpfs", common_flags, None);
+        mount("tmpfs", "/tmp", "tmpfs", tmp_flags, None);
 
         if fs_available("securityfs")
             && Path::new("/sys/kernel/security").exists()
