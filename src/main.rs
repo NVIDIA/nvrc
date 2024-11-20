@@ -1,9 +1,7 @@
 use nix::sys::reboot::{reboot, RebootMode};
 use nix::unistd::{fork, ForkResult};
 
-
 use std::panic;
-
 
 mod check_supported;
 mod container_toolkit;
@@ -15,9 +13,9 @@ mod mount;
 mod ndev;
 mod proc_cmdline;
 mod query_cc_mode;
+mod sbin_init;
 mod start_stop_daemon;
 mod user_group;
-mod sbin_init;
 
 #[macro_use]
 extern crate log;
@@ -75,7 +73,6 @@ impl NVRC {
             }
         }
     }
-
 
     fn setup_gpu(&mut self) {
         self.query_gpu_cc_mode().unwrap();

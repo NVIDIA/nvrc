@@ -7,10 +7,10 @@ use std::io::Read;
 
 use lazy_static::lazy_static;
 
-pub const NVRC_LOG:                 &str = "nvrc.log";
+pub const NVRC_LOG: &str = "nvrc.log";
 pub const NVRC_UVM_PERISTENCE_MODE: &str = "nvrc.uvm_persistence_mode";
-pub const NVRC_DCGM:                &str = "nvrc.dcgm";
-pub const NVIDIA_SMI_SRS:           &str = "nvidia.smi.srs";
+pub const NVRC_DCGM: &str = "nvrc.dcgm";
+pub const NVIDIA_SMI_SRS: &str = "nvidia.smi.srs";
 
 lazy_static! {
     static ref PARAM_HANDLER: HashMap<&'static str, ParamHandler> = {
