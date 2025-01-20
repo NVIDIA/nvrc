@@ -3,6 +3,7 @@ use nix::unistd::{fork, ForkResult};
 
 use std::panic;
 
+mod cgroup;
 mod check_supported;
 mod container_toolkit;
 mod coreutils;
@@ -21,11 +22,11 @@ mod user_group;
 extern crate log;
 extern crate kernlog;
 
+use cgroup::set_cgroup_subtree_control;
 use container_toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
 use ndev::udev;
 use proc_cmdline::NVRC;
 use sbin_init::kata_agent;
-
 //use start_stop_daemon::io_setup;
 fn main() {
     //io_setup();
@@ -45,6 +46,9 @@ fn main() {
     init.process_kernel_params(None).unwrap();
     init.query_cpu_vendor().unwrap();
     init.get_gpu_devices(None).unwrap();
+
+    set_cgroup_subtree_control().unwrap();
+
     // At this this point we either have GPUs (cold-plug) or we do not have
     // any GPUs (hot-plug) depending on the mode of operation execute cold|hot-plug
     init.hot_or_cold_plug.get(&init.cold_plug).unwrap()(&mut init);

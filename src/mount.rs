@@ -65,6 +65,7 @@ impl NVRC {
         mount("sysfs", "/sys", "sysfs", common_flags, None);
         mount("run", "/run", "tmpfs", common_flags, Some("mode=0755"));
         mount("tmpfs", "/tmp", "tmpfs", tmp_flags, None);
+        mount("cgroup2", "/sys/fs/cgroup", "cgroup2", common_flags, None);
 
         if fs_available("securityfs")
             && Path::new("/sys/kernel/security").exists()
