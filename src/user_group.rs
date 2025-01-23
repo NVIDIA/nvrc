@@ -2,7 +2,7 @@ use rand::Rng;
 use std::fs::OpenOptions;
 use std::io::Write;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct UserGroup {
     user_id: u32,
     group_id: u32,

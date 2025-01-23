@@ -7,6 +7,9 @@ use std::io::Read;
 
 use lazy_static::lazy_static;
 
+use crate::user_group::random_user_group;
+use crate::user_group::UserGroup;
+
 pub const NVRC_LOG: &str = "nvrc.log";
 pub const NVRC_UVM_PERISTENCE_MODE: &str = "nvrc.uvm_persistence_mode";
 pub const NVRC_DCGM: &str = "nvrc.dcgm";
@@ -39,6 +42,7 @@ pub struct NVRC {
     pub cold_plug: bool,
     pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC)>,
     pub dcgm_enabled: Option<bool>,
+    pub user_group: UserGroup,
 }
 
 pub type ParamHandler = fn(&str, &mut NVRC) -> Result<()>;
@@ -57,6 +61,7 @@ impl NVRC {
             cold_plug: false,
             hot_or_cold_plug: HashMap::new(),
             dcgm_enabled: None,
+            user_group: random_user_group(),
         };
 
         init.hot_or_cold_plug.insert(true, NVRC::cold_plug);

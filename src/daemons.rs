@@ -1,7 +1,6 @@
 use anyhow::Result;
 
 use crate::proc_cmdline::NVRC;
-use crate::user_group::random_user_group;
 
 use super::start_stop_daemon::{background, foreground};
 
@@ -22,16 +21,14 @@ impl NVRC {
             }
         }
 
-        let _user_group = random_user_group();
-
         let command = "/bin/nvidia-persistenced";
         let args = [
             "--verbose",
             uvm_persistence_mode,
             //           "-u",
-            //          &user_group.user_name,
+            //          &self.user_group.user_name,
             //        "-g",
-            //      &user_group.group_name,
+            //      &self.user_group.group_name,
         ];
 
         foreground(command, &args)

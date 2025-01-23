@@ -2,9 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use std::fs::OpenOptions;
 use std::process::{Command, Stdio};
 
-//use crate::kmsg::kmsg;
-
-fn kmsg() -> std::fs::File {
+pub fn kmsg() -> std::fs::File {
     let log_path = if log_enabled!(log::Level::Debug) {
         "/dev/kmsg"
     } else {

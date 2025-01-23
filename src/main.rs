@@ -1,20 +1,19 @@
 use nix::sys::reboot::{reboot, RebootMode};
-use nix::unistd::{fork, ForkResult};
+use nix::unistd::{fork, sync, ForkResult};
 
 use std::panic;
 
-mod cgroup;
 mod check_supported;
 mod container_toolkit;
 mod coreutils;
 mod cpu_vendor;
 mod daemons;
 mod get_devices;
+mod kata_agent;
 mod mount;
 mod ndev;
 mod proc_cmdline;
 mod query_cc_mode;
-mod sbin_init;
 mod start_stop_daemon;
 mod user_group;
 
@@ -22,16 +21,16 @@ mod user_group;
 extern crate log;
 extern crate kernlog;
 
-use cgroup::set_cgroup_subtree_control;
+//use cgroup::set_cgroup_subtree_control;
 use container_toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
+use kata_agent::kata_agent;
 use ndev::udev;
 use proc_cmdline::NVRC;
-use sbin_init::kata_agent;
-//use start_stop_daemon::io_setup;
+
 fn main() {
-    //io_setup();
     panic::set_hook(Box::new(|panic_info| {
         error!("{}", panic_info);
+        sync();
         reboot(RebootMode::RB_POWER_OFF).unwrap();
     }));
 
@@ -41,14 +40,11 @@ fn main() {
 
     kernlog::init().unwrap();
     log::set_max_level(log::LevelFilter::Off);
-    // TODO: mount root readonly
-    //init.mount_readonly("/");
+
+    init.mount_readonly("/");
     init.process_kernel_params(None).unwrap();
     init.query_cpu_vendor().unwrap();
     init.get_gpu_devices(None).unwrap();
-
-    set_cgroup_subtree_control().unwrap();
-
     // At this this point we either have GPUs (cold-plug) or we do not have
     // any GPUs (hot-plug) depending on the mode of operation execute cold|hot-plug
     init.hot_or_cold_plug.get(&init.cold_plug).unwrap()(&mut init);

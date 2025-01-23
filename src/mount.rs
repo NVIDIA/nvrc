@@ -47,7 +47,7 @@ impl NVRC {
             None::<&str>,
             // TODO how to mount it MsFlags::MS_NOEXEC
             //MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY,
-            MsFlags::MS_RDONLY,
+            MsFlags::MS_RDONLY | MsFlags::MS_REMOUNT,
             None::<&str>,
         ) {
             Ok(_) => {}
@@ -65,7 +65,7 @@ impl NVRC {
         mount("sysfs", "/sys", "sysfs", common_flags, None);
         mount("run", "/run", "tmpfs", common_flags, Some("mode=0755"));
         mount("tmpfs", "/tmp", "tmpfs", tmp_flags, None);
-        mount("cgroup2", "/sys/fs/cgroup", "cgroup2", common_flags, None);
+        //mount("cgroup2", "/sys/fs/cgroup", "cgroup2", common_flags, None);
 
         if fs_available("securityfs")
             && Path::new("/sys/kernel/security").exists()
@@ -105,6 +105,7 @@ impl NVRC {
         mknod("/dev/zero", stat::SFlag::S_IFCHR, 1, 5);
         mknod("/dev/random", stat::SFlag::S_IFCHR, 1, 8);
         mknod("/dev/urandom", stat::SFlag::S_IFCHR, 1, 9);
+        //mknod("/dev/tty", stat::SFlag::S_IFCHR, 5, 0);
     }
 }
 #[cfg(test)]
