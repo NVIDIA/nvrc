@@ -1,7 +1,6 @@
 use anyhow::Result;
 
 use crate::proc_cmdline::NVRC;
-
 use super::start_stop_daemon::{background, foreground};
 
 impl NVRC {

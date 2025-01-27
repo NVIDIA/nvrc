@@ -1,7 +1,5 @@
 use nix::sys::stat;
 use nix::unistd::symlinkat;
-use std::fs::File;
-use std::io::{self, Read};
 use std::path::Path;
 
 pub fn ln(target: &str, linkpath: &str) {
@@ -19,7 +17,12 @@ pub fn mknod(path: &str, kind: stat::SFlag, major: u64, minor: u64) {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "debug")]
+use std::fs::File;
+#[cfg(feature = "debug")]
+use std::io::{self, Read};
+
+#[cfg(feature = "debug")]
 pub fn cat(filename: &str) -> io::Result<()> {
     debug!("cat {}", filename);
     let mut file = File::open(filename)?;

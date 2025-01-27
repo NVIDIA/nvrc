@@ -45,6 +45,7 @@ fn main() {
     init.process_kernel_params(None).unwrap();
     init.query_cpu_vendor().unwrap();
     init.get_gpu_devices(None).unwrap();
+    //set_cgroup_subtree_control().unwrap();
     // At this this point we either have GPUs (cold-plug) or we do not have
     // any GPUs (hot-plug) depending on the mode of operation execute cold|hot-plug
     init.hot_or_cold_plug.get(&init.cold_plug).unwrap()(&mut init);
