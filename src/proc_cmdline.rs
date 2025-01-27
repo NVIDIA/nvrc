@@ -151,6 +151,7 @@ pub fn uvm_persistenced_mode(value: &str, context: &mut NVRC) -> Result<()> {
 #[cfg(test)]
 
 mod tests {
+    use serial_test::serial;
     use super::*;
     use lazy_static::lazy_static;
     use nix::unistd::Uid;
@@ -187,6 +188,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_nvrc_log_debug() {
         if !Uid::effective().is_root() {
             return rerun_with_sudo();
@@ -200,6 +202,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_process_kernel_params_nvrc_log_debug() {
         if !Uid::effective().is_root() {
             return rerun_with_sudo();
@@ -218,6 +221,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_process_kernel_params_nvrc_log_info() {
         if !Uid::effective().is_root() {
             return rerun_with_sudo();
@@ -236,6 +240,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_process_kernel_params_nvrc_log_0() {
         if !Uid::effective().is_root() {
             return rerun_with_sudo();
@@ -251,6 +256,7 @@ mod tests {
         assert_eq!(log::max_level(), log::LevelFilter::Off);
     }
     #[test]
+    #[serial]
     fn test_process_kernel_params_nvrc_log_none() {
         if !Uid::effective().is_root() {
             return rerun_with_sudo();
