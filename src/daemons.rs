@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use crate::proc_cmdline::NVRC;
 use super::start_stop_daemon::{background, foreground};
+use crate::proc_cmdline::NVRC;
 
 impl NVRC {
     pub fn nvidia_persistenced(&self) -> Result<()> {
