@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh
+      - run: ./tests/install_rust.sh nightly
       - run: cargo install cargo-audit
       - run: cargo audit
 
