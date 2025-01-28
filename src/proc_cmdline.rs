@@ -30,6 +30,7 @@ lazy_static! {
 }
 #[derive(Debug, Default)]
 #[allow(clippy::upper_case_acronyms)]
+#[allow(non_snake_case)]
 pub struct NVRC {
     pub nvidia_smi_srs: Option<String>,
     pub nvidia_smi_lgc: Option<String>,
