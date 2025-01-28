@@ -23,6 +23,7 @@ use std::fs::File;
 use std::io::{self, Read};
 
 #[cfg(feature = "debug")]
+#[allow(dead_code)]
 pub fn cat(filename: &str) -> io::Result<()> {
     debug!("cat {}", filename);
     let mut file = File::open(filename)?;
