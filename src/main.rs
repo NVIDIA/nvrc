@@ -6,6 +6,7 @@ use std::panic;
 mod check_supported;
 mod container_toolkit;
 mod coreutils;
+#[cfg(feature = "confidential")]
 mod cpu_vendor;
 mod daemons;
 mod get_devices;
@@ -13,6 +14,7 @@ mod kata_agent;
 mod mount;
 mod ndev;
 mod proc_cmdline;
+#[cfg(feature = "confidential")]
 mod query_cc_mode;
 mod start_stop_daemon;
 mod user_group;
@@ -42,8 +44,11 @@ fn main() {
     log::set_max_level(log::LevelFilter::Off);
 
     init.mount_readonly("/");
-    init.process_kernel_params(None).unwrap();
+
+    #[cfg(feature = "confidential")]
     init.query_cpu_vendor().unwrap();
+
+    init.process_kernel_params(None).unwrap();
     init.get_gpu_devices(None).unwrap();
     //set_cgroup_subtree_control().unwrap();
     // At this this point we either have GPUs (cold-plug) or we do not have
@@ -76,6 +81,7 @@ impl NVRC {
     }
 
     fn setup_gpu(&mut self) {
+        #[cfg(feature = "confidential")]
         self.query_gpu_cc_mode().unwrap();
         self.check_gpu_supported(None).unwrap();
         // If we're running in a confidential environment we may need to set

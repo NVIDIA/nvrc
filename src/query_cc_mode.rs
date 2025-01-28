@@ -1,7 +1,6 @@
+use super::NVRC;
 use anyhow::{Context, Result};
 use std::process::Command;
-
-use super::NVRC;
 
 impl NVRC {
     pub fn query_gpu_cc_mode(&mut self) -> Result<()> {
