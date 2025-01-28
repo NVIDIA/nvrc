@@ -42,7 +42,7 @@ pub struct NVRC {
     pub cold_plug: bool,
     pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC)>,
     pub dcgm_enabled: Option<bool>,
-    pub user_group: UserGroup,
+    pub _user_group: UserGroup,
 }
 
 pub type ParamHandler = fn(&str, &mut NVRC) -> Result<()>;
@@ -61,7 +61,7 @@ impl NVRC {
             cold_plug: false,
             hot_or_cold_plug: HashMap::new(),
             dcgm_enabled: None,
-            user_group: random_user_group(),
+            _user_group: random_user_group(),
         };
 
         init.hot_or_cold_plug.insert(true, NVRC::cold_plug);
@@ -151,10 +151,10 @@ pub fn uvm_persistenced_mode(value: &str, context: &mut NVRC) -> Result<()> {
 #[cfg(test)]
 
 mod tests {
-    use serial_test::serial;
     use super::*;
     use lazy_static::lazy_static;
     use nix::unistd::Uid;
+    use serial_test::serial;
     use std::env;
     use std::process::Command;
     use std::sync::Once;
