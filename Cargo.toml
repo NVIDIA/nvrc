@@ -27,5 +27,3 @@ serial_test = "0.5.0"
 
 [features]
 debug = []
-
-

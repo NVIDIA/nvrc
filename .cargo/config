@@ -1,0 +1,22 @@
+
+[target.aarch64-unknown-linux-musl]
+rustflags = [
+    "-C", "linker=musl-gcc",
+    "-C", "target-feature=+crt-static", # Use static crt
+    "-C", "link-arg=-s",                # Strip symbols
+    "-C", "opt-level=z",                # Optimize for size
+    "-C", "codegen-units=1",            # Enable better (though slower) optimization
+    "-C", "panic=abort",                # Remove stack unwind code
+]
+
+
+[target.x86_64-unknown-linux-musl]
+rustflags = [
+    "-C", "linker=musl-gcc",
+    "-C", "target-feature=+crt-static", # Use static crt
+    "-C", "link-arg=-s",                # Strip symbols
+    "-C", "opt-level=z",                # Optimize for size
+    "-C", "codegen-units=1",            # Enable better (though slower) optimization
+    "-C", "panic=abort",                # Remove stack unwind code
+]
+
