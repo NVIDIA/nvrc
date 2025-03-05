@@ -16,18 +16,3 @@ pub fn mknod(path: &str, kind: stat::SFlag, major: u64, minor: u64) {
         }
     }
 }
-
-#[cfg(feature = "debug")]
-use std::fs::File;
-#[cfg(feature = "debug")]
-use std::io::{self, Read};
-
-#[cfg(feature = "debug")]
-pub fn cat(filename: &str) -> io::Result<()> {
-    debug!("cat {}", filename);
-    let mut file = File::open(filename)?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
-    debug!("{}", contents);
-    Ok(())
-}

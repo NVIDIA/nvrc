@@ -1,7 +1,6 @@
+use super::daemon::foreground;
 use anyhow::{Context, Result};
 use std::process::Command;
-
-use super::start_stop_daemon::foreground;
 
 #[allow(dead_code)]
 pub fn nvidia_smi() -> Result<()> {

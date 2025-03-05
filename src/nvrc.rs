@@ -1,13 +1,13 @@
+use anyhow::Context;
 use anyhow::Result;
-use anyhow::{anyhow, Context};
 use std::collections::HashMap;
-use std::fs::write;
+use std::fs;
 use std::fs::File;
 use std::io::Read;
 
 use lazy_static::lazy_static;
 
-use crate::user_group::random_user_group;
+use crate::daemon::Name;
 use crate::user_group::UserGroup;
 
 pub const NVRC_LOG: &str = "nvrc.log";
@@ -28,7 +28,7 @@ lazy_static! {
         m
     };
 }
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
     pub nvidia_smi_srs: Option<String>,
@@ -42,13 +42,14 @@ pub struct NVRC {
     pub cold_plug: bool,
     pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC)>,
     pub dcgm_enabled: Option<bool>,
-    pub _user_group: UserGroup,
+    pub identity: UserGroup,
+    pub daemons: HashMap<Name, std::process::Child>,
 }
 
 pub type ParamHandler = fn(&str, &mut NVRC) -> Result<()>;
 
 impl NVRC {
-    pub fn init() -> Self {
+    pub fn default() -> Self {
         let mut init = NVRC {
             nvidia_smi_srs: None,
             nvidia_smi_lgc: None,
@@ -61,7 +62,8 @@ impl NVRC {
             cold_plug: false,
             hot_or_cold_plug: HashMap::new(),
             dcgm_enabled: None,
-            _user_group: random_user_group(),
+            identity: UserGroup::new(),
+            daemons: HashMap::new(),
         };
 
         init.hot_or_cold_plug.insert(true, NVRC::cold_plug);
@@ -119,12 +121,7 @@ pub fn nvrc_log(value: &str, _context: &mut NVRC) -> Result<()> {
     log::set_max_level(level);
     debug!("nvrc.log: {}", log::max_level());
     // Do not ratelimit userspace to /dev/kmsg if we have debug enabled
-    if let Err(e) = write("/proc/sys/kernel/printk_devkmsg", b"on\n") {
-        return Err(anyhow!(
-            "failed to write to /proc/sys/kernel/printk_devkmsg: {}",
-            e
-        ));
-    }
+    fs::write("/proc/sys/kernel/printk_devkmsg", b"on\n").unwrap();
     Ok(())
 }
 

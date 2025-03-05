@@ -5,8 +5,6 @@ use nix::sys::stat;
 use std::fs;
 use std::path::Path;
 
-use super::NVRC;
-
 use crate::coreutils::{ln, mknod};
 
 fn mount(source: &str, target: &str, fstype: &str, flags: MsFlags, data: Option<&str>) {
@@ -38,76 +36,70 @@ fn fs_available(fs: &str) -> bool {
     false
 }
 
-impl NVRC {
-    #[allow(dead_code)]
-    pub fn mount_readonly(&self, target: &str) {
-        match mount::mount(
-            None::<&str>,
-            target,
-            None::<&str>,
-            // TODO how to mount it MsFlags::MS_NOEXEC
-            //MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY,
-            MsFlags::MS_RDONLY | MsFlags::MS_REMOUNT,
-            None::<&str>,
-        ) {
-            Ok(_) => {}
-            Err(e) => panic!("failed to remount {} readonly: {}", target, e),
-        }
-    }
-    pub fn mount_setup(&self) {
-        let common_flags =
-            MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
-        let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
-        let tmp_flags: MsFlags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
-
-        mount("proc", "/proc", "proc", common_flags, None);
-        mount("dev", "/dev", "devtmpfs", dev_flags, Some("mode=0755"));
-        mount("sysfs", "/sys", "sysfs", common_flags, None);
-        mount("run", "/run", "tmpfs", common_flags, Some("mode=0755"));
-        mount("tmpfs", "/tmp", "tmpfs", tmp_flags, None);
-        //mount("cgroup2", "/sys/fs/cgroup", "cgroup2", common_flags, None);
-
-        if fs_available("securityfs")
-            && Path::new("/sys/kernel/security").exists()
-            && !is_mounted("/sys/kernel/security")
-        {
-            mount(
-                "securityfs",
-                "/sys/kernel/security",
-                "securityfs",
-                common_flags,
-                None,
-            );
-        }
-
-        if fs_available("efivarfs")
-            && Path::new("/sys/firmware/efi/efivars").exists()
-            && !is_mounted("/sys/firmware/efi/efivars")
-        {
-            mount(
-                "efivarfs",
-                "/sys/firmware/efi/efivars",
-                "efivarfs",
-                common_flags,
-                None,
-            );
-        }
-
-        //self.mount_readonly("/");
-
-        ln("/proc/kcore", "/dev/core");
-        ln("/proc/self/fd", "/dev/fd");
-        ln("/proc/self/fd/0", "/dev/stdin");
-        ln("/proc/self/fd/1", "/dev/stdout");
-        ln("/proc/self/fd/2", "/dev/stderr");
-
-        mknod("/dev/null", stat::SFlag::S_IFCHR, 1, 3);
-        mknod("/dev/zero", stat::SFlag::S_IFCHR, 1, 5);
-        mknod("/dev/random", stat::SFlag::S_IFCHR, 1, 8);
-        mknod("/dev/urandom", stat::SFlag::S_IFCHR, 1, 9);
-        //mknod("/dev/tty", stat::SFlag::S_IFCHR, 5, 0);
+pub fn readonly(target: &str) {
+    match mount::mount(
+        None::<&str>,
+        target,
+        None::<&str>,
+        // TODO how to mount it MsFlags::MS_NOEXEC
+        //MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY,
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY | MsFlags::MS_REMOUNT,
+        None::<&str>,
+    ) {
+        Ok(_) => {}
+        Err(e) => panic!("failed to remount {} readonly: {}", target, e),
     }
 }
+pub fn setup() {
+    let common_flags =
+        MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
+    let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
+    let tmp_flags: MsFlags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
+
+    mount("proc", "/proc", "proc", common_flags, None);
+    mount("dev", "/dev", "devtmpfs", dev_flags, Some("mode=0755"));
+    mount("sysfs", "/sys", "sysfs", common_flags, None);
+    mount("run", "/run", "tmpfs", common_flags, Some("mode=0755"));
+    mount("tmpfs", "/tmp", "tmpfs", tmp_flags, None);
+
+    if fs_available("securityfs")
+        && Path::new("/sys/kernel/security").exists()
+        && !is_mounted("/sys/kernel/security")
+    {
+        mount(
+            "securityfs",
+            "/sys/kernel/security",
+            "securityfs",
+            common_flags,
+            None,
+        );
+    }
+
+    if fs_available("efivarfs")
+        && Path::new("/sys/firmware/efi/efivars").exists()
+        && !is_mounted("/sys/firmware/efi/efivars")
+    {
+        mount(
+            "efivarfs",
+            "/sys/firmware/efi/efivars",
+            "efivarfs",
+            common_flags,
+            None,
+        );
+    }
+
+    ln("/proc/kcore", "/dev/core");
+    ln("/proc/self/fd", "/dev/fd");
+    ln("/proc/self/fd/0", "/dev/stdin");
+    ln("/proc/self/fd/1", "/dev/stdout");
+    ln("/proc/self/fd/2", "/dev/stderr");
+
+    mknod("/dev/null", stat::SFlag::S_IFCHR, 1, 3);
+    mknod("/dev/zero", stat::SFlag::S_IFCHR, 1, 5);
+    mknod("/dev/random", stat::SFlag::S_IFCHR, 1, 8);
+    mknod("/dev/urandom", stat::SFlag::S_IFCHR, 1, 9);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

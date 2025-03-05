@@ -1,26 +1,40 @@
+use nix::unistd::{Gid, Uid};
 use rand::Rng;
 use std::fs::OpenOptions;
 use std::io::Write;
-
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct UserGroup {
-    user_id: u32,
-    group_id: u32,
+    pub user_id: Uid,
+    pub group_id: Gid,
     pub user_name: String,
     pub group_name: String,
 }
 
+impl UserGroup {
+    pub fn new() -> Self {
+        UserGroup {
+            user_id: Uid::from_raw(0),
+            group_id: Gid::from_raw(0),
+            user_name: String::from("root"),
+            group_name: String::from("root"),
+        }
+    }
+}
+
 pub fn random_user_group() -> UserGroup {
-    let mut rng = rand::thread_rng();
-    let user_id = rng.gen_range(1000..60000); // Generating user ID in the range 1000-60000
-    let group_id = rng.gen_range(1000..60000); // Generating group ID in the range 1000-60000
+    let mut rng = rand::rng();
+    let uid = rng.random_range(1000..60000); // Generating user ID in the range 1000-60000
+    let gid = rng.random_range(1000..60000); // Generating group ID in the range 1000-60000
 
     let user_name: String = (0..8)
-        .map(|_| (rng.gen_range(b'a'..=b'z') as char))
+        .map(|_| (rng.random_range(b'a'..=b'z') as char))
         .collect();
     let group_name: String = (0..8)
-        .map(|_| (rng.gen_range(b'a'..=b'z') as char))
+        .map(|_| (rng.random_range(b'a'..=b'z') as char))
         .collect();
+
+    let user_id = Uid::from_raw(uid);
+    let group_id = Gid::from_raw(gid);
 
     let user_group = UserGroup {
         user_id,
