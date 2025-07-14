@@ -65,7 +65,7 @@ pub fn watch_for_pattern(pattern: &'static str, tx: std::sync::mpsc::Sender<&'st
                 }
             }
             Err(e) => {
-                panic!("error reading /dev/kmsg: {}", e);
+                panic!("error reading /dev/kmsg: {e}");
             }
         }
     });
