@@ -150,7 +150,17 @@ impl NVRC {
         chown("/var/run/nvidia-persistenced", Some(uid), Some(gid)).unwrap();
 
         let command = "/bin/nvidia-persistenced";
-        let args = ["--verbose", uvm_persistence_mode, "-u", u, "-g", g];
+
+        let mut args = vec!["--verbose", uvm_persistence_mode];
+
+        match self.gpu_cc_mode {
+            Some(ref mode) if mode == "on" => {
+                warn!("TODO: Running in GPU Confidential Computing mode, not setting user/group for nvidia-persistenced");
+            }
+            _ => {
+                args.extend_from_slice(&["-u", u, "-g", g]);
+            }
+        }
 
         match mode {
             Action::Start => self.start(&Name::Persistenced, command, &args),

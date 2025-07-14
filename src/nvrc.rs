@@ -13,7 +13,7 @@ use crate::user_group::UserGroup;
 pub const NVRC_LOG: &str = "nvrc.log";
 pub const NVRC_UVM_PERISTENCE_MODE: &str = "nvrc.uvm_persistence_mode";
 pub const NVRC_DCGM: &str = "nvrc.dcgm";
-pub const NVIDIA_SMI_SRS: &str = "nvidia.smi.srs";
+pub const NVRC_SMI_SRS: &str = "nvrc.smi.srs";
 
 lazy_static! {
     static ref PARAM_HANDLER: HashMap<&'static str, ParamHandler> = {
@@ -24,7 +24,7 @@ lazy_static! {
             uvm_persistenced_mode as ParamHandler,
         );
         m.insert(NVRC_DCGM, nvrc_dcgm as ParamHandler);
-        m.insert(NVIDIA_SMI_SRS, nvidia_smi_srs as ParamHandler);
+        m.insert(NVRC_SMI_SRS, nvidia_smi_srs as ParamHandler);
         m
     };
 }

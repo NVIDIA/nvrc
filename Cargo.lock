@@ -10,6 +10,7 @@ dependencies = [
  "kernlog",
  "kobject-uevent",
  "lazy_static",
+ "libc",
  "log",
  "mktemp",
  "netlink-sys",

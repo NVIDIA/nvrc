@@ -60,8 +60,7 @@ mod tests {
 
         let mut init = NVRC::default();
         init.gpu_devids = vec!["0x2330".to_string()];
-        init.check_gpu_supported(Some(supported.as_path()))
-            .unwrap();
+        init.check_gpu_supported(Some(supported.as_path())).unwrap();
         assert!(init.gpu_supported);
 
         let not_supported_dir = tempdir().unwrap();
