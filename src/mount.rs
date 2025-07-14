@@ -11,7 +11,7 @@ fn mount(source: &str, target: &str, fstype: &str, flags: MsFlags, data: Option<
     if !is_mounted(target) {
         match mount::mount(Some(source), target, Some(fstype), flags, data) {
             Ok(_) => {}
-            Err(e) => panic!("Failed to mount {} on {}: {}", source, target, e),
+            Err(e) => panic!("Failed to mount {source} on {target}: {e}"),
         }
     }
 }
@@ -47,7 +47,7 @@ pub fn readonly(target: &str) {
         None::<&str>,
     ) {
         Ok(_) => {}
-        Err(e) => panic!("failed to remount {} readonly: {}", target, e),
+        Err(e) => panic!("failed to remount {target} readonly: {e}"),
     }
 }
 pub fn setup() {
@@ -121,7 +121,7 @@ mod tests {
                 }
             }
             Err(e) => {
-                panic!("Failed to escalate privileges: {:?}", e)
+                panic!("Failed to escalate privileges: {e:?}")
             }
         }
     }

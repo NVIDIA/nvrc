@@ -24,7 +24,7 @@ impl NVRC {
             ));
         }
 
-        let file = File::open(supported).context(format!("Failed to open {:?}", supported))?;
+        let file = File::open(supported).context(format!("Failed to open {supported:?}"))?;
         let reader = BufReader::new(file);
 
         let supported_ids: Vec<String> = reader
@@ -60,18 +60,18 @@ mod tests {
 
         let mut init = NVRC::default();
         init.gpu_devids = vec!["0x2330".to_string()];
-        init.check_gpu_supported(Some(&supported.as_path()))
+        init.check_gpu_supported(Some(supported.as_path()))
             .unwrap();
-        assert_eq!(init.gpu_supported, true);
+        assert!(init.gpu_supported);
 
         let not_supported_dir = tempdir().unwrap();
         let not_supported = not_supported_dir.path().join("supported-gpu.devids");
         let mut file = File::create(&not_supported).unwrap();
         file.write_all(b"0x2331\n").unwrap();
 
-        match init.check_gpu_supported(Some(&not_supported.as_path())) {
+        match init.check_gpu_supported(Some(not_supported.as_path())) {
             Ok(_) => panic!("Expected an error"),
-            _ => assert_ne!(init.gpu_supported, true),
+            _ => assert!(!init.gpu_supported),
         }
     }
 }

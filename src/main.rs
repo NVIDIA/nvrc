@@ -112,7 +112,7 @@ impl NVRC {
                 }
             }
             Err(e) => {
-                panic!("fork failed: {}", e);
+                panic!("fork failed: {e}");
             }
         }
     }

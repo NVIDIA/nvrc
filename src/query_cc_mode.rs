@@ -21,7 +21,7 @@ impl NVRC {
                     bdf,
                 ])
                 .output()
-                .with_context(|| format!("Failed to execute nvidia_gpu_tools for BDF: {}", bdf))?;
+                .with_context(|| format!("Failed to execute nvidia_gpu_tools for BDF: {bdf}"))?;
 
             let combined_output = format!(
                 "{}{}",

@@ -38,7 +38,7 @@ impl fmt::Display for Name {
         // Truncate to 15 characters if longer; since /proc/<pid>/comm is
         // limited to 16 - 15 characters plus \0
         let truncated = &full_str[..std::cmp::min(full_str.len(), 15)];
-        write!(f, "{}", truncated)
+        write!(f, "{truncated}")
     }
 }
 
@@ -50,7 +50,7 @@ pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
         .stderr(Stdio::from(kmsg()))
         .args(args)
         .output()
-        .context(format!("failed to execute {}", command))?;
+        .context(format!("failed to execute {command}"))?;
 
     if !output.status.success() {
         return Err(anyhow!("{} failed with status: {}", command, output.status,));
@@ -64,7 +64,7 @@ fn background(command: &str, args: &[&str]) -> Result<std::process::Child> {
         .stdout(Stdio::from(kmsg().try_clone().unwrap()))
         .stderr(Stdio::from(kmsg()))
         .spawn()
-        .unwrap_or_else(|_| panic!("failed to start {}", command));
+        .unwrap_or_else(|_| panic!("failed to start {command}"));
 
     match child.try_wait() {
         Ok(Some(status)) => Err(anyhow!("{} exited with status: {}", command, status)),
@@ -106,7 +106,7 @@ impl NVRC {
             child.kill().unwrap();
             child.wait().unwrap();
 
-            let comm_name = format!("{}", daemon);
+            let comm_name = format!("{daemon}");
 
             debug!("killing all processes named '{}'", comm_name);
             kill_processes_by_comm(comm_name.as_str());
