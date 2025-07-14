@@ -43,23 +43,23 @@ fn main() {
     init.identity = user_group::random_user_group();
     mount::readonly("/");
 
-    init.process_kernel_params(None).unwrap();
+    init.process_kernel_params(None).expect("Failed to process kernel parameters");
 
     let init_or_sbin_init = init::InitInvocation::from_argv0();
     debug!("init_or_sbin_init: {:?}", init_or_sbin_init);
 
-    init.query_cpu_vendor().unwrap();
-    init.get_gpu_devices(None).unwrap();
+    init.query_cpu_vendor().expect("Failed to query CPU vendor");
+    init.get_gpu_devices(None).expect("Failed to get GPU devices");
     // At this this point we either have GPUs (cold-plug) or we do not have
     // any GPUs (hot-plug) depending on the mode of operation execute cold|hot-plug
-    init.hot_or_cold_plug.get(&init.cold_plug).unwrap()(&mut init);
+    init.hot_or_cold_plug.get(&init.cold_plug).expect("Failed to determine hot or cold plug mode")(&mut init);
 }
 
 impl NVRC {
     fn cold_plug(&mut self) {
         debug!("cold-plug mode detected, starting GPU setup");
         self.setup_gpu();
-        kata_agent().unwrap();
+        kata_agent().expect("Failed to initialize Kata agent in cold-plug mode");
     }
 
     fn hot_plug(&mut self) {
@@ -68,7 +68,7 @@ impl NVRC {
         );
         match unsafe { fork() } {
             Ok(ForkResult::Parent { child: _ }) => {
-                kata_agent().unwrap();
+                kata_agent().expect("Failed to initialize Kata agent in hot-plug parent process");
             }
             Ok(ForkResult::Child) => {
                 let (tx_to_nvrc, rx_in_nvrc) = mpsc::channel::<&str>();
@@ -87,24 +87,24 @@ impl NVRC {
                     debug!("received event: {}", event);
                     match event {
                         "hot-plug" => {
-                            self.get_gpu_devices(None).unwrap();
+                            self.get_gpu_devices(None).expect("Failed to get GPU devices during hot-plug event");
                             self.setup_gpu();
                         }
                         "hot-unplug" => {
-                            self.nvidia_persistenced(daemon::Action::Stop).unwrap();
-                            self.nv_hostengine(Action::Stop).unwrap();
-                            self.dcgm_exporter(Action::Stop).unwrap();
+                            self.nvidia_persistenced(daemon::Action::Stop).expect("Failed to stop NVIDIA persistence daemon during hot-unplug");
+                            self.nv_hostengine(Action::Stop).expect("Failed to stop NVIDIA host engine during hot-unplug");
+                            self.dcgm_exporter(Action::Stop).expect("Failed to stop DCGM exporter during hot-unplug");
 
                             sleep(Duration::from_millis(3000));
-                            self.get_gpu_devices(None).unwrap();
+                            self.get_gpu_devices(None).expect("Failed to get GPU devices after hot-unplug event");
 
                             // If we still have GPU devices present restart the
                             // daemons e.g. one container is done but we have
                             // more
                             if !self.gpu_bdfs.is_empty() {
-                                self.nvidia_persistenced(Action::Start).unwrap();
-                                self.nv_hostengine(Action::Start).unwrap();
-                                self.dcgm_exporter(Action::Start).unwrap();
+                                self.nvidia_persistenced(Action::Start).expect("Failed to start NVIDIA persistence daemon after hot-unplug");
+                                self.nv_hostengine(Action::Start).expect("Failed to start NVIDIA host engine after hot-unplug");
+                                self.dcgm_exporter(Action::Start).expect("Failed to start DCGM exporter after hot-unplug");
                             }
                         }
                         _ => {}
@@ -118,25 +118,25 @@ impl NVRC {
     }
 
     fn setup_gpu(&mut self) {
-        self.query_gpu_cc_mode().unwrap();
-        self.check_gpu_supported(None).unwrap();
+        self.query_gpu_cc_mode().expect("Failed to query GPU confidential computing mode");
+        self.check_gpu_supported(None).expect("Failed to check if GPU is supported");
         // If we're running in a confidential environment we may need to set
         // specific kernel module parameters. Check those first and then load
         // the modules.
-        nvidia_ctk_system().unwrap();
+        nvidia_ctk_system().expect("Failed to setup NVIDIA container toolkit system");
         // Once we have loaded the driver we can start persistenced
         // CDI will not pick up the daemon if it is not created
-        self.nvidia_persistenced(Action::Restart).unwrap();
+        self.nvidia_persistenced(Action::Restart).expect("Failed to restart NVIDIA persistence daemon");
         // At this point we have all modules loaded lock down module loading
         lockdown::disable_modules_loading();
         // Create the CDI spec for the GPUs including persistenced
-        nvidia_ctk_cdi().unwrap();
+        nvidia_ctk_cdi().expect("Failed to generate NVIDIA CDI specification");
         // If user has enabled nvrc.dcgm=on in the kernel command line
         // we're starting the DCGM exporter
-        self.nv_hostengine(Action::Restart).unwrap();
-        self.dcgm_exporter(Action::Restart).unwrap();
+        self.nv_hostengine(Action::Restart).expect("Failed to restart NVIDIA host engine");
+        self.dcgm_exporter(Action::Restart).expect("Failed to restart DCGM exporter");
         // If user has enabled nvidia_smi_srs in the kernel command line
         // we can optionally set the GPU to Ready
-        self.nvidia_smi_srs().unwrap();
+        self.nvidia_smi_srs().expect("Failed to set GPU to ready state via nvidia-smi");
     }
 }
