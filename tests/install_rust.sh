@@ -17,7 +17,7 @@ set -o nounset
 set -o pipefail
 
 RUSTARCH=$(arch_to_rust)
-VERSION="${1:-"1.81.0"}"
+VERSION="${1:-"1.85.1"}"
 
 echo "Install rust ${VERSION}"
 
