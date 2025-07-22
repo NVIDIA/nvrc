@@ -1,1 +1,1 @@
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/nvidia/nvrc/badge)](https://scorecard.dev/viewer/?uri=github.com/nvidia/nvrc)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/NVIDIA/nvrc/badge)](https://scorecard.dev/viewer/?uri=github.com/NVIDIA/nvrc)
