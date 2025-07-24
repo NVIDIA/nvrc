@@ -10,11 +10,18 @@ use super::NVRC;
 // NVIDIA GPU Register definitions
 const NV_PGC6_AON_SECURE_SCRATCH_GROUP_20: u64 = 0x001182cc; /* RW-4R */
 
+// CC-state bits are used to determine the CC-mode
+const CC_STATE_MASK: u32 = 0x3;
+
 // CC Mode register values and their corresponding mode strings
-const CC_MODE_LOOKUP: &[(u32, &str)] = &[(0x5, "on"), (0x3, "devtools"), (0x0, "off")];
+const CC_MODE_LOOKUP: &[(u32, &str)] = &[(0x1, "on"), (0x3, "devtools"), (0x0, "off")];
 
 impl NVRC {
     /// Query CC mode by reading BAR0 memory mapped register
+    ///
+    /// Reference:
+    /// - https://github.com/NVIDIA/gpu-admin-tools/blob/main/nvidia_gpu_tools.py
+    ///   function: query_cc_mode_hopper()
     fn query_cc_mode_bar0(&self, bdf: &str) -> Result<String> {
         let resource_path = format!("/sys/bus/pci/devices/{bdf}/resource0");
         debug!("Reading BAR0 resource for BDF {}: {}", bdf, resource_path);
@@ -60,14 +67,15 @@ impl NVRC {
             );
 
             // Determine CC mode based on register value using lookup table
+            let cc_state = reg_value & CC_STATE_MASK;
             let mode = CC_MODE_LOOKUP
                 .iter()
-                .find(|(value, _)| *value == reg_value)
+                .find(|(value, _)| *value == cc_state)
                 .map(|(_, mode)| *mode)
                 .unwrap_or_else(|| {
                     debug!(
-                        "CC mode for BDF {} (via BAR0): unknown value 0x{:x}, assuming off",
-                        bdf, reg_value
+                        "CC mode for BDF {} (via BAR0): unknown cc_state 0x{:x}, assuming off",
+                        bdf, cc_state
                     );
                     "off"
                 });
