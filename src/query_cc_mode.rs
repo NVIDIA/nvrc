@@ -60,7 +60,7 @@ impl NVRC {
             );
 
             // Determine CC mode based on register value using lookup table
-            let cc_state = reg_value & 0x3;
+            let cc_state = reg_value & CC_STATE_MASK;
             let mode = CC_MODE_LOOKUP
                 .iter()
                 .find(|(value, _)| *value == cc_state)
