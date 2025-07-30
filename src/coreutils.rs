@@ -1,9 +1,10 @@
 use nix::sys::stat;
 use nix::unistd::symlinkat;
+use nix::fcntl::AT_FDCWD;
 use std::path::Path;
 
 pub fn ln(target: &str, linkpath: &str) {
-    if let Err(e) = symlinkat(target, None, linkpath) {
+    if let Err(e) = symlinkat(target, AT_FDCWD, linkpath) {
         panic!("Failed to create symlink {linkpath} -> {target}: {e}");
     }
 }

@@ -135,7 +135,7 @@ impl NVRC {
                 uvm_persistence_mode = "--uvm-persistence-mode";
             }
         }
-        let u = &self.identity.user_name.clone();
+        let u: &String = &self.identity.user_name.clone();
         let g = &self.identity.group_name.clone();
 
         let uid = self.identity.user_id;
@@ -154,22 +154,20 @@ impl NVRC {
         let mut args = vec!["--verbose", uvm_persistence_mode];
 
         match self.gpu_cc_mode {
-            Some(ref mode) if mode == "on" => {
-                warn!("TODO: Running in GPU Confidential Computing mode, not setting user/group for nvidia-persistenced");
+          Some(ref mode) if mode == "on" => {
+               warn!("TODO: Running in GPU Confidential Computing mode, not setting user/group for nvidia-persistenced");
             }
             _ => {
                 args.extend_from_slice(&["-u", u, "-g", g]);
             }
-        }
+       }
 
         match mode {
             Action::Start => self.start(&Name::Persistenced, command, &args),
             Action::Stop => self.stop(&Name::Persistenced),
             Action::Restart => self.restart(command, &args, &Name::Persistenced),
         }
-
-        //self.restart(command, &args, &Daemon::Persistenced)?;
-
+        
         Ok(())
     }
 

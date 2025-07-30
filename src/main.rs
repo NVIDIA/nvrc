@@ -19,6 +19,7 @@ mod ndev;
 mod nvrc;
 mod query_cc_mode;
 mod user_group;
+mod syslog;
 
 #[macro_use]
 extern crate log;
@@ -38,6 +39,7 @@ fn main() {
     mount::setup();
 
     kmsg::kernlog_setup();
+    init.setup_syslog().expect("Failed to setup syslog");
     // Now that we have the rand devices let's create our random user,group
     // and afterwards set the rootfs readonly
     init.identity = user_group::random_user_group();
@@ -63,7 +65,24 @@ impl NVRC {
     fn cold_plug(&mut self) {
         debug!("cold-plug mode detected, starting GPU setup");
         self.setup_gpu();
-        kata_agent().expect("Failed to initialize Kata agent in cold-plug mode");
+        //        kata_agent().expect("Failed to initialize Kata agent in cold-plug mode");
+        match unsafe { fork() } {
+            Ok(ForkResult::Parent { child: _ }) => {
+                kata_agent().expect("Failed to initialize Kata agent in hot-plug parent process");
+            }
+            Ok(ForkResult::Child) => {
+                loop {
+                    // In cold-plug mode we do not expect any hot-unplug events
+                    // so we can just wait for the Kata agent to finish
+                    sleep(Duration::from_secs(1));
+                    self.poll_syslog()
+                        .expect("Failed to poll syslog in cold-plug child process");
+                }
+            }
+            Err(e) => {
+                panic!("fork failed: {e}");
+            }
+        }
     }
 
     fn hot_plug(&mut self) {
@@ -143,6 +162,7 @@ impl NVRC {
         nvidia_ctk_system().expect("Failed to setup NVIDIA container toolkit system");
         // Once we have loaded the driver we can start persistenced
         // CDI will not pick up the daemon if it is not created
+
         self.nvidia_persistenced(Action::Restart)
             .expect("Failed to restart NVIDIA persistence daemon");
         // At this point we have all modules loaded lock down module loading
