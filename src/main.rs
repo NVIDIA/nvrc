@@ -18,8 +18,8 @@ mod mount;
 mod ndev;
 mod nvrc;
 mod query_cc_mode;
-mod user_group;
 mod syslog;
+mod user_group;
 
 #[macro_use]
 extern crate log;

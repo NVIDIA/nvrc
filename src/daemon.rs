@@ -154,20 +154,20 @@ impl NVRC {
         let mut args = vec!["--verbose", uvm_persistence_mode];
 
         match self.gpu_cc_mode {
-          Some(ref mode) if mode == "on" => {
-               warn!("TODO: Running in GPU Confidential Computing mode, not setting user/group for nvidia-persistenced");
+            Some(ref mode) if mode == "on" => {
+                warn!("TODO: Running in GPU Confidential Computing mode, not setting user/group for nvidia-persistenced");
             }
             _ => {
                 args.extend_from_slice(&["-u", u, "-g", g]);
             }
-       }
+        }
 
         match mode {
             Action::Start => self.start(&Name::Persistenced, command, &args),
             Action::Stop => self.stop(&Name::Persistenced),
             Action::Restart => self.restart(command, &args, &Name::Persistenced),
         }
-        
+
         Ok(())
     }
 

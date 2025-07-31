@@ -1,6 +1,6 @@
+use nix::fcntl::AT_FDCWD;
 use nix::sys::stat;
 use nix::unistd::symlinkat;
-use nix::fcntl::AT_FDCWD;
 use std::path::Path;
 
 pub fn ln(target: &str, linkpath: &str) {
