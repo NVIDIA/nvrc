@@ -135,7 +135,7 @@ impl NVRC {
                 uvm_persistence_mode = "--uvm-persistence-mode";
             }
         }
-        let u = &self.identity.user_name.clone();
+        let u: &String = &self.identity.user_name.clone();
         let g = &self.identity.group_name.clone();
 
         let uid = self.identity.user_id;
@@ -167,8 +167,6 @@ impl NVRC {
             Action::Stop => self.stop(&Name::Persistenced),
             Action::Restart => self.restart(command, &args, &Name::Persistenced),
         }
-
-        //self.restart(command, &args, &Daemon::Persistenced)?;
 
         Ok(())
     }

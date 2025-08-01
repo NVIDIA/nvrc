@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::Read;
+use std::os::unix::net::UnixDatagram;
 
 use lazy_static::lazy_static;
 
@@ -44,6 +45,7 @@ pub struct NVRC {
     pub dcgm_enabled: Option<bool>,
     pub identity: UserGroup,
     pub daemons: HashMap<Name, std::process::Child>,
+    pub syslog_socket: Option<UnixDatagram>,
 }
 
 pub type ParamHandler = fn(&str, &mut NVRC) -> Result<()>;
@@ -64,12 +66,33 @@ impl NVRC {
             dcgm_enabled: None,
             identity: UserGroup::new(),
             daemons: HashMap::new(),
+            syslog_socket: None,
         };
 
         init.hot_or_cold_plug.insert(true, NVRC::cold_plug);
         init.hot_or_cold_plug.insert(false, NVRC::hot_plug);
 
         init
+    }
+
+    /// Setup the syslog socket for receiving syslog messages
+    pub fn setup_syslog(&mut self) -> Result<()> {
+        match crate::syslog::dev_log_setup() {
+            Ok(socket) => {
+                self.syslog_socket = Some(socket);
+                Ok(())
+            }
+            Err(e) => Err(anyhow::anyhow!("Failed to setup syslog socket: {}", e)),
+        }
+    }
+
+    /// Poll the syslog socket if it's available
+    pub fn poll_syslog(&self) -> Result<()> {
+        if let Some(ref socket) = self.syslog_socket {
+            crate::syslog::poll_dev_log(socket)
+                .map_err(|e| anyhow::anyhow!("Failed to poll syslog: {}", e))?;
+        }
+        Ok(())
     }
 
     pub fn process_kernel_params(&mut self, cmdline: Option<&str>) -> Result<()> {
