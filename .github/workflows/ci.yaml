@@ -19,7 +19,8 @@ on:
 permissions:
   contents: read
 env:
-  ROOTFS_DIR: /tmp/nvrc-rootfs
+  ROOTFS_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-initrd-nvidia-gpu/builddir/initrd-image/ubuntu_rootfs
+  INITRD_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/initrd-builder
 jobs:
   build-asset:
     runs-on: g5g.metal
@@ -33,5 +34,10 @@ jobs:
         run: ./tests/install_rust.sh
       - name: Build NVRC
         run: |
+          . "${HOME}/.cargo/env"
           cargo build --release --target=aarch64-unknown-linux-musl
           cp ./target/aarch64-unknown-linux-musl/release/NVRC $ROOTFS_DIR/bin/NVRC
+      - name: Create initrd
+        run: |
+          cd "${INITRD_DIR}"
+          script -fec 'sudo -E AGENT_INIT=no USE_DOCKER=true ./initrd_builder.sh "${ROOTFS_DIR}"'
