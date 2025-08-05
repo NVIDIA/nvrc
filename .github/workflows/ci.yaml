@@ -1,0 +1,59 @@
+name: Run the NVRC CI
+on:
+  workflow_call:
+    inputs:
+      commit-hash:
+        required: true
+        type: string
+      pr-number:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      target-branch:
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+env:
+  ROOTFS_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-initrd-nvidia-gpu/builddir/initrd-image/ubuntu_rootfs
+  INITRD_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/initrd-builder
+jobs:
+  build-asset:
+    runs-on: g5g.metal
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.commit-hash }}
+          fetch-depth: 0 # This is needed in order to keep the commit ids history
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: ./tests/install_rust.sh
+      - name: Build NVRC
+        run: |
+          . "${HOME}/.cargo/env"
+          cargo build --release --target=aarch64-unknown-linux-musl
+          sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC $ROOTFS_DIR/bin/NVRC
+      - name: Create initrd
+        run: |
+          cd "${INITRD_DIR}"
+          script -fec 'sudo -E AGENT_INIT=no USE_DOCKER=true ./initrd_builder.sh "${ROOTFS_DIR}"'
+      # TODO: why does nerdctl fail here
+      - name: Run nerdctl and verify nvidia-smi execution
+        run: |
+          image=ubuntu
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm $image nvidia-smi 2>&1 || true)
+          echo "$output"
+          
+          # Check if nvidia-smi actually executed and produced meaningful output
+          if echo "$output" | grep -q "NVIDIA-SMI"; then
+            echo "nvidia-smi executed successfully - found NVIDIA-SMI header"
+          elif echo "$output" | grep -q "Driver Version"; then
+            echo "nvidia-smi executed successfully - found Driver Version"
+          else
+            echo "nvidia-smi did not execute properly or produced unexpected output"
+            exit 1
+          fi
