@@ -36,7 +36,8 @@ jobs:
         run: |
           . "${HOME}/.cargo/env"
           cargo build --release --target=aarch64-unknown-linux-musl
-          cp ./target/aarch64-unknown-linux-musl/release/NVRC $ROOTFS_DIR/bin/NVRC
+
+          sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC $ROOTFS_DIR/bin/NVRC
       - name: Create initrd
         run: |
           cd "${INITRD_DIR}"
