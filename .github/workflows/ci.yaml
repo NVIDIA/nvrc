@@ -1,0 +1,37 @@
+name: Run the NVRC CI
+on:
+  workflow_call:
+    inputs:
+      commit-hash:
+        required: true
+        type: string
+      pr-number:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      target-branch:
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+env:
+  ROOTFS_DIR: /tmp/nvrc-rootfs
+jobs:
+  build-asset:
+    runs-on: g5g.metal
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.commit-hash }}
+          fetch-depth: 0 # This is needed in order to keep the commit ids history
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: ./tests/install_rust.sh
+      - name: Build NVRC
+        run: |
+          cargo build --release --target=aarch64-unknown-linux-musl
+          cp ./target/aarch64-unknown-linux-musl/release/NVRC $ROOTFS_DIR/bin/NVRC
