@@ -17,6 +17,7 @@ mod lockdown;
 mod mount;
 mod ndev;
 mod nvrc;
+mod pci_ids;
 mod query_cc_mode;
 mod syslog;
 mod user_group;
@@ -52,10 +53,10 @@ fn main() {
     debug!("init_or_sbin_init: {:?}", init_or_sbin_init);
 
     init.query_cpu_vendor().expect("Failed to query CPU vendor");
-    init.get_gpu_devices(None)
-        .expect("Failed to get GPU devices");
-    // At this this point we either have GPUs (cold-plug) or we do not have
-    // any GPUs (hot-plug) depending on the mode of operation execute cold|hot-plug
+    init.get_nvidia_devices(None)
+        .expect("Failed to get NVIDIA devices");
+    // At this point we either have NVIDIA devices (cold-plug) or we do not have
+    // any NVIDIA devices (hot-plug) depending on the mode of operation execute cold|hot-plug
     init.hot_or_cold_plug
         .get(&init.cold_plug)
         .expect("Failed to determine hot or cold plug mode")(&mut init);
@@ -110,8 +111,8 @@ impl NVRC {
                     debug!("received event: {}", event);
                     match event {
                         "hot-plug" => {
-                            self.get_gpu_devices(None)
-                                .expect("Failed to get GPU devices during hot-plug event");
+                            self.get_nvidia_devices(None)
+                                .expect("Failed to get NVIDIA devices during hot-plug event");
                             self.setup_gpu();
                         }
                         "hot-unplug" => {
@@ -124,13 +125,13 @@ impl NVRC {
                                 .expect("Failed to stop DCGM exporter during hot-unplug");
 
                             sleep(Duration::from_millis(3000));
-                            self.get_gpu_devices(None)
-                                .expect("Failed to get GPU devices after hot-unplug event");
+                            self.get_nvidia_devices(None)
+                                .expect("Failed to get NVIDIA devices after hot-unplug event");
 
-                            // If we still have GPU devices present restart the
+                            // If we still have NVIDIA devices present restart the
                             // daemons e.g. one container is done but we have
                             // more
-                            if !self.gpu_bdfs.is_empty() {
+                            if !self.nvidia_devices.is_empty() {
                                 self.nvidia_persistenced(Action::Start).expect(
                                     "Failed to start NVIDIA persistence daemon after hot-unplug",
                                 );
