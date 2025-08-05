@@ -1,0 +1,35 @@
+name: NVRC CI
+on:
+  pull_request_target:
+    branches:
+      - 'main'
+    types:
+      # Adding 'labeled' to the list of activity types that trigger this event
+      # (default: opened, synchronize, reopened) so that we can run this
+      # workflow when the 'ok-to-test' label is added.
+      # Reference: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#pull_request_target
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nvrc-ci-on-push:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/ci.yaml
+    with:
+      commit-hash: ${{ github.event.pull_request.head.sha }}
+      pr-number: ${{ github.event.pull_request.number }}
+      tag: ${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+      target-branch: ${{ github.event.pull_request.base.ref }}
