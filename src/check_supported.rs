@@ -4,10 +4,17 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use super::NVRC;
+use crate::pci_ids::DeviceType;
 
 impl NVRC {
     pub fn check_gpu_supported(&mut self, supported: Option<&Path>) -> Result<()> {
-        if self.gpu_devids.is_empty() {
+        let gpu_devices: Vec<_> = self
+            .nvidia_devices
+            .iter()
+            .filter(|d| matches!(d.device_type, DeviceType::Gpu))
+            .collect();
+
+        if gpu_devices.is_empty() {
             debug!("No GPUs found, skipping GPU supported check");
             return Ok(());
         }
@@ -33,7 +40,8 @@ impl NVRC {
             .map(|line| line.to_lowercase())
             .collect();
 
-        for devid in self.gpu_devids.iter() {
+        for gpu_device in gpu_devices {
+            let devid = format!("0x{:04x}", gpu_device.device_id);
             let devid_lowercase = devid.to_lowercase();
             if !supported_ids.contains(&devid_lowercase) {
                 self.gpu_supported = false;
@@ -59,7 +67,14 @@ mod tests {
         file.write_all(b"0x2330\n").unwrap();
 
         let mut init = NVRC::default();
-        init.gpu_devids = vec!["0x2330".to_string()];
+        let nvidia_device = crate::get_devices::NvidiaDevice::new(
+            "0000:01:00.0".to_string(),
+            "0x2330",
+            "0x10de",
+            "0x030000",
+        )
+        .unwrap();
+        init.nvidia_devices = vec![nvidia_device];
         init.check_gpu_supported(Some(supported.as_path())).unwrap();
         assert!(init.gpu_supported);
 

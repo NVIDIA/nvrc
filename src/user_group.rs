@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn test_user_group_new() {
         let user_group = UserGroup::new();
-        
+
         assert_eq!(user_group.user_id, Uid::from_raw(0));
         assert_eq!(user_group.group_id, nix::unistd::Gid::from_raw(0));
         assert_eq!(user_group.user_name, "root");
@@ -133,13 +133,13 @@ mod tests {
         // Verify field count and format
         let fields: Vec<&str> = passwd_entry.trim_end().split(':').collect();
         assert_eq!(fields.len(), 7, "passwd entry should have exactly 7 fields");
-        assert_eq!(fields[0], "testuser");   // username
-        assert_eq!(fields[1], "x");          // password placeholder
-        assert_eq!(fields[2], "1001");       // uid
-        assert_eq!(fields[3], "1001");       // gid
-        assert_eq!(fields[4], "testuser");   // gecos (username as description)
+        assert_eq!(fields[0], "testuser"); // username
+        assert_eq!(fields[1], "x"); // password placeholder
+        assert_eq!(fields[2], "1001"); // uid
+        assert_eq!(fields[3], "1001"); // gid
+        assert_eq!(fields[4], "testuser"); // gecos (username as description)
         assert_eq!(fields[5], "/nonexistent"); // home directory
-        assert_eq!(fields[6], "/bin/false");  // shell
+        assert_eq!(fields[6], "/bin/false"); // shell
     }
 
     #[test]
@@ -159,15 +159,15 @@ mod tests {
         // Verify shadow format: username:password:lastchange:min:max:warn:inactive:expire:reserved
         let fields: Vec<&str> = shadow_entry.trim_end().split(':').collect();
         assert_eq!(fields.len(), 9, "shadow entry should have exactly 9 fields");
-        assert_eq!(fields[0], "testuser");  // username
-        assert_eq!(fields[1], "*");         // password (disabled)
-        assert_eq!(fields[2], "18295");     // last password change (days since epoch)
-        assert_eq!(fields[3], "0");         // minimum password age
-        assert_eq!(fields[4], "99999");     // maximum password age
-        assert_eq!(fields[5], "7");         // password warning period
-        assert_eq!(fields[6], "");          // password inactivity period (empty)
-        assert_eq!(fields[7], "");          // account expiration date (empty)
-        assert_eq!(fields[8], "");          // reserved field (empty)
+        assert_eq!(fields[0], "testuser"); // username
+        assert_eq!(fields[1], "*"); // password (disabled)
+        assert_eq!(fields[2], "18295"); // last password change (days since epoch)
+        assert_eq!(fields[3], "0"); // minimum password age
+        assert_eq!(fields[4], "99999"); // maximum password age
+        assert_eq!(fields[5], "7"); // password warning period
+        assert_eq!(fields[6], ""); // password inactivity period (empty)
+        assert_eq!(fields[7], ""); // account expiration date (empty)
+        assert_eq!(fields[8], ""); // reserved field (empty)
     }
 
     #[test]
@@ -188,9 +188,9 @@ mod tests {
         let fields: Vec<&str> = group_entry.trim_end().split(':').collect();
         assert_eq!(fields.len(), 4, "group entry should have exactly 4 fields");
         assert_eq!(fields[0], "testgroup"); // group name
-        assert_eq!(fields[1], "x");         // password placeholder
-        assert_eq!(fields[2], "1001");      // gid
-        assert_eq!(fields[3], "");          // members list (empty)
+        assert_eq!(fields[1], "x"); // password placeholder
+        assert_eq!(fields[2], "1001"); // gid
+        assert_eq!(fields[3], ""); // members list (empty)
     }
 
     #[test]
@@ -201,24 +201,27 @@ mod tests {
         let mut rng = rand::rng();
         let uid = rng.random_range(1000..60000);
         let gid = rng.random_range(1000..60000);
-        
+
         assert!(uid >= 1000 && uid < 60000, "UID should be in valid range");
         assert!(gid >= 1000 && gid < 60000, "GID should be in valid range");
-        
+
         // Test username generation
         let user_name: String = (0..8)
             .map(|_| (rng.random_range(b'a'..=b'z') as char))
             .collect();
-        
+
         assert_eq!(user_name.len(), 8, "Username should be 8 characters");
-        assert!(user_name.chars().all(|c| c.is_ascii_lowercase()), "Username should only contain lowercase letters");
+        assert!(
+            user_name.chars().all(|c| c.is_ascii_lowercase()),
+            "Username should only contain lowercase letters"
+        );
     }
 
     #[test]
     fn test_passwd_entry_edge_cases() {
         // Test with edge case values
         let user_group = UserGroup {
-            user_id: Uid::from_raw(0),      // root user
+            user_id: Uid::from_raw(0), // root user
             group_id: nix::unistd::Gid::from_raw(0),
             user_name: "root".to_string(),
             group_name: "root".to_string(),
@@ -243,12 +246,18 @@ mod tests {
         };
 
         let shadow_entry = format!("{}:*:18295:0:99999:7:::\n", user_group.user_name);
-        
+
         // Verify that the password is disabled with '*'
-        assert!(shadow_entry.contains(":*:"), "Password should be disabled with '*'");
-        
+        assert!(
+            shadow_entry.contains(":*:"),
+            "Password should be disabled with '*'"
+        );
+
         // Verify reasonable password policy values
-        assert!(shadow_entry.contains(":99999:"), "Max password age should be reasonable");
+        assert!(
+            shadow_entry.contains(":99999:"),
+            "Max password age should be reasonable"
+        );
         assert!(shadow_entry.contains(":7:"), "Warning period should be set");
     }
 
@@ -263,19 +272,22 @@ mod tests {
         };
 
         let group_entry = format!("{}:x:{}:\n", user_group.group_name, user_group.group_id);
-        
+
         // Should end with empty members field
-        assert!(group_entry.ends_with(":\n"), "Group should have empty members list");
+        assert!(
+            group_entry.ends_with(":\n"),
+            "Group should have empty members list"
+        );
     }
 
     #[test]
     fn test_format_compliance_with_real_examples() {
         // Test against real-world examples of these file formats
-        
+
         // Real passwd entry examples:
         // root:x:0:0:root:/root:/bin/bash
         // daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
-        
+
         let user_group = UserGroup {
             user_id: Uid::from_raw(1234),
             group_id: nix::unistd::Gid::from_raw(1234),
@@ -289,8 +301,11 @@ mod tests {
         );
 
         // Should match standard format exactly
-        assert_eq!(passwd_entry, "myuser:x:1234:1234:myuser:/nonexistent:/bin/false\n");
-        
+        assert_eq!(
+            passwd_entry,
+            "myuser:x:1234:1234:myuser:/nonexistent:/bin/false\n"
+        );
+
         // Verify it would be parsable by system tools
         let parts: Vec<&str> = passwd_entry.trim().split(':').collect();
         assert_eq!(parts.len(), 7);
@@ -323,7 +338,10 @@ mod tests {
         let shadow_content = std::fs::read_to_string(temp_shadow.path()).unwrap();
         let group_content = std::fs::read_to_string(temp_group.path()).unwrap();
 
-        assert_eq!(passwd_content, "testuser:x:9999:9999:testuser:/nonexistent:/bin/false\n");
+        assert_eq!(
+            passwd_content,
+            "testuser:x:9999:9999:testuser:/nonexistent:/bin/false\n"
+        );
         assert_eq!(shadow_content, "testuser:*:18295:0:99999:7:::\n");
         assert_eq!(group_content, "testgroup:x:9999:\n");
 
@@ -331,7 +349,7 @@ mod tests {
         assert!(!passwd_content.contains("\0"));
         assert!(!shadow_content.contains("\0"));
         assert!(!group_content.contains("\0"));
-        
+
         assert!(passwd_content.ends_with('\n'));
         assert!(shadow_content.ends_with('\n'));
         assert!(group_content.ends_with('\n'));

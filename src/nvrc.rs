@@ -9,6 +9,7 @@ use std::os::unix::net::UnixDatagram;
 use lazy_static::lazy_static;
 
 use crate::daemon::Name;
+use crate::get_devices::NvidiaDevice;
 use crate::user_group::UserGroup;
 
 pub const NVRC_LOG: &str = "nvrc.log";
@@ -36,8 +37,7 @@ pub struct NVRC {
     pub nvidia_smi_lgc: Option<String>,
     pub uvm_persistence_mode: Option<String>,
     pub cpu_vendor: Option<String>,
-    pub gpu_bdfs: Vec<String>,
-    pub gpu_devids: Vec<String>,
+    pub nvidia_devices: Vec<NvidiaDevice>,
     pub gpu_supported: bool,
     pub gpu_cc_mode: Option<String>,
     pub cold_plug: bool,
@@ -57,8 +57,7 @@ impl NVRC {
             nvidia_smi_lgc: None,
             uvm_persistence_mode: None,
             cpu_vendor: None,
-            gpu_bdfs: Vec::new(),
-            gpu_devids: Vec::new(),
+            nvidia_devices: Vec::new(),
             gpu_supported: false,
             gpu_cc_mode: None,
             cold_plug: false,
