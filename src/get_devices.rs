@@ -168,7 +168,6 @@ mod tests {
         vendor: &'static str,
         class: &'static str,
         device: &'static str,
-        expected_type: DeviceType,
     }
 
     const TEST_DEVICES: &[TestDevice] = &[
@@ -177,21 +176,18 @@ mod tests {
             vendor: "0x10de",
             class: "0x030000",
             device: "0x1234",
-            expected_type: DeviceType::Gpu,
         },
         TestDevice {
             bdf: "0000:02:00.0",
             vendor: "0x10de",
             class: "0x030200",
             device: "0x5678",
-            expected_type: DeviceType::Gpu,
         },
         TestDevice {
             bdf: "0000:03:00.0",
             vendor: "0x10de",
             class: "0x068000",
             device: "0x1af1",
-            expected_type: DeviceType::NvSwitch,
         },
     ];
 
@@ -200,7 +196,6 @@ mod tests {
         vendor: "0x1234",
         class: "0x567800",
         device: "abcd",
-        expected_type: DeviceType::Unknown, // Won't be created due to non-NVIDIA vendor
     };
 
     fn create_mock_device(base_path: &Path, device: &TestDevice) -> Result<()> {

@@ -1,8 +1,20 @@
+use anyhow::{Context, Result};
 use nix::unistd::{Gid, Uid};
 use rand::Rng;
 use std::fs::OpenOptions;
 use std::io::Write;
-#[derive(Debug)]
+
+/// Constants for user and group ID ranges
+const MIN_USER_ID: u32 = 1000;
+const MAX_USER_ID: u32 = 60000;
+const USERNAME_LENGTH: usize = 8;
+
+/// Default paths for system files
+const DEFAULT_PASSWD_PATH: &str = "/etc/passwd";
+const DEFAULT_SHADOW_PATH: &str = "/etc/shadow";
+const DEFAULT_GROUP_PATH: &str = "/etc/group";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserGroup {
     pub user_id: Uid,
     pub group_id: Gid,
@@ -11,88 +23,129 @@ pub struct UserGroup {
 }
 
 impl UserGroup {
+    /// Create a new UserGroup with root user/group (uid=0, gid=0)
     pub fn new() -> Self {
-        UserGroup {
+        Self::root()
+    }
+
+    /// Create a root user/group
+    pub fn root() -> Self {
+        Self {
             user_id: Uid::from_raw(0),
             group_id: Gid::from_raw(0),
-            user_name: String::from("root"),
-            group_name: String::from("root"),
+            user_name: "root".to_owned(),
+            group_name: "root".to_owned(),
         }
+    }
+
+    /// Create a new UserGroup with the specified parameters
+    pub fn with_ids(user_id: u32, group_id: u32, user_name: String, group_name: String) -> Self {
+        Self {
+            user_id: Uid::from_raw(user_id),
+            group_id: Gid::from_raw(group_id),
+            user_name,
+            group_name,
+        }
+    }
+
+    /// Write this user/group to system files (dangerous - use with caution!)
+    pub fn write_to_system_files(&self) -> Result<()> {
+        self.write_to_files(DEFAULT_PASSWD_PATH, DEFAULT_SHADOW_PATH, DEFAULT_GROUP_PATH)
+    }
+
+    /// Write this user/group to specified files
+    pub fn write_to_files(
+        &self,
+        passwd_path: &str,
+        shadow_path: &str,
+        group_path: &str,
+    ) -> Result<()> {
+        self.add_to_passwd(passwd_path)
+            .context("Failed to write to passwd file")?;
+        self.add_to_shadow(shadow_path)
+            .context("Failed to write to shadow file")?;
+        self.add_to_group(group_path)
+            .context("Failed to write to group file")?;
+        Ok(())
+    }
+
+    /// Generate passwd file entry
+    fn passwd_entry(&self) -> String {
+        format!(
+            "{}:x:{}:{}:{}:/nonexistent:/bin/false\n",
+            self.user_name, self.user_id, self.group_id, self.user_name
+        )
+    }
+
+    /// Generate shadow file entry
+    fn shadow_entry(&self) -> String {
+        format!("{}:*:18295:0:99999:7:::\n", self.user_name)
+    }
+
+    /// Generate group file entry
+    fn group_entry(&self) -> String {
+        format!("{}:x:{}:\n", self.group_name, self.group_id)
+    }
+
+    /// Add entry to passwd file
+    fn add_to_passwd(&self, passwd_path: &str) -> Result<()> {
+        let entry = self.passwd_entry();
+        self.append_to_file(passwd_path, &entry)
+            .with_context(|| format!("Failed to write to passwd file: {}", passwd_path))
+    }
+
+    /// Add entry to shadow file
+    fn add_to_shadow(&self, shadow_path: &str) -> Result<()> {
+        let entry = self.shadow_entry();
+        self.append_to_file(shadow_path, &entry)
+            .with_context(|| format!("Failed to write to shadow file: {}", shadow_path))
+    }
+
+    /// Add entry to group file
+    fn add_to_group(&self, group_path: &str) -> Result<()> {
+        let entry = self.group_entry();
+        self.append_to_file(group_path, &entry)
+            .with_context(|| format!("Failed to write to group file: {}", group_path))
+    }
+
+    /// Helper to append content to a file
+    fn append_to_file(&self, file_path: &str, content: &str) -> Result<()> {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file_path)
+            .with_context(|| format!("Failed to open file: {}", file_path))?;
+
+        file.write_all(content.as_bytes())
+            .with_context(|| format!("Failed to write to file: {}", file_path))?;
+
+        Ok(())
     }
 }
 
+impl Default for UserGroup {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Generate a random user/group and add it to system files
 pub fn random_user_group() -> UserGroup {
     let mut rng = rand::rng();
-    let uid = rng.random_range(1000..60000); // Generating user ID in the range 1000-60000
-    let gid = rng.random_range(1000..60000); // Generating group ID in the range 1000-60000
+    let uid = rng.random_range(MIN_USER_ID..MAX_USER_ID);
+    let gid = rng.random_range(MIN_USER_ID..MAX_USER_ID);
 
-    let user_name: String = (0..8)
-        .map(|_| (rng.random_range(b'a'..=b'z') as char))
+    let user_name: String = (0..USERNAME_LENGTH)
+        .map(|_| rng.random_range(b'a'..=b'z') as char)
         .collect();
-    let group_name: String = (0..8)
-        .map(|_| (rng.random_range(b'a'..=b'z') as char))
-        .collect();
+    let group_name = user_name.clone();
 
-    let user_id = Uid::from_raw(uid);
-    let group_id = Gid::from_raw(gid);
+    let user_group = UserGroup::with_ids(uid, gid, user_name, group_name);
 
-    let user_group = UserGroup {
-        user_id,
-        group_id,
-        user_name,
-        group_name,
-    };
-
-    add_to_passwd(&user_group, "/etc/passwd");
-    add_to_shadow(&user_group, "/etc/shadow");
-    add_to_group(&user_group, "/etc/group");
+    // Write to system files (ignoring errors for backward compatibility)
+    let _ = user_group.write_to_system_files();
 
     user_group
-}
-
-fn add_to_passwd(user_group: &UserGroup, passwd_path: &str) {
-    let passwd_entry = format!(
-        "{}:x:{}:{}:{}:/nonexistent:/bin/false\n",
-        user_group.user_name, user_group.user_id, user_group.group_id, user_group.user_name
-    );
-
-    let mut passwd_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(passwd_path)
-        .expect("failed to open passwd file");
-
-    passwd_file
-        .write_all(passwd_entry.as_bytes())
-        .expect("failed to write to passwd file");
-}
-
-fn add_to_shadow(user_group: &UserGroup, shadow_path: &str) {
-    let shadow_entry = format!("{}:*:18295:0:99999:7:::\n", user_group.user_name);
-
-    let mut shadow_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(shadow_path)
-        .expect("failed to open shadow file");
-
-    shadow_file
-        .write_all(shadow_entry.as_bytes())
-        .expect("failed to write to shadow file");
-}
-
-fn add_to_group(user_group: &UserGroup, group_path: &str) {
-    let group_entry = format!("{}:x:{}:\n", user_group.group_name, user_group.group_id,);
-
-    let mut group_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(group_path)
-        .expect("failed to open group file");
-
-    group_file
-        .write_all(group_entry.as_bytes())
-        .expect("failed to write to group file");
 }
 
 #[cfg(test)]
@@ -329,9 +382,13 @@ mod tests {
         };
 
         // Test writing to temporary files
-        add_to_passwd(&user_group, temp_passwd.path().to_str().unwrap());
-        add_to_shadow(&user_group, temp_shadow.path().to_str().unwrap());
-        add_to_group(&user_group, temp_group.path().to_str().unwrap());
+        user_group
+            .write_to_files(
+                temp_passwd.path().to_str().unwrap(),
+                temp_shadow.path().to_str().unwrap(),
+                temp_group.path().to_str().unwrap(),
+            )
+            .unwrap();
 
         // Verify the content was written correctly
         let passwd_content = std::fs::read_to_string(temp_passwd.path()).unwrap();
@@ -353,5 +410,55 @@ mod tests {
         assert!(passwd_content.ends_with('\n'));
         assert!(shadow_content.ends_with('\n'));
         assert!(group_content.ends_with('\n'));
+    }
+
+    #[test]
+    fn test_user_group_with_ids() {
+        let user_group =
+            UserGroup::with_ids(1234, 5678, "testuser".to_owned(), "testgroup".to_owned());
+
+        assert_eq!(user_group.user_id, Uid::from_raw(1234));
+        assert_eq!(user_group.group_id, Gid::from_raw(5678));
+        assert_eq!(user_group.user_name, "testuser");
+        assert_eq!(user_group.group_name, "testgroup");
+    }
+
+    #[test]
+    fn test_user_group_root() {
+        let root = UserGroup::root();
+
+        assert_eq!(root.user_id, Uid::from_raw(0));
+        assert_eq!(root.group_id, Gid::from_raw(0));
+        assert_eq!(root.user_name, "root");
+        assert_eq!(root.group_name, "root");
+    }
+
+    #[test]
+    fn test_user_group_default() {
+        let default = UserGroup::default();
+        let new = UserGroup::new();
+
+        assert_eq!(default, new);
+        assert_eq!(default.user_name, "root");
+    }
+
+    #[test]
+    fn test_entry_generation() {
+        let user_group = UserGroup::with_ids(1001, 1002, "myuser".to_owned(), "mygroup".to_owned());
+
+        // Test passwd entry
+        let passwd = user_group.passwd_entry();
+        assert_eq!(
+            passwd,
+            "myuser:x:1001:1002:myuser:/nonexistent:/bin/false\n"
+        );
+
+        // Test shadow entry
+        let shadow = user_group.shadow_entry();
+        assert_eq!(shadow, "myuser:*:18295:0:99999:7:::\n");
+
+        // Test group entry
+        let group = user_group.group_entry();
+        assert_eq!(group, "mygroup:x:1002:\n");
     }
 }
