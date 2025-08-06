@@ -6,27 +6,22 @@ use std::path::Path;
 use super::NVRC;
 use crate::pci_ids::{self, DeviceType};
 
-/// Default PCI devices directory path
 const DEFAULT_PCI_PATH: &str = "/sys/bus/pci";
 
-/// Helper function to parse hexadecimal strings with optional "0x" prefix
 fn parse_hex_u16(hex_str: &str, field_name: &str) -> Result<u16> {
     let cleaned = hex_str.trim().strip_prefix("0x").unwrap_or(hex_str.trim());
     u16::from_str_radix(cleaned, 16)
         .with_context(|| format!("Failed to parse {}: {}", field_name, hex_str))
 }
 
-/// Helper function to parse hexadecimal strings with optional "0x" prefix for u32
 fn parse_hex_u32(hex_str: &str, field_name: &str) -> Result<u32> {
     let cleaned = hex_str.trim().strip_prefix("0x").unwrap_or(hex_str.trim());
     u32::from_str_radix(cleaned, 16)
         .with_context(|| format!("Failed to parse {}: {}", field_name, hex_str))
 }
 
-/// Represents an NVIDIA device (GPU or NvSwitch) with its associated PCI information
 #[derive(Debug, Clone, PartialEq)]
 pub struct NvidiaDevice {
-    /// Bus-Device-Function identifier (e.g., "0000:01:00.0")
     pub bdf: String,
     pub device_id: u16,
     pub vendor_id: u16,
@@ -44,8 +39,7 @@ impl NvidiaDevice {
         let device_id = parse_hex_u16(device_id_str, "device ID")?;
         let vendor_id = parse_hex_u16(vendor_id_str, "vendor ID")?;
         let class_id = parse_hex_u32(class_id_str, "class ID")?;
-
-        let device_type = Self::determine_device_type(vendor_id, device_id, class_id)?;
+        let device_type = pci_ids::classify_device_type(vendor_id, device_id, class_id)?;
 
         Ok(NvidiaDevice {
             bdf,
@@ -54,10 +48,6 @@ impl NvidiaDevice {
             class_id,
             device_type,
         })
-    }
-
-    fn determine_device_type(vendor_id: u16, device_id: u16, class_id: u32) -> Result<DeviceType> {
-        pci_ids::classify_device_type(vendor_id, device_id, class_id)
     }
 }
 
@@ -77,7 +67,6 @@ impl fmt::Display for NvidiaDevice {
 }
 
 impl NVRC {
-    /// Get all NVIDIA devices from the PCI bus
     pub fn get_nvidia_devices(&mut self, base_path: Option<&Path>) -> Result<()> {
         let base_path = base_path
             .map(|p| p.to_path_buf())
@@ -91,15 +80,10 @@ impl NVRC {
             .filter_map(|entry| {
                 let entry = entry.ok()?;
                 let device_dir = entry.path();
-
-                // Extract BDF from directory name
                 let bdf = device_dir.file_name()?.to_str()?.to_string();
-
-                // Try to read device information
                 self.read_device_info(&device_dir, bdf).ok()
             })
             .filter_map(|(bdf, device_info)| {
-                // Try to create NvidiaDevice
                 NvidiaDevice::new(
                     bdf,
                     &device_info.device_id,
@@ -115,7 +99,6 @@ impl NVRC {
         Ok(())
     }
 
-    /// Read device information from sysfs files
     fn read_device_info(&self, device_dir: &Path, bdf: String) -> Result<(String, DeviceInfo)> {
         let device_info = DeviceInfo {
             vendor_id: Self::read_sysfs_file(&device_dir.join("vendor"))?,
@@ -125,14 +108,12 @@ impl NVRC {
         Ok((bdf, device_info))
     }
 
-    /// Read a sysfs file and return trimmed content
     fn read_sysfs_file(path: &Path) -> Result<String> {
         fs::read_to_string(path)
             .with_context(|| format!("Failed to read file: {:?}", path))
             .map(|content| content.trim().to_string())
     }
 
-    /// Update the NVRC state with discovered devices
     fn update_device_state(&mut self, nvidia_devices: Vec<NvidiaDevice>) {
         let device_count = nvidia_devices.len();
         self.nvidia_devices = nvidia_devices;
@@ -149,7 +130,6 @@ impl NVRC {
     }
 }
 
-/// Helper struct to hold device information read from sysfs
 #[derive(Debug)]
 struct DeviceInfo {
     vendor_id: String,
@@ -162,7 +142,6 @@ mod tests {
     use std::fs::{create_dir_all, write};
     use tempfile::tempdir;
 
-    /// Test device configurations for mock PCI devices
     struct TestDevice {
         bdf: &'static str,
         vendor: &'static str,
@@ -213,22 +192,17 @@ mod tests {
         let temp_dir = tempdir()?;
         let base_path = temp_dir.path();
 
-        // Create mock NVIDIA devices
         for device in TEST_DEVICES {
             create_mock_device(base_path, device)?;
         }
 
-        // Create non-NVIDIA device (should be ignored)
         create_mock_device(base_path, &NON_NVIDIA_DEVICE)?;
 
-        // Run the function with the mock PCI space
         nvrc.get_nvidia_devices(Some(base_path))?;
 
-        // Verify results
         assert_eq!(nvrc.nvidia_devices.len(), TEST_DEVICES.len());
         assert!(nvrc.cold_plug);
 
-        // Group devices by type for verification
         let (gpu_devices, nvswitch_devices): (Vec<_>, Vec<_>) = nvrc
             .nvidia_devices
             .iter()
@@ -237,7 +211,6 @@ mod tests {
         assert_eq!(gpu_devices.len(), 2);
         assert_eq!(nvswitch_devices.len(), 1);
 
-        // Verify specific device details
         let gpu_bdfs: Vec<&String> = gpu_devices.iter().map(|d| &d.bdf).collect();
         let gpu_device_ids: Vec<u16> = gpu_devices.iter().map(|d| d.device_id).collect();
 
