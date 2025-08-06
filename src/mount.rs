@@ -30,6 +30,24 @@ const READONLY_FLAGS: MsFlags = MsFlags::MS_NOSUID
     .union(MsFlags::MS_RDONLY)
     .union(MsFlags::MS_REMOUNT);
 
+// Device major numbers
+const MEM_MAJOR: u64 = 1;
+
+// Device minor numbers for /dev/mem devices
+const NULL_MINOR: u64 = 3;
+const ZERO_MINOR: u64 = 5;
+const RANDOM_MINOR: u64 = 8;
+const URANDOM_MINOR: u64 = 9;
+
+// System paths
+const PROC_MOUNTS: &str = "/proc/mounts";
+const PROC_FILESYSTEMS: &str = "/proc/filesystems";
+const SECURITY_FS_PATH: &str = "/sys/kernel/security";
+const EFIVARFS_PATH: &str = "/sys/firmware/efi/efivars";
+
+/// Mount a filesystem with error handling
+///
+/// Only mounts if the target is not already mounted to avoid conflicts.
 fn mount(
     source: &str,
     target: &str,
@@ -47,7 +65,7 @@ fn mount(
 }
 
 fn is_mounted(path: &str) -> bool {
-    let proc_mounts_path = Path::new("/proc/mounts");
+    let proc_mounts_path = Path::new(PROC_MOUNTS);
     if proc_mounts_path.exists() {
         if let Ok(mounts) = fs::read_to_string(proc_mounts_path) {
             return mounts.lines().any(|line| line.contains(path));
@@ -57,7 +75,7 @@ fn is_mounted(path: &str) -> bool {
 }
 
 fn fs_available(fs: &str) -> bool {
-    let path = Path::new("/proc/filesystems");
+    let path = Path::new(PROC_FILESYSTEMS);
     if path.exists() {
         if let Ok(filesystems) = fs::read_to_string(path) {
             return filesystems.lines().any(|line| line.contains(fs));
@@ -68,8 +86,6 @@ fn fs_available(fs: &str) -> bool {
 
 /// Remount a filesystem as read-only.
 pub fn readonly(target: &str) -> Result<()> {
-    // TODO how to mount it MsFlags::MS_NOEXEC
-    //MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY,
     mount::mount(
         None::<&str>,
         target,
@@ -79,6 +95,51 @@ pub fn readonly(target: &str) -> Result<()> {
     )
     .with_context(|| format!("Failed to remount {} readonly", target))
 }
+
+/// Mount a filesystem conditionally (if it's available and not already mounted)
+fn mount_conditional(
+    fstype: &str,
+    source: &str,
+    target: &str,
+    flags: MsFlags,
+    data: Option<&str>,
+) -> Result<()> {
+    if fs_available(fstype) && Path::new(target).exists() && !is_mounted(target) {
+        mount(source, target, fstype, flags, data)?;
+    }
+    Ok(())
+}
+
+/// Create standard device symlinks
+fn create_device_symlinks() -> Result<()> {
+    let symlinks = [
+        ("/proc/kcore", "/dev/core"),
+        ("/proc/self/fd", "/dev/fd"),
+        ("/proc/self/fd/0", "/dev/stdin"),
+        ("/proc/self/fd/1", "/dev/stdout"),
+        ("/proc/self/fd/2", "/dev/stderr"),
+    ];
+
+    for (source, target) in symlinks {
+        ln(source, target)?;
+    }
+    Ok(())
+}
+
+/// Create standard character device nodes
+fn create_device_nodes() -> Result<()> {
+    let devices = [
+        ("/dev/null", NULL_MINOR),
+        ("/dev/zero", ZERO_MINOR),
+        ("/dev/random", RANDOM_MINOR),
+        ("/dev/urandom", URANDOM_MINOR),
+    ];
+
+    for (path, minor) in devices {
+        mknod(path, stat::SFlag::S_IFCHR, MEM_MAJOR, minor)?;
+    }
+    Ok(())
+}
 /// Set up the basic filesystem hierarchy.
 pub fn setup() -> Result<()> {
     mount("proc", "/proc", "proc", COMMON_FLAGS, None)?;
@@ -87,42 +148,19 @@ pub fn setup() -> Result<()> {
     mount("run", "/run", "tmpfs", COMMON_FLAGS, Some("mode=0755"))?;
     mount("tmpfs", "/tmp", "tmpfs", TMP_FLAGS, None)?;
 
-    if fs_available("securityfs")
-        && Path::new("/sys/kernel/security").exists()
-        && !is_mounted("/sys/kernel/security")
-    {
-        mount(
-            "securityfs",
-            "/sys/kernel/security",
-            "securityfs",
-            COMMON_FLAGS,
-            None,
-        )?;
-    }
+    // Mount conditional filesystems
+    mount_conditional(
+        "securityfs",
+        "securityfs",
+        SECURITY_FS_PATH,
+        COMMON_FLAGS,
+        None,
+    )?;
+    mount_conditional("efivarfs", "efivarfs", EFIVARFS_PATH, COMMON_FLAGS, None)?;
 
-    if fs_available("efivarfs")
-        && Path::new("/sys/firmware/efi/efivars").exists()
-        && !is_mounted("/sys/firmware/efi/efivars")
-    {
-        mount(
-            "efivarfs",
-            "/sys/firmware/efi/efivars",
-            "efivarfs",
-            COMMON_FLAGS,
-            None,
-        )?;
-    }
-
-    ln("/proc/kcore", "/dev/core")?;
-    ln("/proc/self/fd", "/dev/fd")?;
-    ln("/proc/self/fd/0", "/dev/stdin")?;
-    ln("/proc/self/fd/1", "/dev/stdout")?;
-    ln("/proc/self/fd/2", "/dev/stderr")?;
-
-    mknod("/dev/null", stat::SFlag::S_IFCHR, 1, 3)?;
-    mknod("/dev/zero", stat::SFlag::S_IFCHR, 1, 5)?;
-    mknod("/dev/random", stat::SFlag::S_IFCHR, 1, 8)?;
-    mknod("/dev/urandom", stat::SFlag::S_IFCHR, 1, 9)?;
+    // Create device symlinks and nodes
+    create_device_symlinks()?;
+    create_device_nodes()?;
 
     Ok(())
 }
@@ -133,6 +171,7 @@ mod tests {
     use mktemp::Temp;
     use nix::unistd::Uid;
     use std::env;
+    use std::path::Path;
     use std::process::Command;
 
     fn rerun_with_sudo() {
@@ -153,20 +192,31 @@ mod tests {
         }
     }
 
+    fn cleanup_path<P: AsRef<Path>>(path: P) {
+        let path = path.as_ref();
+        if path.exists() {
+            if path.is_dir() {
+                let _ = fs::remove_dir_all(path);
+            } else {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+
     #[test]
     fn test_ln_dir() {
         let target = Temp::new_dir().unwrap();
         let linkpath = Temp::new_dir().unwrap();
 
-        fs::remove_dir(&linkpath).expect("Failed to remove test link");
+        cleanup_path(&linkpath);
 
         let src = target.to_str().unwrap();
         let dst = linkpath.to_str().unwrap();
         ln(src, dst).expect("Failed to create symbolic link");
 
         assert!(Path::new(dst).exists());
-        fs::remove_dir(target).expect("Failed to remove test directory");
-        fs::remove_file(linkpath).expect("Failed to remove test link");
+        cleanup_path(target);
+        cleanup_path(linkpath);
     }
     #[test]
     fn test_ln_file() {
@@ -174,8 +224,7 @@ mod tests {
         let linkpath = Temp::new_file().unwrap();
 
         fs::write(&target, "test").expect("Failed to create test file");
-
-        fs::remove_file(&linkpath).expect("Failed to remove test directory");
+        cleanup_path(&linkpath);
 
         let src = target.to_str().unwrap();
         let dst = linkpath.to_str().unwrap();
@@ -183,8 +232,8 @@ mod tests {
         ln(src, dst).expect("Failed to create symbolic link");
 
         assert!(Path::new(dst).exists());
-        fs::remove_file(target).expect("Failed to remove test file");
-        fs::remove_file(linkpath).expect("Failed to remove test link");
+        cleanup_path(target);
+        cleanup_path(linkpath);
     }
 
     #[test]
@@ -196,11 +245,11 @@ mod tests {
 
         let device = "/tmp/test_node";
         if Path::new(device).exists() {
-            fs::remove_file(device).expect("Failed to remove test node");
+            cleanup_path(device);
         }
         mknod(device, stat::SFlag::S_IFCHR, 1, 3).expect("Failed to create device node");
         assert!(Path::new(device).exists());
-        fs::remove_file(device).expect("Failed to remove test node");
+        cleanup_path(device);
     }
 
     #[test]
@@ -209,23 +258,21 @@ mod tests {
         assert!(!is_mounted("/nonexistent"));
         assert!(is_mounted("/dev"));
     }
-    #[allow(dead_code)]
-    fn test_mount() {
-        //if !Uid::effective().is_root() {
-        // Re-run the test with sudo
-        //    return rerun_with_sudo();
-        //}
 
-        let source = "tmpfs";
-        let target = Temp::new_file().unwrap();
-        let fstype = "tmpfs";
-        let flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV;
-        let data = Some("mode=0755");
+    #[test]
+    fn test_fs_available() {
+        assert!(fs_available("proc"));
+        assert!(fs_available("sysfs"));
+        assert!(!fs_available("nonexistent_fs"));
+    }
 
-        let dst = target.to_str().unwrap();
-
-        mount(source, dst, fstype, flags, data).expect("Failed to mount filesystem");
-        assert!(is_mounted(dst));
-        fs::remove_dir(target).expect("Failed to remove test mount");
+    #[test]
+    fn test_constants() {
+        // Test that our device constants are correct
+        assert_eq!(MEM_MAJOR, 1);
+        assert_eq!(NULL_MINOR, 3);
+        assert_eq!(ZERO_MINOR, 5);
+        assert_eq!(RANDOM_MINOR, 8);
+        assert_eq!(URANDOM_MINOR, 9);
     }
 }
