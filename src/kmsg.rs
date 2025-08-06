@@ -1,72 +1,112 @@
-use std::fs;
-use std::fs::File;
-use std::fs::OpenOptions;
+use anyhow::{Context, Result};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader};
-use std::thread::sleep;
+use std::sync::mpsc;
+use std::thread::{self, sleep, JoinHandle};
 use std::time::Duration;
 
-pub fn kernlog_setup() {
-    kernlog::init().unwrap();
+/// Kernel buffer size for network memory settings (16MB)
+const KERNEL_BUFFER_SIZE: &[u8] = b"16777216";
+
+/// Kernel message device path
+const KMSG_PATH: &str = "/dev/kmsg";
+
+/// Null device path for disabled logging
+const NULL_PATH: &str = "/dev/null";
+
+/// Sleep duration when no new kmsg data is available
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Network core memory setting paths
+const RMEM_DEFAULT_PATH: &str = "/proc/sys/net/core/rmem_default";
+const WMEM_DEFAULT_PATH: &str = "/proc/sys/net/core/wmem_default";
+const RMEM_MAX_PATH: &str = "/proc/sys/net/core/rmem_max";
+const WMEM_MAX_PATH: &str = "/proc/sys/net/core/wmem_max";
+
+pub fn kernlog_setup() -> Result<()> {
+    kernlog::init().context("Failed to initialize kernel log")?;
     log::set_max_level(log::LevelFilter::Off);
 
-    let kernel_buffer_size = b"16777216";
+    // Set kernel network buffer sizes for better performance
+    fs::write(RMEM_DEFAULT_PATH, KERNEL_BUFFER_SIZE)
+        .with_context(|| format!("Failed to write to {}", RMEM_DEFAULT_PATH))?;
+    fs::write(WMEM_DEFAULT_PATH, KERNEL_BUFFER_SIZE)
+        .with_context(|| format!("Failed to write to {}", WMEM_DEFAULT_PATH))?;
+    fs::write(RMEM_MAX_PATH, KERNEL_BUFFER_SIZE)
+        .with_context(|| format!("Failed to write to {}", RMEM_MAX_PATH))?;
+    fs::write(WMEM_MAX_PATH, KERNEL_BUFFER_SIZE)
+        .with_context(|| format!("Failed to write to {}", WMEM_MAX_PATH))?;
 
-    fs::write("/proc/sys/net/core/rmem_default", kernel_buffer_size).unwrap();
-    fs::write("/proc/sys/net/core/wmem_default", kernel_buffer_size).unwrap();
-    fs::write("/proc/sys/net/core/rmem_max", kernel_buffer_size).unwrap();
-    fs::write("/proc/sys/net/core/wmem_max", kernel_buffer_size).unwrap();
+    Ok(())
 }
 
-pub fn kmsg() -> std::fs::File {
+pub fn kmsg() -> Result<File> {
     let log_path = if log_enabled!(log::Level::Debug) {
-        "/dev/kmsg"
+        KMSG_PATH
     } else {
-        "/dev/null"
+        NULL_PATH
     };
     OpenOptions::new()
         .write(true)
         .open(log_path)
-        .expect("failed to open /dev/kmsg")
+        .with_context(|| format!("Failed to open {}", log_path))
 }
 
-pub fn watch_for_pattern(pattern: &'static str, tx: std::sync::mpsc::Sender<&'static str>) {
-    let file = File::open("/dev/kmsg").expect("Could not open /dev/kmsg");
-    let mut reader = BufReader::new(file);
+pub fn watch_for_pattern(pattern: &'static str, tx: mpsc::Sender<&'static str>) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let file = match File::open(KMSG_PATH) {
+            Ok(f) => f,
+            Err(e) => {
+                log::error!("Could not open {}: {}", KMSG_PATH, e);
+                return;
+            }
+        };
 
-    let mut line = String::new();
-    let mut last_seq: u64 = 0; // Track the highest sequence number we've seen
+        let mut reader = BufReader::new(file);
+        let mut line = String::new();
+        let mut last_seq: u64 = 0;
 
-    std::thread::spawn(move || loop {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(bytes_read) => {
-                if bytes_read == 0 {
-                    // No new data right now; try again soon
-                    sleep(Duration::from_millis(100));
-                    continue;
-                }
-                // Example line format: "6,1234,987654321,-;NVRM: Attempting to remove device ..."
-                // We can split on commas to grab the sequence number
-                let parts: Vec<&str> = line.split(',').collect();
-                if parts.len() >= 3 {
-                    if let Ok(seq) = parts[1].parse::<u64>() {
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(bytes_read) => {
+                    if bytes_read == 0 {
+                        // No new data right now; try again soon
+                        sleep(POLL_INTERVAL);
+                        continue;
+                    }
+
+                    // Parse sequence number from kmsg format: "priority,sequence,timestamp,-;message"
+                    if let Some(seq) = parse_kmsg_sequence(&line) {
                         if seq <= last_seq {
-                            // This line is not newer than what we've already seen; skip it.
+                            // Skip already processed messages
                             continue;
                         }
-                        // It's a new line, so update our last_seq
                         last_seq = seq;
                     }
-                }
 
-                // Now check for the pattern
-                if line.contains(pattern) {
-                    tx.send("hot-unplug").unwrap();
+                    // Check for the pattern and send notification
+                    if line.contains(pattern) {
+                        if let Err(e) = tx.send("hot-unplug") {
+                            log::error!("Failed to send pattern notification: {}", e);
+                            break;
+                        }
+                    }
                 }
-            }
-            Err(e) => {
-                panic!("error reading /dev/kmsg: {e}");
+                Err(e) => {
+                    log::error!("Error reading from {}: {}", KMSG_PATH, e);
+                    sleep(POLL_INTERVAL);
+                }
             }
         }
-    });
+    })
+}
+
+fn parse_kmsg_sequence(line: &str) -> Option<u64> {
+    let parts: Vec<&str> = line.split(',').collect();
+    if parts.len() >= 2 {
+        parts[1].parse::<u64>().ok()
+    } else {
+        None
+    }
 }

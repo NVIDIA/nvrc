@@ -45,9 +45,10 @@ impl fmt::Display for Name {
 pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
     debug!("{} {}", command, args.join(" "));
 
+    let kmsg_file = kmsg().context("Failed to open kmsg device")?;
     let output = Command::new(command)
-        .stdout(Stdio::from(kmsg().try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg()))
+        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
+        .stderr(Stdio::from(kmsg_file))
         .args(args)
         .output()
         .context(format!("failed to execute {command}"))?;
@@ -59,10 +60,11 @@ pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
 }
 
 fn background(command: &str, args: &[&str]) -> Result<std::process::Child> {
+    let kmsg_file = kmsg().context("Failed to open kmsg device")?;
     let mut child = Command::new(command)
         .args(args)
-        .stdout(Stdio::from(kmsg().try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg()))
+        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
+        .stderr(Stdio::from(kmsg_file))
         .spawn()
         .unwrap_or_else(|_| panic!("failed to start {command}"));
 
