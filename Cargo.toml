@@ -26,3 +26,6 @@ panic = 'abort'
 mktemp = "0.5.1"
 tempfile = "3.2.0"
 serial_test = "3.2.0"
+
+[features]
+confidential = []
