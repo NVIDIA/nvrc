@@ -1,19 +1,25 @@
+use anyhow::{Context, Result};
 use nix::fcntl::AT_FDCWD;
-use nix::sys::stat;
+use nix::sys::stat::{self, Mode, SFlag};
 use nix::unistd::symlinkat;
 use std::path::Path;
 
-pub fn ln(target: &str, linkpath: &str) {
-    if let Err(e) = symlinkat(target, AT_FDCWD, linkpath) {
-        panic!("Failed to create symlink {linkpath} -> {target}: {e}");
-    }
+/// Create a symbolic link from target to linkpath
+pub fn ln(target: &str, linkpath: &str) -> Result<()> {
+    symlinkat(target, AT_FDCWD, linkpath)
+        .with_context(|| format!("Failed to create symlink {} -> {}", linkpath, target))
 }
 
-pub fn mknod(path: &str, kind: stat::SFlag, major: u64, minor: u64) {
-    if !Path::new(path).exists() {
-        let dev = nix::sys::stat::makedev(major, minor);
-        if let Err(e) = stat::mknod(path, kind, stat::Mode::from_bits_truncate(0o666), dev) {
-            panic!("Failed to create device node {path}: {e}");
-        }
+/// Create a device node if it doesn't already exist
+pub fn mknod(path: &str, kind: SFlag, major: u64, minor: u64) -> Result<()> {
+    if Path::new(path).exists() {
+        debug!("Device node {} already exists, skipping", path);
+        return Ok(());
     }
+
+    let dev = stat::makedev(major, minor);
+    let mode = Mode::from_bits_truncate(0o666);
+
+    stat::mknod(path, kind, mode, dev)
+        .with_context(|| format!("Failed to create device node {}", path))
 }

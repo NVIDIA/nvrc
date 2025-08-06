@@ -37,14 +37,14 @@ fn main() {
 
     let mut init = NVRC::default();
 
-    mount::setup();
+    mount::setup().expect("Failed to setup mounts");
 
     kmsg::kernlog_setup();
     init.setup_syslog().expect("Failed to setup syslog");
     // Now that we have the rand devices let's create our random user,group
     // and afterwards set the rootfs readonly
     init.identity = user_group::random_user_group();
-    mount::readonly("/");
+    mount::readonly("/").expect("Failed to set rootfs to readonly");
 
     init.process_kernel_params(None)
         .expect("Failed to process kernel parameters");

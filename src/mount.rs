@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use nix::mount; //::{mount, MsFlags};
 use nix::mount::MsFlags;
 use nix::sys::stat;
@@ -7,12 +8,41 @@ use std::path::Path;
 
 use crate::coreutils::{ln, mknod};
 
-fn mount(source: &str, target: &str, fstype: &str, flags: MsFlags, data: Option<&str>) {
+/// Common mount flags for most filesystems
+const COMMON_FLAGS: MsFlags = MsFlags::MS_NOSUID
+    .union(MsFlags::MS_NOEXEC)
+    .union(MsFlags::MS_NODEV)
+    .union(MsFlags::MS_RELATIME);
+
+/// Mount flags for device filesystems
+const DEV_FLAGS: MsFlags = MsFlags::MS_NOSUID
+    .union(MsFlags::MS_NOEXEC)
+    .union(MsFlags::MS_RELATIME);
+
+/// Mount flags for temporary filesystems
+const TMP_FLAGS: MsFlags = MsFlags::MS_NOSUID
+    .union(MsFlags::MS_NODEV)
+    .union(MsFlags::MS_RELATIME);
+
+/// Readonly remount flags
+const READONLY_FLAGS: MsFlags = MsFlags::MS_NOSUID
+    .union(MsFlags::MS_NODEV)
+    .union(MsFlags::MS_RDONLY)
+    .union(MsFlags::MS_REMOUNT);
+
+fn mount(
+    source: &str,
+    target: &str,
+    fstype: &str,
+    flags: MsFlags,
+    data: Option<&str>,
+) -> Result<()> {
     if !is_mounted(target) {
-        match mount::mount(Some(source), target, Some(fstype), flags, data) {
-            Ok(_) => {}
-            Err(e) => panic!("Failed to mount {source} on {target}: {e}"),
-        }
+        mount::mount(Some(source), target, Some(fstype), flags, data)
+            .with_context(|| format!("Failed to mount {} on {}", source, target))
+    } else {
+        // Skip mounting if already mounted
+        Ok(())
     }
 }
 
@@ -36,31 +66,26 @@ fn fs_available(fs: &str) -> bool {
     false
 }
 
-pub fn readonly(target: &str) {
-    match mount::mount(
+/// Remount a filesystem as read-only.
+pub fn readonly(target: &str) -> Result<()> {
+    // TODO how to mount it MsFlags::MS_NOEXEC
+    //MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY,
+    mount::mount(
         None::<&str>,
         target,
         None::<&str>,
-        // TODO how to mount it MsFlags::MS_NOEXEC
-        //MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY,
-        MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY | MsFlags::MS_REMOUNT,
+        READONLY_FLAGS,
         None::<&str>,
-    ) {
-        Ok(_) => {}
-        Err(e) => panic!("failed to remount {target} readonly: {e}"),
-    }
+    )
+    .with_context(|| format!("Failed to remount {} readonly", target))
 }
-pub fn setup() {
-    let common_flags =
-        MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
-    let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
-    let tmp_flags: MsFlags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
-
-    mount("proc", "/proc", "proc", common_flags, None);
-    mount("dev", "/dev", "devtmpfs", dev_flags, Some("mode=0755"));
-    mount("sysfs", "/sys", "sysfs", common_flags, None);
-    mount("run", "/run", "tmpfs", common_flags, Some("mode=0755"));
-    mount("tmpfs", "/tmp", "tmpfs", tmp_flags, None);
+/// Set up the basic filesystem hierarchy.
+pub fn setup() -> Result<()> {
+    mount("proc", "/proc", "proc", COMMON_FLAGS, None)?;
+    mount("dev", "/dev", "devtmpfs", DEV_FLAGS, Some("mode=0755"))?;
+    mount("sysfs", "/sys", "sysfs", COMMON_FLAGS, None)?;
+    mount("run", "/run", "tmpfs", COMMON_FLAGS, Some("mode=0755"))?;
+    mount("tmpfs", "/tmp", "tmpfs", TMP_FLAGS, None)?;
 
     if fs_available("securityfs")
         && Path::new("/sys/kernel/security").exists()
@@ -70,9 +95,9 @@ pub fn setup() {
             "securityfs",
             "/sys/kernel/security",
             "securityfs",
-            common_flags,
+            COMMON_FLAGS,
             None,
-        );
+        )?;
     }
 
     if fs_available("efivarfs")
@@ -83,21 +108,23 @@ pub fn setup() {
             "efivarfs",
             "/sys/firmware/efi/efivars",
             "efivarfs",
-            common_flags,
+            COMMON_FLAGS,
             None,
-        );
+        )?;
     }
 
-    ln("/proc/kcore", "/dev/core");
-    ln("/proc/self/fd", "/dev/fd");
-    ln("/proc/self/fd/0", "/dev/stdin");
-    ln("/proc/self/fd/1", "/dev/stdout");
-    ln("/proc/self/fd/2", "/dev/stderr");
+    ln("/proc/kcore", "/dev/core")?;
+    ln("/proc/self/fd", "/dev/fd")?;
+    ln("/proc/self/fd/0", "/dev/stdin")?;
+    ln("/proc/self/fd/1", "/dev/stdout")?;
+    ln("/proc/self/fd/2", "/dev/stderr")?;
 
-    mknod("/dev/null", stat::SFlag::S_IFCHR, 1, 3);
-    mknod("/dev/zero", stat::SFlag::S_IFCHR, 1, 5);
-    mknod("/dev/random", stat::SFlag::S_IFCHR, 1, 8);
-    mknod("/dev/urandom", stat::SFlag::S_IFCHR, 1, 9);
+    mknod("/dev/null", stat::SFlag::S_IFCHR, 1, 3)?;
+    mknod("/dev/zero", stat::SFlag::S_IFCHR, 1, 5)?;
+    mknod("/dev/random", stat::SFlag::S_IFCHR, 1, 8)?;
+    mknod("/dev/urandom", stat::SFlag::S_IFCHR, 1, 9)?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -135,7 +162,7 @@ mod tests {
 
         let src = target.to_str().unwrap();
         let dst = linkpath.to_str().unwrap();
-        ln(src, dst);
+        ln(src, dst).expect("Failed to create symbolic link");
 
         assert!(Path::new(dst).exists());
         fs::remove_dir(target).expect("Failed to remove test directory");
@@ -153,7 +180,7 @@ mod tests {
         let src = target.to_str().unwrap();
         let dst = linkpath.to_str().unwrap();
 
-        ln(src, dst);
+        ln(src, dst).expect("Failed to create symbolic link");
 
         assert!(Path::new(dst).exists());
         fs::remove_file(target).expect("Failed to remove test file");
@@ -171,7 +198,7 @@ mod tests {
         if Path::new(device).exists() {
             fs::remove_file(device).expect("Failed to remove test node");
         }
-        mknod(device, stat::SFlag::S_IFCHR, 1, 3);
+        mknod(device, stat::SFlag::S_IFCHR, 1, 3).expect("Failed to create device node");
         assert!(Path::new(device).exists());
         fs::remove_file(device).expect("Failed to remove test node");
     }
@@ -197,7 +224,7 @@ mod tests {
 
         let dst = target.to_str().unwrap();
 
-        mount(source, dst, fstype, flags, data);
+        mount(source, dst, fstype, flags, data).expect("Failed to mount filesystem");
         assert!(is_mounted(dst));
         fs::remove_dir(target).expect("Failed to remove test mount");
     }
