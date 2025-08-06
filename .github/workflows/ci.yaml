@@ -36,9 +36,19 @@ jobs:
         run: |
           . "${HOME}/.cargo/env"
           cargo build --release --target=aarch64-unknown-linux-musl
-
           sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC $ROOTFS_DIR/bin/NVRC
       - name: Create initrd
         run: |
           cd "${INITRD_DIR}"
           script -fec 'sudo -E AGENT_INIT=no USE_DOCKER=true ./initrd_builder.sh "${ROOTFS_DIR}"'
+      - name: Run nerdctl and verify nvidia-smi execution
+        run: |
+          image=ubuntu
+          if output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm $image nvidia-smi 2>&1); then
+            echo "nvidia-smi executed successfully"
+            echo "$output"
+          else
+            echo "nvidia-smi execution failed"
+            echo "$output"
+            exit 1
+          fi
