@@ -1,4 +1,5 @@
-use std::fs::{self};
+use log::{debug, error, info, warn};
+use std::fs;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixDatagram;
 use std::path::Path;
@@ -6,27 +7,116 @@ use std::path::Path;
 use nix::poll::{poll, PollFd, PollFlags};
 
 const DEV_LOG_PATH: &str = "/dev/log";
+const SYSLOG_BUFFER_SIZE: usize = 4096;
 
-/// Create and bind /dev/log as a Unix datagram socket.
-pub fn dev_log_setup() -> std::io::Result<UnixDatagram> {
-    if Path::new(DEV_LOG_PATH).exists() {
-        fs::remove_file(DEV_LOG_PATH)?;
+/// Convert nix error to std::io::Error
+fn nix_to_io_error(err: nix::Error) -> std::io::Error {
+    std::io::Error::from_raw_os_error(err as i32)
+}
+
+/// Syslog severity levels (RFC 3164)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum SyslogSeverity {
+    Emergency = 0, // System is unusable
+    Alert = 1,     // Action must be taken immediately
+    Critical = 2,  // Critical conditions
+    Error = 3,     // Error conditions
+    Warning = 4,   // Warning conditions
+    Notice = 5,    // Normal but significant condition
+    Info = 6,      // Informational messages
+    Debug = 7,     // Debug-level messages
+}
+
+impl From<u8> for SyslogSeverity {
+    fn from(value: u8) -> Self {
+        match value & 0x07 {
+            // Extract only the last 3 bits
+            0 => Self::Emergency,
+            1 => Self::Alert,
+            2 => Self::Critical,
+            3 => Self::Error,
+            4 => Self::Warning,
+            5 => Self::Notice,
+            6 => Self::Info,
+            7 => Self::Debug,
+            _ => Self::Info, // Default fallback
+        }
     }
+}
+
+impl SyslogSeverity {
+    fn log_message(self, content: &str) {
+        match self {
+            Self::Emergency | Self::Alert | Self::Critical | Self::Error => error!("{}", content),
+            Self::Warning => warn!("{}", content),
+            Self::Notice | Self::Info => info!("{}", content),
+            Self::Debug => debug!("{}", content),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SyslogMessage {
+    severity: SyslogSeverity,
+    content: String,
+}
+
+impl SyslogMessage {
+    fn parse(raw_message: &str) -> Self {
+        let trimmed = raw_message.trim_end();
+
+        if let Some(parsed) = Self::try_parse_priority(trimmed) {
+            parsed
+        } else {
+            Self {
+                severity: SyslogSeverity::Info,
+                content: format!("syslog: {}", trimmed),
+            }
+        }
+    }
+
+    fn try_parse_priority(message: &str) -> Option<Self> {
+        if !message.starts_with('<') {
+            return None;
+        }
+
+        let end = message.find('>')?;
+        let priority_str = &message[1..end];
+        let priority: u8 = priority_str.parse().ok()?;
+        let content = &message[end + 1..];
+
+        Some(Self {
+            severity: SyslogSeverity::from(priority),
+            content: content.to_owned(),
+        })
+    }
+
+    fn log(&self) {
+        self.severity.log_message(&self.content);
+    }
+}
+
+pub fn dev_log_setup() -> std::io::Result<UnixDatagram> {
+    let dev_log_path = Path::new(DEV_LOG_PATH);
+
+    if dev_log_path.exists() {
+        fs::remove_file(dev_log_path)?;
+    }
+
     UnixDatagram::bind(DEV_LOG_PATH)
 }
 
-/// Poll the /dev/log socket, and if data is available, forward it to /dev/kmsg.
 pub fn poll_dev_log(socket: &UnixDatagram) -> std::io::Result<()> {
     let mut fds = [PollFd::new(socket.as_fd(), PollFlags::POLLIN)];
 
     // Non-blocking poll - return immediately if no data
-    let n = poll(&mut fds, 0u16).map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+    let poll_count = poll(&mut fds, 0u16).map_err(nix_to_io_error)?;
 
-    if n == 0 {
+    if poll_count == 0 {
         return Ok(()); // No data available
     }
 
-    // Check if data is ready to read
     if let Some(revents) = fds[0].revents() {
         if revents.contains(PollFlags::POLLIN) {
             forward_syslog_message(socket)?;
@@ -36,45 +126,13 @@ pub fn poll_dev_log(socket: &UnixDatagram) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Read a message from the socket and forward it to /dev/kmsg using logging macros.
 fn forward_syslog_message(socket: &UnixDatagram) -> std::io::Result<()> {
-    let mut buf = [0u8; 4096];
+    let mut buf = [0u8; SYSLOG_BUFFER_SIZE];
     let (len, _addr) = socket.recv_from(&mut buf)?;
 
-    let message = String::from_utf8_lossy(&buf[..len]).trim_end().to_string();
-
-    // Parse syslog priority if present, otherwise default to info level
-    if message.starts_with('<') {
-        // Extract priority number between < and >
-        if let Some(end) = message.find('>') {
-            if let Ok(priority) = message[1..end].parse::<u8>() {
-                let severity = priority & 0x07; // Last 3 bits are severity
-                let msg_content = &message[end + 1..];
-
-                // Forward to appropriate log level based on syslog severity
-                match severity {
-                    0 => error!("{}", msg_content), // Emergency
-                    1 => error!("{}", msg_content), // Alert
-                    2 => error!("{}", msg_content), // Critical
-                    3 => error!("{}", msg_content), // Error
-                    4 => warn!("{}", msg_content),  // Warning
-                    5 => info!("{}", msg_content),  // Notice
-                    6 => info!("{}", msg_content),  // Info
-                    7 => debug!("{}", msg_content), // Debug
-                    _ => info!("{}", msg_content),  // Default to info
-                }
-            } else {
-                // Invalid priority format, log as info
-                info!("syslog: {}", message);
-            }
-        } else {
-            // No closing >, log as info
-            info!("syslog: {}", message);
-        }
-    } else {
-        // No priority, default to info level
-        info!("syslog: {}", message);
-    }
+    let raw_message = String::from_utf8_lossy(&buf[..len]);
+    let message = SyslogMessage::parse(&raw_message);
+    message.log();
 
     Ok(())
 }
@@ -254,5 +312,63 @@ mod tests {
         // Test that forward_syslog_message processes it without error
         let result = forward_syslog_message(&socket_pair.0);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_syslog_message_parsing() {
+        // Test parsing with valid priority
+        let msg = SyslogMessage::parse("<3>Error message");
+        assert_eq!(msg.severity as u8, 3);
+        assert_eq!(msg.content, "Error message");
+
+        // Test parsing without priority
+        let msg = SyslogMessage::parse("No priority message");
+        assert_eq!(msg.severity as u8, 6); // Should default to Info
+        assert_eq!(msg.content, "syslog: No priority message");
+
+        // Test parsing with invalid priority
+        let msg = SyslogMessage::parse("<abc>Invalid priority");
+        assert_eq!(msg.severity as u8, 6); // Should default to Info
+        assert_eq!(msg.content, "syslog: <abc>Invalid priority");
+    }
+
+    #[test]
+    fn test_syslog_severity_conversion() {
+        // Test all severity levels
+        assert_eq!(SyslogSeverity::from(0), SyslogSeverity::Emergency);
+        assert_eq!(SyslogSeverity::from(1), SyslogSeverity::Alert);
+        assert_eq!(SyslogSeverity::from(2), SyslogSeverity::Critical);
+        assert_eq!(SyslogSeverity::from(3), SyslogSeverity::Error);
+        assert_eq!(SyslogSeverity::from(4), SyslogSeverity::Warning);
+        assert_eq!(SyslogSeverity::from(5), SyslogSeverity::Notice);
+        assert_eq!(SyslogSeverity::from(6), SyslogSeverity::Info);
+        assert_eq!(SyslogSeverity::from(7), SyslogSeverity::Debug);
+
+        // Test masking works correctly (only last 3 bits)
+        assert_eq!(SyslogSeverity::from(24), SyslogSeverity::Emergency); // 24 & 0x07 = 0
+        assert_eq!(SyslogSeverity::from(22), SyslogSeverity::Info); // 22 & 0x07 = 6
+    }
+
+    #[test]
+    fn test_syslog_message_edge_cases() {
+        // Empty message
+        let msg = SyslogMessage::parse("");
+        assert_eq!(msg.severity as u8, 6);
+        assert_eq!(msg.content, "syslog: ");
+
+        // Only priority bracket
+        let msg = SyslogMessage::parse("<>");
+        assert_eq!(msg.severity as u8, 6);
+        assert_eq!(msg.content, "syslog: <>");
+
+        // Unclosed priority bracket
+        let msg = SyslogMessage::parse("<5 Missing closing");
+        assert_eq!(msg.severity as u8, 6);
+        assert_eq!(msg.content, "syslog: <5 Missing closing");
+
+        // Valid priority with empty content
+        let msg = SyslogMessage::parse("<4>");
+        assert_eq!(msg.severity as u8, 4);
+        assert_eq!(msg.content, "");
     }
 }

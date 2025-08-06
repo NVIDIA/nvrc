@@ -200,20 +200,16 @@ impl NVRC {
         self.query_gpu_cc_mode()
             .expect("Failed to query GPU confidential computing mode");
 
-        // Double-check GPU support after potential CC mode changes
         self.check_gpu_supported(None)
             .expect("Failed to verify GPU support after CC mode check");
 
         nvidia_ctk_system().expect("Failed to setup NVIDIA container toolkit system");
 
-        // Start persistence daemon first
         self.manage_daemons(Action::Restart)
             .expect("Failed to restart NVIDIA daemons");
 
-        // Lock down module loading for security
         lockdown::disable_modules_loading().expect("Failed to disable module loading");
 
-        // Generate CDI specification
         nvidia_ctk_cdi().expect("Failed to generate NVIDIA CDI specification");
 
         // Set GPU to ready state if configured

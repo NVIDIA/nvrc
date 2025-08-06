@@ -1,8 +1,15 @@
 use anyhow::Result;
+use log::debug;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
-// Re-export embedded PCI IDs from query_cc_mode module
+// Embedded PCI IDs database
 const EMBEDDED_PCI_IDS: &str = include_str!("pci_ids_embedded.txt");
+
+// Cached PCI database - parsed once and reused
+static PCI_DATABASE: LazyLock<HashMap<u16, String>> = LazyLock::new(|| {
+    parse_pci_database_content(EMBEDDED_PCI_IDS).expect("Failed to parse embedded PCI database")
+});
 
 pub const NVIDIA_VENDOR_ID: u16 = 0x10de;
 
@@ -10,18 +17,21 @@ pub mod class_ids {
     pub const VGA_CONTROLLER: u32 = 0x030000;
     pub const DISPLAY_3D_CONTROLLER: u32 = 0x030200;
     pub const BRIDGE_OTHER: u32 = 0x068000;
+
+    /// GPU class IDs
+    pub const GPU_CLASSES: &[u32] = &[VGA_CONTROLLER, DISPLAY_3D_CONTROLLER];
 }
 
 /// Device types for NVIDIA hardware
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeviceType {
     Gpu,
     NvSwitch,
     Unknown,
 }
 
-pub fn get_pci_ids_database() -> Result<HashMap<u16, String>> {
-    parse_pci_database_content(EMBEDDED_PCI_IDS)
+pub fn get_pci_ids_database() -> &'static HashMap<u16, String> {
+    &PCI_DATABASE
 }
 
 fn parse_pci_database_content(content: &str) -> Result<HashMap<u16, String>> {
@@ -35,21 +45,25 @@ fn parse_pci_database_content(content: &str) -> Result<HashMap<u16, String>> {
         }
 
         if in_nvidia_section {
-            if line.starts_with('\t') && !line.starts_with("\t\t") {
+            match line {
                 // Device entry: "\t<device_id>  <device_name>"
-                if let Some(parts) = line.strip_prefix('\t') {
-                    if let Some((id_str, name)) = parts.split_once("  ") {
-                        if let Ok(device_id) = u16::from_str_radix(id_str, 16) {
-                            nvidia_devices.insert(device_id, name.to_string());
+                line if line.starts_with('\t') && !line.starts_with("\t\t") => {
+                    if let Some(device_line) = line.strip_prefix('\t') {
+                        if let Some((id_str, name)) = device_line.split_once("  ") {
+                            if let Ok(device_id) = u16::from_str_radix(id_str, 16) {
+                                nvidia_devices.insert(device_id, name.to_string());
+                            }
                         }
                     }
                 }
-            } else if line.starts_with("\t\t") {
                 // Subsystem entry (skip these)
-                continue;
-            } else if !line.starts_with('\t') && !line.is_empty() && !line.starts_with('#') {
-                // End of NVIDIA section (new vendor)
-                break;
+                line if line.starts_with("\t\t") => continue,
+                // End of NVIDIA section (new vendor) or comment
+                line if !line.starts_with('\t') && !line.is_empty() && !line.starts_with('#') => {
+                    break;
+                }
+                // Empty lines or other content
+                _ => {}
             }
         }
     }
@@ -58,18 +72,16 @@ fn parse_pci_database_content(content: &str) -> Result<HashMap<u16, String>> {
 }
 
 fn is_nvswitch(device_name: &str) -> bool {
-    let name_lower = device_name.to_lowercase();
-
     // NvSwitch devices typically have "nvswitch" in their name
     // Examples: "GA100 [A100 NVSwitch]", "GH100 [H100 NVSwitch]"
-    name_lower.contains("nvswitch")
+    device_name.to_ascii_lowercase().contains("nvswitch")
 }
 
 fn is_gpu_class(class_id: u32) -> bool {
-    class_id == class_ids::VGA_CONTROLLER || class_id == class_ids::DISPLAY_3D_CONTROLLER
+    class_ids::GPU_CLASSES.contains(&class_id)
 }
 
-fn is_bridge_class(class_id: u32) -> bool {
+const fn is_bridge_class(class_id: u32) -> bool {
     class_id == class_ids::BRIDGE_OTHER
 }
 
@@ -86,7 +98,7 @@ pub fn classify_device_type_by_name(device_name: &str) -> DeviceType {
 
 /// Determine device type based on PCI class ID and device ID
 pub fn classify_device_type(vendor_id: u16, device_id: u16, class_id: u32) -> Result<DeviceType> {
-    // NVIDIA vendor ID is 0x10de
+    // Ensure this is an NVIDIA device
     if vendor_id != NVIDIA_VENDOR_ID {
         return Err(anyhow::anyhow!(
             "Not an NVIDIA device (vendor ID: 0x{:04x})",
@@ -102,13 +114,11 @@ pub fn classify_device_type(vendor_id: u16, device_id: u16, class_id: u32) -> Re
     // NvSwitch devices have class ID 0x068000 (Bridge device, Other bridge device)
     // Use the PCI database to verify if it's actually an NvSwitch
     if is_bridge_class(class_id) {
-        // Try to get device name from PCI database
-        if let Ok(pci_db) = get_pci_ids_database() {
-            if let Some(device_name) = pci_db.get(&device_id) {
-                let device_type = classify_device_type_by_name(device_name);
-                if device_type == DeviceType::NvSwitch {
-                    return Ok(DeviceType::NvSwitch);
-                }
+        let pci_db = get_pci_ids_database();
+        if let Some(device_name) = pci_db.get(&device_id) {
+            let device_type = classify_device_type_by_name(device_name);
+            if matches!(device_type, DeviceType::NvSwitch) {
+                return Ok(DeviceType::NvSwitch);
             }
         }
 
@@ -157,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_pci_database_access() {
-        let pci_db = get_pci_ids_database().expect("Should be able to load embedded PCI database");
+        let pci_db = get_pci_ids_database();
         assert!(!pci_db.is_empty(), "PCI database should not be empty");
 
         // Check for known NvSwitch entries
