@@ -1,53 +1,36 @@
+use crate::coreutils::{ln, mknod};
 use anyhow::{Context, Result};
-use nix::mount; //::{mount, MsFlags};
-use nix::mount::MsFlags;
+use nix::mount::{self, MsFlags};
 use nix::sys::stat;
-
 use std::fs;
 use std::path::Path;
 
-use crate::coreutils::{ln, mknod};
-
-/// Common mount flags for most filesystems
 const COMMON_FLAGS: MsFlags = MsFlags::MS_NOSUID
     .union(MsFlags::MS_NOEXEC)
     .union(MsFlags::MS_NODEV)
     .union(MsFlags::MS_RELATIME);
-
-/// Mount flags for device filesystems
 const DEV_FLAGS: MsFlags = MsFlags::MS_NOSUID
     .union(MsFlags::MS_NOEXEC)
     .union(MsFlags::MS_RELATIME);
-
-/// Mount flags for temporary filesystems
 const TMP_FLAGS: MsFlags = MsFlags::MS_NOSUID
     .union(MsFlags::MS_NODEV)
     .union(MsFlags::MS_RELATIME);
-
-/// Readonly remount flags
 const READONLY_FLAGS: MsFlags = MsFlags::MS_NOSUID
     .union(MsFlags::MS_NODEV)
     .union(MsFlags::MS_RDONLY)
     .union(MsFlags::MS_REMOUNT);
 
-// Device major numbers
 const MEM_MAJOR: u64 = 1;
-
-// Device minor numbers for /dev/mem devices
 const NULL_MINOR: u64 = 3;
 const ZERO_MINOR: u64 = 5;
 const RANDOM_MINOR: u64 = 8;
 const URANDOM_MINOR: u64 = 9;
 
-// System paths
 const PROC_MOUNTS: &str = "/proc/mounts";
 const PROC_FILESYSTEMS: &str = "/proc/filesystems";
 const SECURITY_FS_PATH: &str = "/sys/kernel/security";
 const EFIVARFS_PATH: &str = "/sys/firmware/efi/efivars";
 
-/// Mount a filesystem with error handling
-///
-/// Only mounts if the target is not already mounted to avoid conflicts.
 fn mount(
     source: &str,
     target: &str,
@@ -59,7 +42,6 @@ fn mount(
         mount::mount(Some(source), target, Some(fstype), flags, data)
             .with_context(|| format!("Failed to mount {} on {}", source, target))
     } else {
-        // Skip mounting if already mounted
         Ok(())
     }
 }
@@ -84,7 +66,6 @@ fn fs_available(fs: &str) -> bool {
     false
 }
 
-/// Remount a filesystem as read-only.
 pub fn readonly(target: &str) -> Result<()> {
     mount::mount(
         None::<&str>,
@@ -96,7 +77,6 @@ pub fn readonly(target: &str) -> Result<()> {
     .with_context(|| format!("Failed to remount {} readonly", target))
 }
 
-/// Mount a filesystem conditionally (if it's available and not already mounted)
 fn mount_conditional(
     fstype: &str,
     source: &str,
@@ -110,7 +90,6 @@ fn mount_conditional(
     Ok(())
 }
 
-/// Create standard device symlinks
 fn create_device_symlinks() -> Result<()> {
     let symlinks = [
         ("/proc/kcore", "/dev/core"),
@@ -119,14 +98,12 @@ fn create_device_symlinks() -> Result<()> {
         ("/proc/self/fd/1", "/dev/stdout"),
         ("/proc/self/fd/2", "/dev/stderr"),
     ];
-
     for (source, target) in symlinks {
         ln(source, target)?;
     }
     Ok(())
 }
 
-/// Create standard character device nodes
 fn create_device_nodes() -> Result<()> {
     let devices = [
         ("/dev/null", NULL_MINOR),
@@ -134,21 +111,18 @@ fn create_device_nodes() -> Result<()> {
         ("/dev/random", RANDOM_MINOR),
         ("/dev/urandom", URANDOM_MINOR),
     ];
-
     for (path, minor) in devices {
         mknod(path, stat::SFlag::S_IFCHR, MEM_MAJOR, minor)?;
     }
     Ok(())
 }
-/// Set up the basic filesystem hierarchy.
+
 pub fn setup() -> Result<()> {
     mount("proc", "/proc", "proc", COMMON_FLAGS, None)?;
     mount("dev", "/dev", "devtmpfs", DEV_FLAGS, Some("mode=0755"))?;
     mount("sysfs", "/sys", "sysfs", COMMON_FLAGS, None)?;
     mount("run", "/run", "tmpfs", COMMON_FLAGS, Some("mode=0755"))?;
     mount("tmpfs", "/tmp", "tmpfs", TMP_FLAGS, None)?;
-
-    // Mount conditional filesystems
     mount_conditional(
         "securityfs",
         "securityfs",
@@ -157,11 +131,8 @@ pub fn setup() -> Result<()> {
         None,
     )?;
     mount_conditional("efivarfs", "efivarfs", EFIVARFS_PATH, COMMON_FLAGS, None)?;
-
-    // Create device symlinks and nodes
     create_device_symlinks()?;
     create_device_nodes()?;
-
     Ok(())
 }
 
@@ -239,10 +210,8 @@ mod tests {
     #[test]
     fn test_mknod() {
         if !Uid::effective().is_root() {
-            // Re-run the test with sudo
             return rerun_with_sudo();
         }
-
         let device = "/tmp/test_node";
         if Path::new(device).exists() {
             cleanup_path(device);
@@ -268,7 +237,6 @@ mod tests {
 
     #[test]
     fn test_constants() {
-        // Test that our device constants are correct
         assert_eq!(MEM_MAJOR, 1);
         assert_eq!(NULL_MINOR, 3);
         assert_eq!(ZERO_MINOR, 5);

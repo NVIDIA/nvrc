@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::Path;
 
 use super::NVRC;
@@ -35,41 +35,33 @@ impl NVRC {
 
         let supported_ids = self.load_supported_ids(supported_path)?;
 
-        // Use iterator methods instead of manual loop
-        let unsupported_gpu = gpu_devices.iter().find(|gpu| {
-            let device_id = format!("0x{:04x}", gpu.device_id).to_lowercase();
-            !supported_ids.contains(&device_id)
-        });
-
-        match unsupported_gpu {
-            Some(gpu) => {
-                self.gpu_supported = false;
-                Err(anyhow::anyhow!(
-                    "GPU 0x{:04x} is not supported",
-                    gpu.device_id
-                ))
-            }
-            None => {
-                self.gpu_supported = true;
-                Ok(())
-            }
+        if let Some(gpu) = gpu_devices
+            .iter()
+            .find(|gpu| !supported_ids.contains(&format!("0x{:04x}", gpu.device_id).to_lowercase()))
+        {
+            self.gpu_supported = false;
+            Err(anyhow::anyhow!(
+                "GPU 0x{:04x} is not supported",
+                gpu.device_id
+            ))
+        } else {
+            self.gpu_supported = true;
+            Ok(())
         }
     }
 
     /// Load and parse supported device IDs from file
     fn load_supported_ids(&self, path: &Path) -> Result<HashSet<String>> {
-        let file =
-            File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+        let reader = std::io::BufReader::new(
+            File::open(path).with_context(|| format!("Failed to open {}", path.display()))?,
+        );
 
-        BufReader::new(file)
+        Ok(reader
             .lines()
-            .map(|line| line.context("Could not read line"))
-            .map(|result| result.map(|line| line.trim().to_lowercase()))
-            .filter(|result| {
-                // Filter out empty lines
-                result.as_ref().map_or(true, |line| !line.is_empty())
-            })
-            .collect()
+            .map_while(Result::ok)
+            .map(|line| line.trim().to_lowercase())
+            .filter(|line| !line.is_empty())
+            .collect())
     }
 }
 #[cfg(test)]

@@ -10,10 +10,7 @@ use sysinfo::System;
 use crate::kmsg::kmsg;
 use crate::nvrc::NVRC;
 
-/// Directory for nvidia-persistenced runtime files
 const NVIDIA_PERSISTENCED_DIR: &str = "/var/run/nvidia-persistenced";
-
-/// Command paths
 const NVIDIA_PERSISTENCED_CMD: &str = "/bin/nvidia-persistenced";
 const NV_HOSTENGINE_CMD: &str = "/bin/nv-hostengine";
 const DCGM_EXPORTER_CMD: &str = "/bin/dcgm-exporter";
@@ -35,7 +32,6 @@ pub enum Name {
 
 impl fmt::Display for Name {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // First, pick the full string
         let full_str = match self {
             Name::Persistenced => "nvidia-persistenced",
             Name::NVHostengine => "nv-hostengine",
@@ -85,8 +81,7 @@ fn kill_processes_by_comm(target_name: &str) {
     let mut system = System::new_all();
     // Refresh process info so `system.processes_by_name()` is up‐to‐date
     system.refresh_all();
-    let os_str_name = OsStr::new(target_name);
-    let processes = system.processes_by_name(os_str_name);
+    let processes = system.processes_by_name(OsStr::new(target_name));
 
     for process in processes {
         debug!(
@@ -131,7 +126,6 @@ impl NVRC {
         Ok(())
     }
 
-    /// Configure and manage nvidia-persistenced daemon
     pub fn nvidia_persistenced(&mut self, mode: Action) -> Result<()> {
         let uvm_persistence_mode = match self.uvm_persistence_mode.as_deref() {
             Some("on") => "--uvm-persistence-mode",
@@ -151,7 +145,6 @@ impl NVRC {
         let uid = self.identity.user_id;
         let gid = self.identity.group_id;
 
-        // Create runtime directory if it doesn't exist
         if !Path::new(NVIDIA_PERSISTENCED_DIR).exists() {
             mkdir(NVIDIA_PERSISTENCED_DIR, Mode::S_IRWXU).with_context(|| {
                 format!("Failed to create directory {}", NVIDIA_PERSISTENCED_DIR)
@@ -166,8 +159,7 @@ impl NVRC {
             args.push(uvm_persistence_mode);
         }
 
-        let gpu_cc_mode = self.gpu_cc_mode.clone();
-        match gpu_cc_mode.as_deref() {
+        match self.gpu_cc_mode.as_deref() {
             Some("on") => {
                 warn!("TODO: Running in GPU Confidential Computing mode, not setting user/group for nvidia-persistenced");
             }
@@ -185,7 +177,6 @@ impl NVRC {
         Ok(())
     }
 
-    /// Manage nv-hostengine daemon for DCGM
     pub fn nv_hostengine(&mut self, mode: Action) -> Result<()> {
         if !self.dcgm_enabled.unwrap_or(false) {
             return Ok(());
@@ -201,7 +192,6 @@ impl NVRC {
         Ok(())
     }
 
-    /// Manage dcgm-exporter daemon
     pub fn dcgm_exporter(&mut self, mode: Action) -> Result<()> {
         if !self.dcgm_enabled.unwrap_or(false) {
             return Ok(());
@@ -217,7 +207,6 @@ impl NVRC {
         Ok(())
     }
 
-    /// Configure nvidia-smi secure reset sequence for Confidential Computing
     pub fn nvidia_smi_srs(&self) -> Result<()> {
         if self.gpu_cc_mode != Some("on".to_string()) {
             debug!("CC mode is off, skipping nvidia-smi conf-compute -srs");
@@ -229,7 +218,6 @@ impl NVRC {
             "-srs",
             self.nvidia_smi_srs.as_deref().unwrap_or("0"),
         ];
-
         foreground(NVIDIA_SMI_CMD, &args)
     }
 }

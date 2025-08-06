@@ -13,29 +13,30 @@ pub fn nvidia_smi() -> Result<()> {
         .output()
         .context("Failed to execute nvidia-smi")?;
 
-    // Use write! macro for better formatting and combine stdout/stderr more elegantly
-    let combined_output = format!(
-        "{}{}",
+    println!(
+        "nvidia-smi output:\n{}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-
-    println!("nvidia-smi output:\n{}", combined_output.trim());
     Ok(())
 }
 
 pub fn nvidia_ctk_system() -> Result<()> {
-    let args = [
-        "-d",
-        "system",
-        "create-device-nodes",
-        "--control-devices",
-        "--load-kernel-modules",
-    ];
-    foreground(NVIDIA_CTK_PATH, &args)
+    foreground(
+        NVIDIA_CTK_PATH,
+        &[
+            "-d",
+            "system",
+            "create-device-nodes",
+            "--control-devices",
+            "--load-kernel-modules",
+        ],
+    )
 }
 
 pub fn nvidia_ctk_cdi() -> Result<()> {
-    let args = ["-d", "cdi", "generate", "--output=/var/run/cdi/nvidia.yaml"];
-    foreground(NVIDIA_CTK_PATH, &args)
+    foreground(
+        NVIDIA_CTK_PATH,
+        &["-d", "cdi", "generate", "--output=/var/run/cdi/nvidia.yaml"],
+    )
 }
