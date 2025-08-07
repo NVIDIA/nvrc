@@ -45,7 +45,6 @@ jobs:
       - name: Run nerdctl and verify nvidia-smi execution
         run: |
           image=ubuntu
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm $image nvidia-smi 2>&1 || true)
           echo "$output"
           
           # Check if nvidia-smi actually executed and produced meaningful output
@@ -57,3 +56,4 @@ jobs:
             echo "nvidia-smi did not execute properly or produced unexpected output"
             exit 1
           fi
+          
