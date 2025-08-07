@@ -7,6 +7,7 @@ name = "NVRC"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cfg-if",
  "kernlog",
  "kobject-uevent",
  "lazy_static",
@@ -16,6 +17,7 @@ dependencies = [
  "netlink-sys",
  "nix",
  "rand",
+ "raw-cpuid",
  "rlimit",
  "serial_test",
  "sysinfo",
@@ -395,6 +397,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
 dependencies = [
  "getrandom 0.3.1",
+]
+
+[[package]]
+name = "raw-cpuid"
+version = "11.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6df7ab838ed27997ba19a4664507e6f82b41fe6e20be42929332156e5e85146"
+dependencies = [
+ "bitflags",
 ]
 
 [[package]]

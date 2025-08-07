@@ -5,8 +5,9 @@ use std::fs;
 use std::os::unix::net::UnixDatagram;
 use std::sync::LazyLock;
 
+use crate::cpu::Cpu;
 use crate::daemon::Name;
-use crate::get_devices::NvidiaDevice;
+use crate::devices::NvidiaDevice;
 use crate::user_group::UserGroup;
 
 /// Trait for parsing boolean-like values from strings
@@ -49,7 +50,7 @@ pub struct NVRC {
     pub nvidia_smi_srs: Option<String>,
     pub nvidia_smi_lgc: Option<String>,
     pub uvm_persistence_mode: Option<String>,
-    pub cpu_vendor: Option<String>,
+    pub cpu_vendor: Option<Cpu>,
     pub nvidia_devices: Vec<NvidiaDevice>,
     pub gpu_supported: bool,
     pub gpu_cc_mode: Option<String>,
