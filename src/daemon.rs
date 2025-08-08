@@ -10,10 +10,15 @@ use sysinfo::System;
 use crate::kmsg::kmsg;
 use crate::nvrc::NVRC;
 
+#[cfg(feature = "confidential")]
+use crate::gpu::confidential::CC;
+
 const NVIDIA_PERSISTENCED_DIR: &str = "/var/run/nvidia-persistenced";
 const NVIDIA_PERSISTENCED_CMD: &str = "/bin/nvidia-persistenced";
 const NV_HOSTENGINE_CMD: &str = "/bin/nv-hostengine";
 const DCGM_EXPORTER_CMD: &str = "/bin/dcgm-exporter";
+
+#[cfg(feature = "confidential")]
 const NVIDIA_SMI_CMD: &str = "/bin/nvidia-smi";
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
@@ -140,8 +145,6 @@ impl NVRC {
             }
         };
 
-        let user_name = self.identity.user_name.clone();
-        let group_name = self.identity.group_name.clone();
         let uid = self.identity.user_id;
         let gid = self.identity.group_id;
 
@@ -159,14 +162,15 @@ impl NVRC {
             args.push(uvm_persistence_mode);
         }
 
-        match self.gpu_cc_mode.as_deref() {
-            Some("on") => {
-                warn!("TODO: Running in GPU Confidential Computing mode, not setting user/group for nvidia-persistenced");
-            }
-            _ => {
-                args.extend_from_slice(&["-u", &user_name, "-g", &group_name]);
-            }
-        }
+        #[cfg(feature = "confidential")]
+        warn!("TODO: Running in GPU Confidential Computing mode, not setting user/group for nvidia-persistenced");
+
+        #[cfg(not(feature = "confidential"))]
+        let user_name = self.identity.user_name.clone();
+        #[cfg(not(feature = "confidential"))]
+        let group_name = self.identity.group_name.clone();
+        #[cfg(not(feature = "confidential"))]
+        args.extend_from_slice(&["-u", &user_name, "-g", &group_name]);
 
         match mode {
             Action::Start => self.start(&Name::Persistenced, NVIDIA_PERSISTENCED_CMD, &args)?,
@@ -207,8 +211,9 @@ impl NVRC {
         Ok(())
     }
 
+    #[cfg(feature = "confidential")]
     pub fn nvidia_smi_srs(&self) -> Result<()> {
-        if self.gpu_cc_mode != Some("on".to_string()) {
+        if self.gpu_cc_mode != Some(CC::On) {
             debug!("CC mode is off, skipping nvidia-smi conf-compute -srs");
             return Ok(());
         }

@@ -8,6 +8,8 @@ use std::sync::LazyLock;
 use crate::cpu::Cpu;
 use crate::daemon::Name;
 use crate::devices::NvidiaDevice;
+#[cfg(feature = "confidential")]
+use crate::gpu::confidential::CC;
 use crate::user_group::UserGroup;
 
 /// Trait for parsing boolean-like values from strings
@@ -53,7 +55,8 @@ pub struct NVRC {
     pub cpu_vendor: Option<Cpu>,
     pub nvidia_devices: Vec<NvidiaDevice>,
     pub gpu_supported: bool,
-    pub gpu_cc_mode: Option<String>,
+    #[cfg(feature = "confidential")]
+    pub gpu_cc_mode: Option<CC>,
     pub cold_plug: bool,
     pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC)>,
     pub dcgm_enabled: Option<bool>,
@@ -71,6 +74,7 @@ impl Default for NVRC {
             cpu_vendor: None,
             nvidia_devices: Vec::new(),
             gpu_supported: false,
+            #[cfg(feature = "confidential")]
             gpu_cc_mode: None,
             cold_plug: false,
             hot_or_cold_plug: HashMap::from([

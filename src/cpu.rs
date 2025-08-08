@@ -42,78 +42,95 @@ mod vendor {
         }
     }
 }
-pub mod confidential {
 
+//#[cfg(feature = "confidential")]
+pub mod confidential {
+    use super::super::NVRC;
     use crate::cpu::Cpu;
-    use cfg_if::cfg_if;
     use log::debug;
     use std::path::Path;
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum CC {
         On,
         Off,
     }
 
-    cfg_if! {
-        if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
-            use core::arch::x86_64::__cpuid_count;
-        }
+    // ---- per‑architecture helpers (return false on unsupported targets) ----
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    #[inline]
+    fn amd_snp_supported() -> bool {
+        use core::arch::x86_64::__cpuid_count;
+        unsafe { (__cpuid_count(0x8000_001f, 0).eax & (1 << 4)) != 0 }
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "x86")))]
+    #[inline]
+    fn amd_snp_supported() -> bool {
+        false
     }
 
-    pub fn detect(cpu: &Cpu) -> std::io::Result<CC> {
-        let mut cc: bool = false;
-        match cpu {
-            Cpu::Amd => {
-                cfg_if! {
-                    if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
-                        unsafe {
-                            // AMD SEV‑SNP — leaf 0x8000001F, EAX[4]
-                            let regs = __cpuid_count(0x8000_001f, 0);
-                            if regs.eax & (1 << 4) != 0 {
-                                cc = true;
-                            }
-                        }
+    #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+    #[inline]
+    fn intel_tdx_supported() -> bool {
+        use core::arch::x86_64::__cpuid_count;
+        unsafe { __cpuid_count(0x21, 0).eax != 0 }
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "x86")))]
+    #[inline]
+    fn intel_tdx_supported() -> bool {
+        false
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[inline]
+    fn arm_cca_supported() -> bool {
+        const AT_HWCAP2: libc::c_ulong = 26;
+        const HWCAP2_RME: u64 = 1 << 28;
+        unsafe { (libc::getauxval(AT_HWCAP2) & HWCAP2_RME) != 0 }
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    #[inline]
+    fn arm_cca_supported() -> bool {
+        false
+    }
+
+    impl NVRC {
+        pub fn query_cpu_cc_mode(&self) -> std::io::Result<CC> {
+            let Some(vendor) = self.cpu_vendor.as_ref() else {
+                debug!("CPU vendor not detected; CC mode = Off");
+                return Ok(CC::Off);
+            };
+            let enabled = match *vendor {
+                Cpu::Amd => {
+                    let sev_snp = amd_snp_supported();
+                    let devnode = Path::new("/dev/sev-guest").exists();
+                    if sev_snp && devnode {
+                        debug!(
+                            "AMD SEV-SNP detected (cpuid={}, devnode={})",
+                            sev_snp, devnode
+                        );
                     }
+                    sev_snp || devnode
                 }
-                if cc | Path::new("/dev/sev-guest").exists() {
-                    debug!("AMD SEV-SNP");
-                    return Ok(CC::On);
-                }
-            }
-            Cpu::Intel => {
-                cfg_if! {
-                    if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
-                        unsafe {
-                            // Intel TDX — leaf 0x21 sub‑leaf 0, EAX != 0
-                            let regs = __cpuid_count(0x21, 0);
-                            if regs.eax != 0 {
-                                cc = true;
-                            }
-                        }
+                Cpu::Intel => {
+                    let tdx = intel_tdx_supported();
+                    let devnode = Path::new("/dev/tdx-guest").exists();
+                    if tdx && devnode {
+                        debug!("Intel TDX detected (cpuid={}, devnode={})", tdx, devnode);
                     }
+                    tdx || devnode
                 }
-                if cc | Path::new("/dev/tdx-guest").exists() {
-                    debug!("Intel TDX");
-                    return Ok(CC::On);
-                }
-            }
-            Cpu::Arm => {
-                cfg_if! {
-                        if #[cfg(target_arch = "aarch64")] {
-                        // Arm CCA — HWCAP2_RME (bit 28)
-                        const AT_HWCAP2: libc::c_ulong = 26;
-                        let hw2 = unsafe { libc::getauxval(AT_HWCAP2) };
-                        const HWCAP2_RME: u64 = 1 << 28;
-                        if (hw2 & HWCAP2_RME) != 0 { cc = true; }
+                Cpu::Arm => {
+                    let cca = arm_cca_supported();
+                    let devnode = Path::new("/dev/todo-abi-guest").exists();
+                    if cca && devnode {
+                        debug!("Arm CCA detected (hwcap={}, devnode={})", cca, devnode);
                     }
+                    cca || devnode
                 }
-                if cc | Path::new("/dev/todo-abi-guest").exists() {
-                    debug!("Arm CCA");
-                    return Ok(CC::On);
-                }
-            }
+            };
+            Ok(if enabled { CC::On } else { CC::Off })
         }
-        Ok(CC::Off)
     }
 }
 #[cfg(test)]
