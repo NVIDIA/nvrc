@@ -56,9 +56,9 @@ fn main() {
 
     init.query_cpu_vendor().expect("Failed to query CPU vendor");
 
-    let cpu_vendor = init.cpu_vendor.as_ref().expect("CPU vendor not set");
-
-    cpu::confidential::detect(cpu_vendor).expect("Failed to query confidential computing mode");
+    // #[cfg(feature = "confidential")]
+    init.query_cpu_cc_mode()
+        .expect("Failed to query CPU confidential computing mode");
 
     init.get_nvidia_devices(None)
         .expect("Failed to get NVIDIA devices");
@@ -218,6 +218,7 @@ impl NVRC {
         nvidia_ctk_cdi().expect("Failed to generate NVIDIA CDI specification");
 
         // Set GPU to ready state if configured
+        #[cfg(feature = "confidential")]
         self.nvidia_smi_srs()
             .expect("Failed to set GPU to ready state via nvidia-smi");
     }

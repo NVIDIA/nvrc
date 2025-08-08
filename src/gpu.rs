@@ -1,5 +1,5 @@
 #[cfg(feature = "confidential")]
-mod confidential {
+pub mod confidential {
     use super::super::NVRC;
     use crate::pci_ids::DeviceType;
     use anyhow::{Context, Result};
@@ -10,39 +10,44 @@ mod confidential {
 
     const EMBEDDED_PCI_IDS: &str = include_str!("pci_ids_embedded.txt");
 
-    #[derive(Debug, PartialEq, Clone)]
+    #[derive(Debug, PartialEq, Clone, Copy)]
     pub enum GpuArchitecture {
         Hopper,
         Blackwell,
         Unknown,
     }
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum CC {
+        On,
+        Off,
+        Devtools,
+    }
 
     impl GpuArchitecture {
         pub const CC_STATE_MASK: u32 = 0x3;
-        pub const CC_MODE_LOOKUP: &'static [(u32, &'static str)] =
-            &[(0x1, "on"), (0x3, "devtools"), (0x0, "off")];
-
         pub fn cc_register(&self) -> Result<u64> {
             match self {
                 GpuArchitecture::Hopper => Ok(0x001182cc),
                 GpuArchitecture::Blackwell => Ok(0x590),
-                GpuArchitecture::Unknown => Err(anyhow::anyhow!("Cannot determine CC register for unknown GPU architecture. This is required for safe hardware access."))
+                GpuArchitecture::Unknown => Err(anyhow::anyhow!(
+                    "Cannot determine CC register for unknown GPU architecture."
+                )),
             }
         }
 
-        pub fn parse_cc_mode(&self, reg_value: u32) -> Result<String> {
+        pub fn parse_cc_mode(&self, reg_value: u32) -> Result<CC> {
             if matches!(self, GpuArchitecture::Unknown) {
                 return Err(anyhow::anyhow!(
                     "Cannot parse CC mode for unknown GPU architecture."
                 ));
             }
             let cc_state = reg_value & Self::CC_STATE_MASK;
-            let mode = Self::CC_MODE_LOOKUP
-                .iter()
-                .find(|(value, _)| *value == cc_state)
-                .map(|(_, mode)| *mode)
-                .unwrap_or("off");
-            Ok(mode.to_string())
+            let mode = match cc_state {
+                0x1 => CC::On,
+                0x3 => CC::Devtools,
+                _ => CC::Off,
+            };
+            Ok(mode)
         }
     }
 
@@ -113,7 +118,7 @@ mod confidential {
     }
 
     impl NVRC {
-        fn query_cc_mode_bar0(&self, bdf: &str, device_id: u16) -> Result<String> {
+        fn query_cc_mode_bar0(&self, bdf: &str, device_id: u16) -> Result<CC> {
             let resource_path = format!("/sys/bus/pci/devices/{bdf}/resource0");
             debug!("Reading BAR0 resource for BDF {}: {}", bdf, resource_path);
             let architecture = get_gpu_architecture_by_device_id(device_id, bdf)
@@ -159,7 +164,7 @@ mod confidential {
                     )
                 })?;
                 debug!(
-                    "CC mode for BDF {} (via BAR0): {} (0x{:x}) [arch: {:?}]",
+                    "CC mode for BDF {} (via BAR0): {:?} (0x{:x}) [arch: {:?}]",
                     bdf, mode, reg_value, architecture
                 );
                 mode
@@ -171,7 +176,7 @@ mod confidential {
             Ok(result)
         }
         pub fn query_gpu_cc_mode(&mut self) -> Result<()> {
-            let mut mode: Option<String> = None;
+            let mut mode: Option<CC> = None;
             let gpu_devices: Vec<_> = self
                 .nvidia_devices
                 .iter()
@@ -190,7 +195,7 @@ mod confidential {
                 match &mode {
                     Some(m) if m != &current_mode => {
                         return Err(anyhow::anyhow!(
-                            "Inconsistent CC mode detected: {} has mode '{}', expected '{}'",
+                            "Inconsistent CC mode detected: {} has mode '{:?}', expected '{:?}'",
                             bdf,
                             current_mode,
                             m
@@ -211,6 +216,7 @@ mod confidential {
             GpuArchitecture, NVRC,
         };
 
+        use crate::gpu::confidential::CC;
         #[test]
         fn test_gpu_architecture_classification() {
             // Test Hopper classification
@@ -292,35 +298,21 @@ mod confidential {
         }
 
         #[test]
-        fn test_cc_mode_lookup_table() {
-            // Test that the lookup table contains expected values
-            assert_eq!(GpuArchitecture::CC_MODE_LOOKUP.len(), 3);
-
-            // Test each expected mode
-            let lookup_map: std::collections::HashMap<u32, &str> =
-                GpuArchitecture::CC_MODE_LOOKUP.iter().copied().collect();
-
-            assert_eq!(lookup_map.get(&0x0), Some(&"off"));
-            assert_eq!(lookup_map.get(&0x1), Some(&"on"));
-            assert_eq!(lookup_map.get(&0x3), Some(&"devtools"));
-        }
-
-        #[test]
         fn test_cc_mode_parsing() {
             // Test CC mode parsing for different architectures
             let hopper = GpuArchitecture::Hopper;
             let blackwell = GpuArchitecture::Blackwell;
 
             // Test different register values
-            assert_eq!(hopper.parse_cc_mode(0x0).unwrap(), "off");
-            assert_eq!(hopper.parse_cc_mode(0x1).unwrap(), "on");
-            assert_eq!(hopper.parse_cc_mode(0x3).unwrap(), "devtools");
-            assert_eq!(hopper.parse_cc_mode(0x2).unwrap(), "off"); // Unknown state defaults to "off"
+            assert_eq!(hopper.parse_cc_mode(0x0).unwrap(), CC::Off);
+            assert_eq!(hopper.parse_cc_mode(0x1).unwrap(), CC::On);
+            assert_eq!(hopper.parse_cc_mode(0x3).unwrap(), CC::Devtools);
+            assert_eq!(hopper.parse_cc_mode(0x2).unwrap(), CC::Off); // Unknown state defaults to "off"
 
             // Test that Blackwell behaves the same
-            assert_eq!(blackwell.parse_cc_mode(0x0).unwrap(), "off");
-            assert_eq!(blackwell.parse_cc_mode(0x1).unwrap(), "on");
-            assert_eq!(blackwell.parse_cc_mode(0x3).unwrap(), "devtools");
+            assert_eq!(blackwell.parse_cc_mode(0x0).unwrap(), CC::Off);
+            assert_eq!(blackwell.parse_cc_mode(0x1).unwrap(), CC::On);
+            assert_eq!(blackwell.parse_cc_mode(0x3).unwrap(), CC::Devtools);
 
             // Test that Unknown architecture fails
             let unknown = GpuArchitecture::Unknown;
@@ -399,10 +391,6 @@ mod confidential {
             assert!(
                 error_msg.contains("unknown GPU architecture"),
                 "Error should mention unknown architecture"
-            );
-            assert!(
-                error_msg.contains("safe hardware access"),
-                "Error should mention safety concerns"
             );
         }
 
