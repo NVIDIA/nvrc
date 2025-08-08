@@ -81,7 +81,7 @@ mod tests {
             writeln!(file, "0x2330")?;
 
             let mut nvrc = NVRC::default();
-            let nvidia_device = crate::get_devices::NvidiaDevice::new(
+            let nvidia_device = crate::devices::NvidiaDevice::new(
                 "0000:01:00.0".to_string(),
                 "0x2330",
                 "0x10de",
@@ -99,7 +99,7 @@ mod tests {
             writeln!(file, "0x2331")?; // Different device ID
 
             let mut nvrc = NVRC::default();
-            let nvidia_device = crate::get_devices::NvidiaDevice::new(
+            let nvidia_device = crate::devices::NvidiaDevice::new(
                 "0000:01:00.0".to_string(),
                 "0x2330", // This won't match the supported ID
                 "0x10de",
@@ -129,7 +129,7 @@ mod tests {
             writeln!(file, "  ")?; // Whitespace line
 
             let mut nvrc = NVRC::default();
-            let nvidia_device = crate::get_devices::NvidiaDevice::new(
+            let nvidia_device = crate::devices::NvidiaDevice::new(
                 "0000:01:00.0".to_string(),
                 "0x2330",
                 "0x10de",

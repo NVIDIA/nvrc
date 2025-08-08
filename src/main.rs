@@ -7,9 +7,10 @@ use std::time::Duration;
 mod check_supported;
 mod container_toolkit;
 mod coreutils;
-mod cpu_vendor;
+mod cpu;
 mod daemon;
-mod get_devices;
+mod devices;
+mod gpu;
 mod init;
 mod kata_agent;
 mod kmsg;
@@ -18,7 +19,6 @@ mod mount;
 mod ndev;
 mod nvrc;
 mod pci_ids;
-mod query_cc_mode;
 mod syslog;
 mod user_group;
 
@@ -55,6 +55,11 @@ fn main() {
     debug!("init_or_sbin_init: {:?}", init_or_sbin_init);
 
     init.query_cpu_vendor().expect("Failed to query CPU vendor");
+
+    let cpu_vendor = init.cpu_vendor.as_ref().expect("CPU vendor not set");
+
+    cpu::confidential::detect(cpu_vendor).expect("Failed to query confidential computing mode");
+
     init.get_nvidia_devices(None)
         .expect("Failed to get NVIDIA devices");
 
