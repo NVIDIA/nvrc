@@ -2,14 +2,11 @@ use super::daemon::foreground;
 use anyhow::{Context, Result};
 use std::process::Command;
 
-const NVIDIA_SMI_PATH: &str = "/bin/nvidia-smi";
-const NVIDIA_CTK_PATH: &str = "/bin/nvidia-ctk";
-
 #[allow(dead_code)]
 pub fn nvidia_smi() -> Result<()> {
     debug!("nvidia-smi");
 
-    let output = Command::new(NVIDIA_SMI_PATH)
+    let output = Command::new("/bin/nvidia-smi")
         .output()
         .context("Failed to execute nvidia-smi")?;
 
@@ -21,22 +18,20 @@ pub fn nvidia_smi() -> Result<()> {
     Ok(())
 }
 
+fn ctk(args: &[&str]) -> Result<()> {
+    foreground("/bin/nvidia-ctk", args)
+}
+
 pub fn nvidia_ctk_system() -> Result<()> {
-    foreground(
-        NVIDIA_CTK_PATH,
-        &[
-            "-d",
-            "system",
-            "create-device-nodes",
-            "--control-devices",
-            "--load-kernel-modules",
-        ],
-    )
+    ctk(&[
+        "-d",
+        "system",
+        "create-device-nodes",
+        "--control-devices",
+        "--load-kernel-modules",
+    ])
 }
 
 pub fn nvidia_ctk_cdi() -> Result<()> {
-    foreground(
-        NVIDIA_CTK_PATH,
-        &["-d", "cdi", "generate", "--output=/var/run/cdi/nvidia.yaml"],
-    )
+    ctk(&["-d", "cdi", "generate", "--output=/var/run/cdi/nvidia.yaml"])
 }

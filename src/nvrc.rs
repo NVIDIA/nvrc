@@ -3,7 +3,6 @@ use log::debug;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::net::UnixDatagram;
-use std::sync::LazyLock;
 
 use crate::cpu::Cpu;
 use crate::daemon::Name;
@@ -12,40 +11,10 @@ use crate::devices::NvidiaDevice;
 use crate::gpu::confidential::CC;
 use crate::user_group::UserGroup;
 
-/// Trait for parsing boolean-like values from strings
-trait BooleanLike {
-    fn parse_boolean(&self) -> bool;
+fn parse_boolean(s: &str) -> bool {
+    matches!(s.to_ascii_lowercase().as_str(), "on" | "true" | "1" | "yes")
 }
 
-impl BooleanLike for str {
-    fn parse_boolean(&self) -> bool {
-        matches!(
-            self.to_ascii_lowercase().as_str(),
-            "on" | "true" | "1" | "yes"
-        )
-    }
-}
-
-pub const NVRC_LOG: &str = "nvrc.log";
-pub const NVRC_UVM_PERISTENCE_MODE: &str = "nvrc.uvm_persistence_mode";
-pub const NVRC_DCGM: &str = "nvrc.dcgm";
-pub const NVRC_SMI_SRS: &str = "nvrc.smi.srs";
-
-const PROC_CMDLINE: &str = "/proc/cmdline";
-const PROC_PRINTK_DEVKMSG: &str = "/proc/sys/kernel/printk_devkmsg";
-
-pub type ParamHandler = fn(&str, &mut NVRC) -> Result<()>;
-
-// Use const array for better compile-time initialization
-const PARAM_HANDLERS: &[(&str, ParamHandler)] = &[
-    (NVRC_LOG, nvrc_log),
-    (NVRC_UVM_PERISTENCE_MODE, uvm_persistenced_mode),
-    (NVRC_DCGM, nvrc_dcgm),
-    (NVRC_SMI_SRS, nvidia_smi_srs),
-];
-
-static PARAM_HANDLER: LazyLock<HashMap<&'static str, ParamHandler>> =
-    LazyLock::new(|| HashMap::from_iter(PARAM_HANDLERS.iter().copied()));
 #[derive(Debug)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
@@ -91,46 +60,51 @@ impl Default for NVRC {
 
 impl NVRC {
     pub fn setup_syslog(&mut self) -> Result<()> {
-        let socket = crate::syslog::dev_log_setup().context("Failed to setup syslog socket")?;
+        let socket = crate::syslog::dev_log_setup().context("syslog socket")?;
         self.syslog_socket = Some(socket);
         Ok(())
     }
 
     pub fn poll_syslog(&self) -> Result<()> {
         if let Some(socket) = &self.syslog_socket {
-            crate::syslog::poll_dev_log(socket).context("Failed to poll syslog")?;
+            crate::syslog::poll_dev_log(socket).context("poll syslog")?;
         }
         Ok(())
     }
 
     pub fn process_kernel_params(&mut self, cmdline: Option<&str>) -> Result<()> {
         let content = match cmdline {
-            Some(custom) => custom.to_owned(),
-            None => fs::read_to_string(PROC_CMDLINE).context("Failed to read /proc/cmdline")?,
+            Some(c) => c.to_owned(),
+            None => fs::read_to_string("/proc/cmdline").context("read /proc/cmdline")?,
         };
 
-        content
-            .split_whitespace()
-            .filter_map(|param| param.split_once('='))
-            .try_for_each(|(key, value)| {
-                if let Some(handler) = PARAM_HANDLER.get(key) {
-                    handler(value, self)
-                } else {
-                    Ok(())
-                }
-            })
+        for (k, v) in content.split_whitespace().filter_map(|p| p.split_once('=')) {
+            match k {
+                "nvrc.log" => nvrc_log(v, self)?,
+                "nvrc.uvm_persistence_mode" => uvm_persistenced_mode(v, self)?,
+                "nvrc.dcgm" => nvrc_dcgm(v, self)?,
+                "nvrc.smi.srs" => nvidia_smi_srs(v, self)?,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    pub fn set_random_identity(&mut self) -> anyhow::Result<()> {
+        self.identity = crate::user_group::random_user_group()?;
+        Ok(())
     }
 }
 
-pub fn nvrc_dcgm(value: &str, context: &mut NVRC) -> Result<()> {
-    let dcgm = value.parse_boolean();
-    context.dcgm_enabled = Some(dcgm);
-    debug!("nvrc.dcgm: {}", dcgm);
+pub fn nvrc_dcgm(value: &str, ctx: &mut NVRC) -> Result<()> {
+    let dcgm = parse_boolean(value);
+    ctx.dcgm_enabled = Some(dcgm);
+    debug!("nvrc.dcgm: {dcgm}");
     Ok(())
 }
 
-pub fn nvrc_log(value: &str, _context: &mut NVRC) -> Result<()> {
-    let level = match value.to_ascii_lowercase().as_str() {
+pub fn nvrc_log(value: &str, _ctx: &mut NVRC) -> Result<()> {
+    let lvl = match value.to_ascii_lowercase().as_str() {
         "off" | "0" | "" => log::LevelFilter::Off,
         "error" => log::LevelFilter::Error,
         "warn" => log::LevelFilter::Warn,
@@ -140,32 +114,30 @@ pub fn nvrc_log(value: &str, _context: &mut NVRC) -> Result<()> {
         _ => log::LevelFilter::Off,
     };
 
-    log::set_max_level(level);
+    log::set_max_level(lvl);
     debug!("nvrc.log: {}", log::max_level());
 
-    // Do not ratelimit userspace to /dev/kmsg if we have debug enabled
-    fs::write(PROC_PRINTK_DEVKMSG, b"on\n")
-        .context("Failed to write to /proc/sys/kernel/printk_devkmsg")?;
+    fs::write("/proc/sys/kernel/printk_devkmsg", b"on\n").context("printk_devkmsg")?;
 
     Ok(())
 }
 
-pub fn nvidia_smi_srs(value: &str, context: &mut NVRC) -> Result<()> {
-    context.nvidia_smi_srs = Some(value.to_owned());
-    debug!("nvidia_smi_srs: {}", value);
+pub fn nvidia_smi_srs(value: &str, ctx: &mut NVRC) -> Result<()> {
+    ctx.nvidia_smi_srs = Some(value.to_owned());
+    debug!("nvidia_smi_srs: {value}");
     Ok(())
 }
 
 #[allow(dead_code)]
-pub fn nvidia_smi_lgc(value: &str, context: &mut NVRC) -> Result<()> {
-    context.nvidia_smi_lgc = Some(value.to_owned());
-    debug!("nvidia_smi_lgc: {}", value);
+pub fn nvidia_smi_lgc(value: &str, ctx: &mut NVRC) -> Result<()> {
+    ctx.nvidia_smi_lgc = Some(value.to_owned());
+    debug!("nvidia_smi_lgc: {value}");
     Ok(())
 }
 
-pub fn uvm_persistenced_mode(value: &str, context: &mut NVRC) -> Result<()> {
-    context.uvm_persistence_mode = Some(value.to_owned());
-    debug!("nvrc.uvm_persistence_mode: {}", value);
+pub fn uvm_persistenced_mode(value: &str, ctx: &mut NVRC) -> Result<()> {
+    ctx.uvm_persistence_mode = Some(value.to_owned());
+    debug!("nvrc.uvm_persistence_mode: {value}");
     Ok(())
 }
 
@@ -191,8 +163,8 @@ mod tests {
         let output = Command::new("sudo").args(&args).status();
 
         match output {
-            Ok(output) => {
-                if output.success() {
+            Ok(o) => {
+                if o.success() {
                     println!("running with sudo")
                 } else {
                     panic!("not running with sudo")
@@ -212,9 +184,9 @@ mod tests {
         }
 
         log_setup();
-        let mut context = NVRC::default();
+        let mut c = NVRC::default();
 
-        nvrc_log("debug", &mut context).unwrap();
+        nvrc_log("debug", &mut c).unwrap();
         assert!(log_enabled!(log::Level::Debug));
     }
 
@@ -229,7 +201,7 @@ mod tests {
         let mut init = NVRC::default();
 
         init.process_kernel_params(Some(
-            format!("nvidia.smi.lgc=1500 {NVRC_LOG}=debug nvidia.smi.lgc=1500").as_str(),
+            "nvidia.smi.lgc=1500 nvrc.log=debug nvidia.smi.lgc=1500",
         ))
         .unwrap();
 
@@ -248,7 +220,7 @@ mod tests {
         let mut init = NVRC::default();
 
         init.process_kernel_params(Some(
-            format!("nvidia.smi.lgc=1500 {NVRC_LOG}=info nvidia.smi.lgc=1500").as_str(),
+            "nvidia.smi.lgc=1500 nvrc.log=info nvidia.smi.lgc=1500",
         ))
         .unwrap();
 
@@ -266,10 +238,8 @@ mod tests {
         log_setup();
         let mut init = NVRC::default();
 
-        init.process_kernel_params(Some(
-            format!("nvidia.smi.lgc=1500 {NVRC_LOG}=0 nvidia.smi.lgc=1500").as_str(),
-        ))
-        .unwrap();
+        init.process_kernel_params(Some("nvidia.smi.lgc=1500 nvrc.log=0 nvidia.smi.lgc=1500"))
+            .unwrap();
         assert_eq!(log::max_level(), log::LevelFilter::Off);
     }
 
@@ -283,54 +253,54 @@ mod tests {
         log_setup();
         let mut init = NVRC::default();
 
-        init.process_kernel_params(Some(format!("nvidia.smi.lgc=1500 {NVRC_LOG}= ").as_str()))
+        init.process_kernel_params(Some("nvidia.smi.lgc=1500 nvrc.log= "))
             .unwrap();
         assert_eq!(log::max_level(), log::LevelFilter::Off);
     }
 
     #[test]
     fn test_nvrc_dcgm_parameter_handling() {
-        let mut context = NVRC::default();
+        let mut c = NVRC::default();
 
         // Test various "on" values
-        nvrc_dcgm("on", &mut context).unwrap();
-        assert_eq!(context.dcgm_enabled, Some(true));
+        nvrc_dcgm("on", &mut c).unwrap();
+        assert_eq!(c.dcgm_enabled, Some(true));
 
-        nvrc_dcgm("true", &mut context).unwrap();
-        assert_eq!(context.dcgm_enabled, Some(true));
+        nvrc_dcgm("true", &mut c).unwrap();
+        assert_eq!(c.dcgm_enabled, Some(true));
 
-        nvrc_dcgm("1", &mut context).unwrap();
-        assert_eq!(context.dcgm_enabled, Some(true));
+        nvrc_dcgm("1", &mut c).unwrap();
+        assert_eq!(c.dcgm_enabled, Some(true));
 
-        nvrc_dcgm("yes", &mut context).unwrap();
-        assert_eq!(context.dcgm_enabled, Some(true));
+        nvrc_dcgm("yes", &mut c).unwrap();
+        assert_eq!(c.dcgm_enabled, Some(true));
 
         // Test "off" values
-        nvrc_dcgm("off", &mut context).unwrap();
-        assert_eq!(context.dcgm_enabled, Some(false));
+        nvrc_dcgm("off", &mut c).unwrap();
+        assert_eq!(c.dcgm_enabled, Some(false));
 
-        nvrc_dcgm("false", &mut context).unwrap();
-        assert_eq!(context.dcgm_enabled, Some(false));
+        nvrc_dcgm("false", &mut c).unwrap();
+        assert_eq!(c.dcgm_enabled, Some(false));
 
-        nvrc_dcgm("invalid", &mut context).unwrap();
-        assert_eq!(context.dcgm_enabled, Some(false));
+        nvrc_dcgm("invalid", &mut c).unwrap();
+        assert_eq!(c.dcgm_enabled, Some(false));
     }
 
     #[test]
-    fn test_boolean_like_trait() {
-        assert!("on".parse_boolean());
-        assert!("true".parse_boolean());
-        assert!("1".parse_boolean());
-        assert!("yes".parse_boolean());
-        assert!("ON".parse_boolean()); // Test case insensitive
-        assert!("True".parse_boolean());
-        assert!("YES".parse_boolean());
+    fn test_parse_boolean() {
+        assert!(parse_boolean("on"));
+        assert!(parse_boolean("true"));
+        assert!(parse_boolean("1"));
+        assert!(parse_boolean("yes"));
+        assert!(parse_boolean("ON"));
+        assert!(parse_boolean("True"));
+        assert!(parse_boolean("YES"));
 
-        assert!(!"off".parse_boolean());
-        assert!(!"false".parse_boolean());
-        assert!(!"0".parse_boolean());
-        assert!(!"no".parse_boolean());
-        assert!(!"invalid".parse_boolean());
-        assert!(!"".parse_boolean());
+        assert!(!parse_boolean("off"));
+        assert!(!parse_boolean("false"));
+        assert!(!parse_boolean("0"));
+        assert!(!parse_boolean("no"));
+        assert!(!parse_boolean("invalid"));
+        assert!(!parse_boolean(""));
     }
 }
