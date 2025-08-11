@@ -4,8 +4,6 @@ use std::sync::mpsc;
 use std::thread::sleep;
 use std::time::Duration;
 
-mod check_supported;
-mod container_toolkit;
 mod coreutils;
 mod cpu;
 mod daemon;
@@ -19,7 +17,9 @@ mod mount;
 mod ndev;
 mod nvrc;
 mod pci_ids;
+mod supported;
 mod syslog;
+mod toolkit;
 mod user_group;
 
 #[macro_use]
@@ -39,10 +39,10 @@ macro_rules! must {
     };
 }
 
-use container_toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
 use daemon::Action;
 use kata_agent::kata_agent;
 use nvrc::NVRC;
+use toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
 
 fn main() {
     lockdown::set_panic_hook();
