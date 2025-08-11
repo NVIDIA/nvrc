@@ -5,82 +5,69 @@ use std::sync::mpsc;
 use std::thread::{self, sleep, JoinHandle};
 use std::time::Duration;
 
-const KERNEL_BUFFER_SIZE: &[u8] = b"16777216";
-const KMSG_PATH: &str = "/dev/kmsg";
-const NULL_PATH: &str = "/dev/null";
+// Keep only poll interval constant (readability)
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
-const RMEM_DEFAULT_PATH: &str = "/proc/sys/net/core/rmem_default";
-const WMEM_DEFAULT_PATH: &str = "/proc/sys/net/core/wmem_default";
-const RMEM_MAX_PATH: &str = "/proc/sys/net/core/rmem_max";
-const WMEM_MAX_PATH: &str = "/proc/sys/net/core/wmem_max";
 
 pub fn kernlog_setup() -> Result<()> {
-    kernlog::init().context("Failed to initialize kernel log")?;
+    kernlog::init().context("kernel log init")?;
     log::set_max_level(log::LevelFilter::Off);
-
-    fs::write(RMEM_DEFAULT_PATH, KERNEL_BUFFER_SIZE)
-        .with_context(|| format!("Failed to write to {}", RMEM_DEFAULT_PATH))?;
-    fs::write(WMEM_DEFAULT_PATH, KERNEL_BUFFER_SIZE)
-        .with_context(|| format!("Failed to write to {}", WMEM_DEFAULT_PATH))?;
-    fs::write(RMEM_MAX_PATH, KERNEL_BUFFER_SIZE)
-        .with_context(|| format!("Failed to write to {}", RMEM_MAX_PATH))?;
-    fs::write(WMEM_MAX_PATH, KERNEL_BUFFER_SIZE)
-        .with_context(|| format!("Failed to write to {}", WMEM_MAX_PATH))?;
-
+    // Write large buffer size to related kernel params
+    for path in [
+        "/proc/sys/net/core/rmem_default",
+        "/proc/sys/net/core/wmem_default",
+        "/proc/sys/net/core/rmem_max",
+        "/proc/sys/net/core/wmem_max",
+    ] {
+        fs::write(path, b"16777216").with_context(|| format!("write {}", path))?;
+    }
     Ok(())
 }
 
 pub fn kmsg() -> Result<File> {
-    let log_path = if log_enabled!(log::Level::Debug) {
-        KMSG_PATH
+    let path = if log_enabled!(log::Level::Debug) {
+        "/dev/kmsg"
     } else {
-        NULL_PATH
+        "/dev/null"
     };
     OpenOptions::new()
         .write(true)
-        .open(log_path)
-        .with_context(|| format!("Failed to open {}", log_path))
+        .open(path)
+        .with_context(|| format!("open {}", path))
 }
 
 pub fn watch_for_pattern(pattern: &'static str, tx: mpsc::Sender<&'static str>) -> JoinHandle<()> {
     thread::spawn(move || {
-        let file = match File::open(KMSG_PATH) {
+        let file = match File::open("/dev/kmsg") {
             Ok(f) => f,
             Err(e) => {
-                log::error!("Could not open {}: {}", KMSG_PATH, e);
+                log::error!("open /dev/kmsg: {}", e);
                 return;
             }
         };
-
         let mut reader = BufReader::new(file);
         let mut line = String::new();
-        let mut last_seq: u64 = 0;
-
+        let mut last_seq = 0u64;
         loop {
             line.clear();
             match reader.read_line(&mut line) {
-                Ok(bytes_read) => {
-                    if bytes_read == 0 {
-                        sleep(POLL_INTERVAL);
-                        continue;
-                    }
-
+                Ok(0) => {
+                    sleep(POLL_INTERVAL);
+                    continue;
+                }
+                Ok(_) => {
                     if let Some(seq) = parse_kmsg_sequence(&line) {
                         if seq <= last_seq {
                             continue;
                         }
                         last_seq = seq;
                     }
-
-                    if line.contains(pattern) {
-                        if let Err(e) = tx.send("hot-unplug") {
-                            log::error!("Failed to send pattern notification: {}", e);
-                            break;
-                        }
+                    if line.contains(pattern) && tx.send("hot-unplug").is_err() {
+                        log::error!("send pattern notification failed");
+                        break;
                     }
                 }
                 Err(e) => {
-                    log::error!("Error reading from {}: {}", KMSG_PATH, e);
+                    log::error!("read /dev/kmsg: {}", e);
                     sleep(POLL_INTERVAL);
                 }
             }

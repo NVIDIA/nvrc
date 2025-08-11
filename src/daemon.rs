@@ -13,14 +13,6 @@ use crate::nvrc::NVRC;
 #[cfg(feature = "confidential")]
 use crate::gpu::confidential::CC;
 
-const NVIDIA_PERSISTENCED_DIR: &str = "/var/run/nvidia-persistenced";
-const NVIDIA_PERSISTENCED_CMD: &str = "/bin/nvidia-persistenced";
-const NV_HOSTENGINE_CMD: &str = "/bin/nv-hostengine";
-const DCGM_EXPORTER_CMD: &str = "/bin/dcgm-exporter";
-
-#[cfg(feature = "confidential")]
-const NVIDIA_SMI_CMD: &str = "/bin/nvidia-smi";
-
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub enum Action {
     Start,
@@ -114,7 +106,6 @@ impl NVRC {
         if let Some(mut child) = self.daemons.remove(daemon) {
             child.kill().context("Failed to kill daemon process")?;
             child.wait().context("Failed to wait for daemon process")?;
-
             let comm_name = daemon.to_string();
             debug!("killing all processes named '{}'", comm_name);
             kill_processes_by_comm(&comm_name);
@@ -131,98 +122,94 @@ impl NVRC {
         Ok(())
     }
 
+    // New generic helper to run a daemon according to Action
+    fn run_daemon(&mut self, name: Name, cmd: &str, args: &[&str], mode: Action) -> Result<()> {
+        match mode {
+            Action::Start => self.start(&name, cmd, args)?,
+            Action::Stop => self.stop(&name)?,
+            Action::Restart => self.restart(cmd, args, &name)?,
+        }
+        Ok(())
+    }
+
     pub fn nvidia_persistenced(&mut self, mode: Action) -> Result<()> {
-        let uvm_persistence_mode = match self.uvm_persistence_mode.as_deref() {
-            Some("on") => "--uvm-persistence-mode",
-            Some("off") => "",
-            None => "--uvm-persistence-mode",
+        let uvm_flag = match self.uvm_persistence_mode.as_deref() {
+            Some("off") => None,
+            Some("on") | None => Some("--uvm-persistence-mode"),
             Some(other) => {
                 warn!(
                     "Unknown UVM persistence mode '{}', defaulting to 'on'",
                     other
                 );
-                "--uvm-persistence-mode"
+                Some("--uvm-persistence-mode")
             }
         };
 
-        let uid = self.identity.user_id;
-        let gid = self.identity.group_id;
-
-        if !Path::new(NVIDIA_PERSISTENCED_DIR).exists() {
-            mkdir(NVIDIA_PERSISTENCED_DIR, Mode::S_IRWXU).with_context(|| {
-                format!("Failed to create directory {}", NVIDIA_PERSISTENCED_DIR)
-            })?;
+        const DIR: &str = "/var/run/nvidia-persistenced"; // scoped constant for readability
+        if !Path::new(DIR).exists() {
+            mkdir(DIR, Mode::S_IRWXU).with_context(|| format!("Failed to create dir {}", DIR))?;
         }
+        chown(
+            DIR,
+            Some(self.identity.user_id),
+            Some(self.identity.group_id),
+        )
+        .with_context(|| format!("Failed to chown {}", DIR))?;
 
-        chown(NVIDIA_PERSISTENCED_DIR, Some(uid), Some(gid))
-            .with_context(|| format!("Failed to chown {}", NVIDIA_PERSISTENCED_DIR))?;
-
-        let mut args = vec!["--verbose"];
-        if !uvm_persistence_mode.is_empty() {
-            args.push(uvm_persistence_mode);
+        let mut args: Vec<&str> = vec!["--verbose"];
+        if let Some(f) = uvm_flag {
+            args.push(f);
         }
 
         #[cfg(feature = "confidential")]
-        warn!("TODO: Running in GPU Confidential Computing mode, not setting user/group for nvidia-persistenced");
+        warn!("GPU CC mode build: not setting user/group for nvidia-persistenced");
 
         #[cfg(not(feature = "confidential"))]
-        let user_name = self.identity.user_name.clone();
-        #[cfg(not(feature = "confidential"))]
-        let group_name = self.identity.group_name.clone();
-        #[cfg(not(feature = "confidential"))]
-        args.extend_from_slice(&["-u", &user_name, "-g", &group_name]);
-
-        match mode {
-            Action::Start => self.start(&Name::Persistenced, NVIDIA_PERSISTENCED_CMD, &args)?,
-            Action::Stop => self.stop(&Name::Persistenced)?,
-            Action::Restart => self.restart(NVIDIA_PERSISTENCED_CMD, &args, &Name::Persistenced)?,
+        {
+            let user = self.identity.user_name.clone();
+            let group = self.identity.group_name.clone();
+            let owned = [user, group];
+            args.extend_from_slice(&["-u", owned[0].as_str(), "-g", owned[1].as_str()]);
+            self.run_daemon(Name::Persistenced, "/bin/nvidia-persistenced", &args, mode)
         }
-
-        Ok(())
+        #[cfg(feature = "confidential")]
+        {
+            self.run_daemon(Name::Persistenced, "/bin/nvidia-persistenced", &args, mode)
+        }
     }
 
     pub fn nv_hostengine(&mut self, mode: Action) -> Result<()> {
         if !self.dcgm_enabled.unwrap_or(false) {
             return Ok(());
         }
-
-        let args = ["--service-account", "nvidia-dcgm", "--home-dir", "/tmp"];
-
-        match mode {
-            Action::Start => self.start(&Name::NVHostengine, NV_HOSTENGINE_CMD, &args)?,
-            Action::Stop => self.stop(&Name::NVHostengine)?,
-            Action::Restart => self.restart(NV_HOSTENGINE_CMD, &args, &Name::NVHostengine)?,
-        }
-        Ok(())
+        self.run_daemon(
+            Name::NVHostengine,
+            "/bin/nv-hostengine",
+            &["--service-account", "nvidia-dcgm", "--home-dir", "/tmp"],
+            mode,
+        )
     }
 
     pub fn dcgm_exporter(&mut self, mode: Action) -> Result<()> {
         if !self.dcgm_enabled.unwrap_or(false) {
             return Ok(());
         }
-
-        let args = ["-k"];
-
-        match mode {
-            Action::Start => self.start(&Name::DCGMExporter, DCGM_EXPORTER_CMD, &args)?,
-            Action::Stop => self.stop(&Name::DCGMExporter)?,
-            Action::Restart => self.restart(DCGM_EXPORTER_CMD, &args, &Name::DCGMExporter)?,
-        }
-        Ok(())
+        self.run_daemon(Name::DCGMExporter, "/bin/dcgm-exporter", &["-k"], mode)
     }
 
     #[cfg(feature = "confidential")]
     pub fn nvidia_smi_srs(&self) -> Result<()> {
         if self.gpu_cc_mode != Some(CC::On) {
-            debug!("CC mode is off, skipping nvidia-smi conf-compute -srs");
+            debug!("CC mode off; skip nvidia-smi conf-compute -srs");
             return Ok(());
         }
-
-        let args = [
-            "conf-compute",
-            "-srs",
-            self.nvidia_smi_srs.as_deref().unwrap_or("0"),
-        ];
-        foreground(NVIDIA_SMI_CMD, &args)
+        foreground(
+            "/bin/nvidia-smi",
+            &[
+                "conf-compute",
+                "-srs",
+                self.nvidia_smi_srs.as_deref().unwrap_or("0"),
+            ],
+        )
     }
 }
