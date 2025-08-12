@@ -27,7 +27,7 @@ pub struct NVRC {
     #[cfg(feature = "confidential")]
     pub gpu_cc_mode: Option<CC>,
     pub cold_plug: bool,
-    pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC)>,
+    pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC) -> Result<()>>,
     pub dcgm_enabled: Option<bool>,
     pub identity: UserGroup,
     pub daemons: HashMap<Name, std::process::Child>,
@@ -47,8 +47,8 @@ impl Default for NVRC {
             gpu_cc_mode: None,
             cold_plug: false,
             hot_or_cold_plug: HashMap::from([
-                (true, NVRC::cold_plug as fn(&mut NVRC)),
-                (false, NVRC::hot_plug as fn(&mut NVRC)),
+                (true, NVRC::cold_plug as fn(&mut NVRC) -> Result<()>),
+                (false, NVRC::hot_plug as fn(&mut NVRC) -> Result<()>),
             ]),
             dcgm_enabled: None,
             identity: UserGroup::new(),
