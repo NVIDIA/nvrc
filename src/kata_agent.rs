@@ -6,9 +6,6 @@ use sc::syscall;
 // From <sys/resource.h>
 const RLIMIT_NOFILE: i32 = 7;
 
-// From <fcntl.h>
-const AT_FDCWD: i32 = -100;
-
 #[repr(C)]
 #[derive(Debug, Default)]
 struct Rlimit {
