@@ -1,53 +1,67 @@
-use crate::coreutils::{ln, mknod, S_IFCHR};
-use anyhow::{Context, Result};
-use nix::mount::{self, MsFlags};
-use std::fs;
-use std::path::Path;
+use crate::coreutils::{ln, mknod, str_to_cstring, CoreUtilsError, Result, S_IFCHR};
+use sc::syscall;
 
-// Simplified helper: perform mount only if target not already mounted
-fn mount(
-    source: &str,
-    target: &str,
-    fstype: &str,
-    flags: MsFlags,
-    data: Option<&str>,
-) -> Result<()> {
-    if !is_mounted(target) {
-        mount::mount(Some(source), target, Some(fstype), flags, data)
-            .with_context(|| format!("Failed to mount {source} on {target}"))?;
+// Mount flags from <sys/mount.h>
+const MS_RDONLY: usize = 1;
+const MS_NOSUID: usize = 2;
+const MS_NODEV: usize = 4;
+const MS_NOEXEC: usize = 8;
+const MS_REMOUNT: usize = 32;
+const MS_RELATIME: usize = 1 << 21;
+
+/// Performs a mount operation using a syscall.
+fn mount(source: &str, target: &str, fstype: &str, flags: usize, data: Option<&str>) -> Result<()> {
+    let mut source_buf = [0u8; 256];
+    let mut target_buf = [0u8; 256];
+    let mut fstype_buf = [0u8; 256];
+    let mut data_buf = [0u8; 256];
+
+    let source_ptr = str_to_cstring(source, &mut source_buf)?;
+    let target_ptr = str_to_cstring(target, &mut target_buf)?;
+    let fstype_ptr = str_to_cstring(fstype, &mut fstype_buf)?;
+    let data_ptr = match data {
+        Some(d) => str_to_cstring(d, &mut data_buf)?,
+        None => core::ptr::null(),
+    };
+
+    let result = unsafe {
+        syscall!(
+            MOUNT,
+            source_ptr as usize,
+            target_ptr as usize,
+            fstype_ptr as usize,
+            flags,
+            data_ptr as usize
+        )
+    } as isize;
+
+    if result < 0 {
+        Err(CoreUtilsError::Syscall(result))
+    } else {
+        Ok(())
     }
-    Ok(())
-}
-
-fn is_mounted(path: &str) -> bool {
-    fs::read_to_string("/proc/mounts")
-        .map(|mounts| mounts.lines().any(|line| line.contains(path)))
-        .unwrap_or(false)
-}
-
-fn fs_available(fs: &str) -> bool {
-    fs::read_to_string("/proc/filesystems")
-        .map(|filesystems| filesystems.lines().any(|line| line.contains(fs)))
-        .unwrap_or(false)
 }
 
 pub fn readonly(target: &str) -> Result<()> {
-    let flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY | MsFlags::MS_REMOUNT;
-    mount::mount(None::<&str>, target, None::<&str>, flags, None::<&str>)
-        .with_context(|| format!("Failed to remount {target} readonly"))
-}
+    let flags = MS_NOSUID | MS_NODEV | MS_RDONLY | MS_REMOUNT;
+    let mut target_buf = [0u8; 256];
+    let target_ptr = str_to_cstring(target, &mut target_buf)?;
+    let result = unsafe {
+        syscall!(
+            MOUNT,
+            0, // NULL source for remount
+            target_ptr as usize,
+            0, // NULL fstype for remount
+            flags,
+            0 // NULL data for remount
+        )
+    } as isize;
 
-fn mount_if(
-    fstype: &str,
-    source: &str,
-    target: &str,
-    flags: MsFlags,
-    data: Option<&str>,
-) -> Result<()> {
-    if fs_available(fstype) && Path::new(target).exists() && !is_mounted(target) {
-        mount(source, target, fstype, flags, data)?;
+    if result < 0 {
+        Err(CoreUtilsError::Syscall(result))
+    } else {
+        Ok(())
     }
-    Ok(())
 }
 
 fn proc_symlinks() -> Result<()> {
@@ -58,7 +72,7 @@ fn proc_symlinks() -> Result<()> {
         ("/proc/self/fd/1", "/dev/stdout"),
         ("/proc/self/fd/2", "/dev/stderr"),
     ] {
-        ln(src, dst).unwrap();
+        ln(src, dst)?;
     }
     Ok(())
 }
@@ -71,34 +85,37 @@ fn device_nodes() -> Result<()> {
         ("/dev/random", 8u64),
         ("/dev/urandom", 9u64),
     ] {
-        mknod(path, S_IFCHR, 1, minor).unwrap(); // major 1 for memory devices
+        mknod(path, S_IFCHR, 1, minor)?; // major 1 for memory devices
     }
     Ok(())
 }
 
 pub fn setup() -> Result<()> {
-    let common = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
+    let common = MS_NOSUID | MS_NOEXEC | MS_NODEV | MS_RELATIME;
     mount("proc", "/proc", "proc", common, None)?;
-    let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME; // allow device nodes
+    let dev_flags = MS_NOSUID | MS_NOEXEC | MS_RELATIME; // allow device nodes
     mount("dev", "/dev", "devtmpfs", dev_flags, Some("mode=0755"))?;
     mount("sysfs", "/sys", "sysfs", common, None)?;
     mount("run", "/run", "tmpfs", common, Some("mode=0755"))?;
-    let tmp_flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
+    let tmp_flags = MS_NOSUID | MS_NODEV | MS_RELATIME;
     mount("tmpfs", "/tmp", "tmpfs", tmp_flags, None)?;
-    mount_if(
-        "securityfs",
+    // The mount_if calls are converted to unconditional mounts.
+    // The kernel will fail them if the fs type is not available.
+    // We ignore errors here as these filesystems might not be present.
+    let _ = mount(
         "securityfs",
         "/sys/kernel/security",
+        "securityfs",
         common,
         None,
-    )?;
-    mount_if(
-        "efivarfs",
+    );
+    let _ = mount(
         "efivarfs",
         "/sys/firmware/efi/efivars",
+        "efivarfs",
         common,
         None,
-    )?;
+    );
     proc_symlinks()?;
     device_nodes()?;
     Ok(())
@@ -179,19 +196,5 @@ mod tests {
         mknod(device, S_IFCHR, 1, 3).expect("Failed to create device node");
         assert!(Path::new(device).exists());
         cleanup_path(device);
-    }
-
-    #[test]
-    fn test_is_mounted() {
-        assert!(is_mounted("/"));
-        assert!(!is_mounted("/nonexistent"));
-        assert!(is_mounted("/dev"));
-    }
-
-    #[test]
-    fn test_fs_available() {
-        assert!(fs_available("proc"));
-        assert!(fs_available("sysfs"));
-        assert!(!fs_available("nonexistent_fs"));
     }
 }
