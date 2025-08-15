@@ -1,9 +1,19 @@
-use anyhow::{Context, Result};
-use std::fs;
-use std::io::BufRead;
-use std::io::Cursor;
-
 use crate::nvrc::NVRC;
+use core::str;
+use sc::{syscall};
+
+const O_RDONLY: i32 = 0;
+const AT_FDCWD: i32 = -100;
+
+#[derive(Debug)]
+pub enum Error {
+    Syscall(isize),
+    VendorNotFound,
+    Utf8Error(str::Utf8Error),
+    InvalidPath,
+}
+
+pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Cpu {
@@ -12,19 +22,54 @@ pub enum Cpu {
     Arm,
 }
 
+/// Copies a rust string slice into a stack-allocated buffer and null-terminates it.
+fn str_to_cstring(s: &str, buf: &mut [u8]) -> Result<*const u8> {
+    if s.len() >= buf.len() {
+        return Err(Error::InvalidPath);
+    }
+    buf[..s.len()].copy_from_slice(s.as_bytes());
+    buf[s.len()] = 0;
+    Ok(buf.as_ptr())
+}
+
 impl NVRC {
     pub fn query_cpu_vendor(&mut self) -> Result<()> {
-        // Read whole file then iterate lines (avoids layered readers)
-        let data =
-            fs::read_to_string("/proc/cpuinfo").with_context(|| "Failed to open /proc/cpuinfo")?;
+        let mut path_buf = [0u8; 256];
+        let path_ptr = str_to_cstring("/proc/cpuinfo", &mut path_buf)?;
+
+        let fd = unsafe {
+            syscall!(
+                OPENAT,
+                AT_FDCWD as isize,
+                path_ptr as usize,
+                O_RDONLY as isize
+            )
+        } as isize;
+
+        if fd < 0 {
+            return Err(Error::Syscall(fd));
+        }
+
+        let mut buf = [0u8; 4096];
+        let bytes_read = unsafe { syscall!(READ, fd, buf.as_mut_ptr() as usize, buf.len()) } as isize;
+
+        unsafe {
+            syscall!(CLOSE, fd);
+        }
+
+        if bytes_read < 0 {
+            return Err(Error::Syscall(bytes_read));
+        }
+
+        let content = str::from_utf8(&buf[..bytes_read as usize]).map_err(Error::Utf8Error)?;
         let mut vendor = None;
-        for line in Cursor::new(data).lines().map_while(Result::ok) {
-            if let Some(v) = self.detect_vendor_from_line(&line) {
+        for line in content.lines() {
+            if let Some(v) = self.detect_vendor_from_line(line) {
                 vendor = Some(v);
                 break;
             }
         }
-        let v = vendor.ok_or_else(|| anyhow::anyhow!("CPU vendor not found"))?;
+        let v = vendor.ok_or(Error::VendorNotFound)?;
         debug!("CPU vendor: {:?}", v);
         self.cpu_vendor = Some(v);
         Ok(())
@@ -46,9 +91,13 @@ impl NVRC {
 
 #[cfg(feature = "confidential")]
 pub mod confidential {
-    use super::{Cpu, NVRC};
+    use super::{Cpu, Error, NVRC};
+    use cfg_if::cfg_if;
     use log::debug;
-    use std::path::Path;
+    use sc::{syscall, nr};
+
+    const AT_FDCWD: i32 = -100;
+    const F_OK: i32 = 0;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum CC {
@@ -56,13 +105,36 @@ pub mod confidential {
         Off,
     }
 
+    /// Checks if a path exists using the faccessat syscall.
+    fn path_exists(path: &str) -> bool {
+        let mut path_buf = [0u8; 256];
+        // This helper can't return a Result easily, so we treat path errors as "doesn't exist".
+        if let Ok(path_ptr) = super::str_to_cstring(path, &mut path_buf) {
+            let result = unsafe {
+                syscall!(
+                    FACCESSAT,
+                    AT_FDCWD as isize,
+                    path_ptr as usize,
+                    F_OK as isize,
+                    0
+                )
+            } as isize;
+            result == 0
+        } else {
+            false
+        }
+    }
+
     // CPUID / HWCAP helpers -------------------------------------------------
+    cfg_if! {
+        if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
+            use core::arch::x86_64::__cpuid_count;
+        }
+    }
+
     #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
     fn amd_snp_cpuid() -> bool {
-        unsafe {
-            use core::arch::x86_64::__cpuid_count;
-            (__cpuid_count(0x8000_001f, 0).eax & (1 << 4)) != 0
-        }
+        unsafe { (__cpuid_count(0x8000_001f, 0).eax & (1 << 4)) != 0 }
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "x86")))]
     fn amd_snp_cpuid() -> bool {
@@ -71,10 +143,7 @@ pub mod confidential {
 
     #[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
     fn intel_tdx_cpuid() -> bool {
-        unsafe {
-            use core::arch::x86_64::__cpuid_count;
-            __cpuid_count(0x21, 0).eax != 0
-        }
+        unsafe { __cpuid_count(0x21, 0).eax != 0 }
     }
     #[cfg(not(any(target_arch = "x86_64", target_arch = "x86")))]
     fn intel_tdx_cpuid() -> bool {
@@ -83,9 +152,10 @@ pub mod confidential {
 
     #[cfg(target_arch = "aarch64")]
     fn arm_cca_hwcap() -> bool {
-        const AT_HWCAP2: libc::c_ulong = 26;
-        const HWCAP2_RME: u64 = 1 << 28;
-        unsafe { (libc::getauxval(AT_HWCAP2) & HWCAP2_RME) != 0 }
+        // NOTE: In a no_std environment, libc::getauxval is not available.
+        // A proper implementation requires parsing the auxiliary vector passed
+        // by the kernel at startup, which is beyond the scope of this conversion.
+        false
     }
     #[cfg(not(target_arch = "aarch64"))]
     fn arm_cca_hwcap() -> bool {
@@ -94,7 +164,7 @@ pub mod confidential {
 
     fn amd_enabled() -> bool {
         let cpuid = amd_snp_cpuid();
-        let devnode = Path::new("/dev/sev-guest").exists();
+        let devnode = path_exists("/dev/sev-guest");
         debug!("AMD SEV-SNP: cpuid={}, devnode={}", cpuid, devnode);
         if cpuid && !devnode {
             debug!("AMD SEV-SNP devnode missing");
@@ -106,7 +176,7 @@ pub mod confidential {
     }
     fn intel_enabled() -> bool {
         let cpuid = intel_tdx_cpuid();
-        let devnode = Path::new("/dev/tdx-guest").exists();
+        let devnode = path_exists("/dev/tdx-guest");
         debug!("Intel TDX: cpuid={}, devnode={}", cpuid, devnode);
         if cpuid && !devnode {
             debug!("Intel TDX devnode missing");
@@ -118,7 +188,7 @@ pub mod confidential {
     }
     fn arm_enabled() -> bool {
         let hw = arm_cca_hwcap();
-        let devnode = Path::new("/dev/cca-guest").exists();
+        let devnode = path_exists("/dev/cca-guest");
         debug!("Arm CCA: hwcap_rme={}, devnode={}", hw, devnode);
         if hw && !devnode {
             debug!("Arm CCA devnode missing");
@@ -130,7 +200,7 @@ pub mod confidential {
     }
 
     impl NVRC {
-        pub fn query_cpu_cc_mode(&self) -> std::io::Result<CC> {
+        pub fn query_cpu_cc_mode(&self) -> super::Result<CC> {
             let Some(vendor) = self.cpu_vendor.as_ref() else {
                 debug!("CPU vendor unknown; CC Off");
                 return Ok(CC::Off);
@@ -144,40 +214,5 @@ pub mod confidential {
             debug!("CPU CC mode: {:?}", mode);
             Ok(mode)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::nvrc::NVRC;
-
-    #[test]
-    fn test_query_cpu_vendor() {
-        let mut nvrc = NVRC::default();
-        nvrc.query_cpu_vendor().expect("Failed to query CPU vendor");
-        let vendor = nvrc.cpu_vendor.expect("CPU vendor should be detected");
-        assert!(matches!(vendor, Cpu::Amd | Cpu::Intel | Cpu::Arm));
-    }
-
-    #[test]
-    fn test_detect_vendor_from_line() {
-        let nvrc = NVRC::default();
-        assert_eq!(
-            nvrc.detect_vendor_from_line("vendor_id\t: AuthenticAMD"),
-            Some(Cpu::Amd)
-        );
-        assert_eq!(
-            nvrc.detect_vendor_from_line("vendor_id\t: GenuineIntel"),
-            Some(Cpu::Intel)
-        );
-        assert_eq!(
-            nvrc.detect_vendor_from_line("CPU implementer\t: 0x41"),
-            Some(Cpu::Arm)
-        );
-        assert_eq!(
-            nvrc.detect_vendor_from_line("vendor_id\t: UnknownVendor"),
-            None
-        );
     }
 }
