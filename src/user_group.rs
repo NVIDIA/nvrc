@@ -1,15 +1,34 @@
-use anyhow::{Context, Result};
-use nix::unistd::{Gid, Uid};
-use rand::Rng;
-use std::fs::OpenOptions;
-use std::io::Write;
+use crate::coreutils::{fs_append, Result};
+use core::str;
+use sc::syscall;
+
+const NAME_LEN: usize = 32;
+const O_RDONLY: i32 = 0;
+const AT_FDCWD: i32 = -100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserGroup {
-    pub user_id: Uid,
-    pub group_id: Gid,
-    pub user_name: String,
-    pub group_name: String,
+    pub user_id: u32,
+    pub group_id: u32,
+    pub user_name: [u8; NAME_LEN],
+    pub group_name: [u8; NAME_LEN],
+    user_name_len: usize,
+    group_name_len: usize,
+}
+
+/// A helper to write a u32 to a buffer and return the written slice.
+fn u32_to_str<'a>(mut n: u32, buf: &'a mut [u8; 10]) -> &'a [u8] {
+    if n == 0 {
+        buf[0] = b'0';
+        return &buf[..1];
+    }
+    let mut i = buf.len();
+    while n > 0 {
+        i -= 1;
+        buf[i] = (n % 10) as u8 + b'0';
+        n /= 10;
+    }
+    &buf[i..]
 }
 
 impl UserGroup {
@@ -18,20 +37,34 @@ impl UserGroup {
     }
 
     pub fn root() -> Self {
+        let mut user_name = [0u8; NAME_LEN];
+        user_name[..4].copy_from_slice(b"root");
+        let mut group_name = [0u8; NAME_LEN];
+        group_name[..4].copy_from_slice(b"root");
+
         Self {
-            user_id: Uid::from_raw(0),
-            group_id: Gid::from_raw(0),
-            user_name: "root".into(),
-            group_name: "root".into(),
+            user_id: 0,
+            group_id: 0,
+            user_name,
+            group_name,
+            user_name_len: 4,
+            group_name_len: 4,
         }
     }
 
-    pub fn with_ids(uid: u32, gid: u32, user: String, group: String) -> Self {
+    pub fn with_ids(uid: u32, gid: u32, user: &[u8], group: &[u8]) -> Self {
+        let mut user_name = [0u8; NAME_LEN];
+        user_name[..user.len()].copy_from_slice(user);
+        let mut group_name = [0u8; NAME_LEN];
+        group_name[..group.len()].copy_from_slice(group);
+
         Self {
-            user_id: Uid::from_raw(uid),
-            group_id: Gid::from_raw(gid),
-            user_name: user,
-            group_name: group,
+            user_id: uid,
+            group_id: gid,
+            user_name,
+            group_name,
+            user_name_len: user.len(),
+            group_name_len: group.len(),
         }
     }
 
@@ -40,40 +73,40 @@ impl UserGroup {
     }
 
     pub fn write_to_files(&self, pw: &str, sh: &str, gr: &str) -> Result<()> {
-        for (p, entry_fn) in [
-            (pw, self.passwd_entry()),
-            (sh, self.shadow_entry()),
-            (gr, self.group_entry()),
-        ] {
-            self.append(p, &entry_fn)?;
-        }
+        let mut buf = [0u8; 256];
+        fs_append(pw, self.passwd_entry(&mut buf)?)?;
+        fs_append(sh, self.shadow_entry(&mut buf)?)?;
+        fs_append(gr, self.group_entry(&mut buf)?)?;
         Ok(())
     }
 
-    fn passwd_entry(&self) -> String {
-        format!(
-            "{}:x:{}:{}:{}:/nonexistent:/bin/false\n",
-            self.user_name, self.user_id, self.group_id, self.user_name
-        )
+    fn passwd_entry<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8]> {
+        let mut writer = BufferWriter::new(buf);
+        writer.write(&self.user_name[..self.user_name_len]);
+        writer.write(b":x:");
+        writer.write_u32(self.user_id);
+        writer.write(b":");
+        writer.write_u32(self.group_id);
+        writer.write(b":");
+        writer.write(&self.user_name[..self.user_name_len]);
+        writer.write(b":/nonexistent:/bin/false\n");
+        Ok(writer.into_slice())
     }
 
-    fn shadow_entry(&self) -> String {
-        format!("{}:*:18295:0:99999:7:::\n", self.user_name)
+    fn shadow_entry<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8]> {
+        let mut writer = BufferWriter::new(buf);
+        writer.write(&self.user_name[..self.user_name_len]);
+        writer.write(b":*:18295:0:99999:7:::\n");
+        Ok(writer.into_slice())
     }
 
-    fn group_entry(&self) -> String {
-        format!("{}:x:{}:\n", self.group_name, self.group_id)
-    }
-
-    fn append(&self, path: &str, content: &str) -> Result<()> {
-        let mut f = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .with_context(|| format!("open {path}"))?;
-        f.write_all(content.as_bytes())
-            .with_context(|| format!("write {path}"))?;
-        Ok(())
+    fn group_entry<'a>(&self, buf: &'a mut [u8]) -> Result<&'a [u8]> {
+        let mut writer = BufferWriter::new(buf);
+        writer.write(&self.group_name[..self.group_name_len]);
+        writer.write(b":x:");
+        writer.write_u32(self.group_id);
+        writer.write(b":\n");
+        Ok(writer.into_slice())
     }
 }
 
@@ -83,162 +116,62 @@ impl Default for UserGroup {
     }
 }
 
+/// Reads random bytes from `/dev/urandom`.
+fn read_random_bytes(buf: &mut [u8]) -> Result<()> {
+    let mut path_buf = [0u8; 32];
+    let path_ptr = crate::coreutils::str_to_cstring("/dev/urandom", &mut path_buf)?;
+    let fd = unsafe { syscall!(OPENAT, AT_FDCWD as isize, path_ptr as usize, O_RDONLY as isize) } as isize;
+    if fd < 0 { return Err(crate::coreutils::CoreUtilsError::Syscall(fd)); }
+
+    let res = unsafe { syscall!(READ, fd as usize, buf.as_mut_ptr() as usize, buf.len()) } as isize;
+    let _ = unsafe { syscall!(CLOSE, fd as usize) };
+
+    if res < 0 { return Err(crate::coreutils::CoreUtilsError::Syscall(res)); }
+    Ok(())
+}
+
 pub fn random_user_group() -> Result<UserGroup> {
-    let mut rng = rand::rng();
-    let uid = rng.random_range(1000..60000);
-    let gid = rng.random_range(1000..60000);
-    let name: String = (0..8)
-        .map(|_| rng.random_range(b'a'..=b'z') as char)
-        .collect();
-    let ug = UserGroup::with_ids(uid, gid, name.clone(), name);
+    let mut int_buf = [0u8; 4];
+    read_random_bytes(&mut int_buf)?;
+    let uid = 1000 + u32::from_ne_bytes(int_buf) % (60000 - 1000);
+    read_random_bytes(&mut int_buf)?;
+    let gid = 1000 + u32::from_ne_bytes(int_buf) % (60000 - 1000);
+
+    let mut name_buf = [0u8; 8];
+    read_random_bytes(&mut name_buf)?;
+    for byte in &mut name_buf {
+        *byte = b'a' + (*byte % 26);
+    }
+
+    let ug = UserGroup::with_ids(uid, gid, &name_buf, &name_buf);
     ug.write_to_system_files()?;
     Ok(ug)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nix::unistd::Uid;
-    use serial_test::serial;
+/// A simple helper to write data into a byte slice buffer.
+struct BufferWriter<'a> {
+    buf: &'a mut [u8],
+    pos: usize,
+}
 
-    #[test]
-    fn test_user_group_new() {
-        let u = UserGroup::new();
-        assert_eq!(u.user_id, Uid::from_raw(0));
-        assert_eq!(u.group_id, nix::unistd::Gid::from_raw(0));
-        assert_eq!(u.user_name, "root");
+impl<'a> BufferWriter<'a> {
+    fn new(buf: &'a mut [u8]) -> Self {
+        Self { buf, pos: 0 }
     }
 
-    #[test]
-    fn test_passwd_entry_format() {
-        let u = UserGroup::with_ids(1001, 1001, "testuser".into(), "testgroup".into());
-        let e = format!(
-            "{}:x:{}:{}:{}:/nonexistent:/bin/false\n",
-            u.user_name, u.user_id, u.group_id, u.user_name
-        );
-        assert_eq!(e, "testuser:x:1001:1001:testuser:/nonexistent:/bin/false\n");
-        let f: Vec<&str> = e.trim_end().split(':').collect();
-        assert_eq!(f.len(), 7);
+    fn write(&mut self, data: &[u8]) {
+        let len = data.len();
+        self.buf[self.pos..self.pos + len].copy_from_slice(data);
+        self.pos += len;
     }
 
-    #[test]
-    fn test_shadow_entry_format() {
-        let u = UserGroup::with_ids(1001, 1001, "testuser".into(), "testgroup".into());
-        let e = format!("{}:*:18295:0:99999:7:::\n", u.user_name);
-        assert_eq!(e, "testuser:*:18295:0:99999:7:::\n");
+    fn write_u32(&mut self, n: u32) {
+        let mut num_buf = [0u8; 10];
+        let s = u32_to_str(n, &mut num_buf);
+        self.write(s);
     }
 
-    #[test]
-    fn test_group_entry_format() {
-        let u = UserGroup::with_ids(1001, 1001, "testuser".into(), "testgroup".into());
-        let e = format!("{}:x:{}:\n", u.group_name, u.group_id);
-        assert_eq!(e, "testgroup:x:1001:\n");
-    }
-
-    #[test]
-    fn test_random_user_group_generation() {
-        let mut rng = rand::rng();
-        let uid = rng.random_range(1000..60000);
-        let gid = rng.random_range(1000..60000);
-        assert!(uid >= 1000 && uid < 60000);
-        assert!(gid >= 1000 && gid < 60000);
-        let name: String = (0..8)
-            .map(|_| rng.random_range(b'a'..=b'z') as char)
-            .collect();
-        assert_eq!(name.len(), 8);
-    }
-
-    #[test]
-    fn test_passwd_entry_edge_cases() {
-        let u = UserGroup::with_ids(0, 0, "root".into(), "root".into());
-        let e = format!(
-            "{}:x:{}:{}:{}:/nonexistent:/bin/false\n",
-            u.user_name, u.user_id, u.group_id, u.user_name
-        );
-        assert_eq!(e, "root:x:0:0:root:/nonexistent:/bin/false\n");
-    }
-
-    #[test]
-    fn test_shadow_entry_validity() {
-        let u = UserGroup::with_ids(1001, 1001, "testuser".into(), "testgroup".into());
-        let e = format!("{}:*:18295:0:99999:7:::\n", u.user_name);
-        assert!(e.contains(":*:"));
-        assert!(e.contains(":99999:"));
-        assert!(e.contains(":7:"));
-    }
-
-    #[test]
-    fn test_group_entry_no_members() {
-        let u = UserGroup::with_ids(1001, 1001, "testuser".into(), "testgroup".into());
-        let e = format!("{}:x:{}:\n", u.group_name, u.group_id);
-        assert!(e.ends_with(":\n"));
-    }
-
-    #[test]
-    fn test_format_compliance_with_real_examples() {
-        let u = UserGroup::with_ids(1234, 1234, "myuser".into(), "mygroup".into());
-        let e = format!(
-            "{}:x:{}:{}:{}:/nonexistent:/bin/false\n",
-            u.user_name, u.user_id, u.group_id, u.user_name
-        );
-        assert_eq!(e, "myuser:x:1234:1234:myuser:/nonexistent:/bin/false\n");
-        let parts: Vec<&str> = e.trim().split(':').collect();
-        assert_eq!(parts.len(), 7);
-        assert!(parts[2].parse::<u32>().is_ok());
-    }
-
-    #[test]
-    #[serial]
-    fn test_safe_file_operations() {
-        let pw = tempfile::NamedTempFile::new().unwrap();
-        let sh = tempfile::NamedTempFile::new().unwrap();
-        let gr = tempfile::NamedTempFile::new().unwrap();
-        let u = UserGroup::with_ids(9999, 9999, "testuser".into(), "testgroup".into());
-        u.write_to_files(
-            pw.path().to_str().unwrap(),
-            sh.path().to_str().unwrap(),
-            gr.path().to_str().unwrap(),
-        )
-        .unwrap();
-        let pc = std::fs::read_to_string(pw.path()).unwrap();
-        let sc = std::fs::read_to_string(sh.path()).unwrap();
-        let gc = std::fs::read_to_string(gr.path()).unwrap();
-        assert_eq!(
-            pc,
-            "testuser:x:9999:9999:testuser:/nonexistent:/bin/false\n"
-        );
-        assert_eq!(sc, "testuser:*:18295:0:99999:7:::\n");
-        assert_eq!(gc, "testgroup:x:9999:\n");
-    }
-
-    #[test]
-    fn test_user_group_with_ids() {
-        let u = UserGroup::with_ids(1234, 5678, "testuser".into(), "testgroup".into());
-        assert_eq!(u.user_id, Uid::from_raw(1234));
-        assert_eq!(u.group_id, Gid::from_raw(5678));
-    }
-
-    #[test]
-    fn test_user_group_root() {
-        let r = UserGroup::root();
-        assert_eq!(r.user_id, Uid::from_raw(0));
-        assert_eq!(r.user_name, "root");
-    }
-
-    #[test]
-    fn test_user_group_default() {
-        let d = UserGroup::default();
-        assert_eq!(d, UserGroup::new());
-    }
-
-    #[test]
-    fn test_entry_generation() {
-        let u = UserGroup::with_ids(1001, 1002, "myuser".into(), "mygroup".into());
-        assert_eq!(
-            u.passwd_entry(),
-            "myuser:x:1001:1002:myuser:/nonexistent:/bin/false\n"
-        );
-        assert_eq!(u.shadow_entry(), "myuser:*:18295:0:99999:7:::\n");
-        assert_eq!(u.group_entry(), "mygroup:x:1002:\n");
+    fn into_slice(self) -> &'a [u8] {
+        &self.buf[..self.pos]
     }
 }

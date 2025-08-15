@@ -7,6 +7,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use sysinfo::System;
 
+use crate::coreutils::cstr_as_str;
 use crate::kmsg::kmsg;
 use crate::nvrc::NVRC;
 
@@ -151,8 +152,8 @@ impl NVRC {
         }
         chown(
             DIR,
-            Some(self.identity.user_id),
-            Some(self.identity.group_id),
+            Some(self.identity.user_id.into()),
+            Some(self.identity.group_id.into()),
         )
         .with_context(|| format!("Failed to chown {}", DIR))?;
 
@@ -166,10 +167,15 @@ impl NVRC {
 
         #[cfg(not(feature = "confidential"))]
         {
-            let user = self.identity.user_name.clone();
-            let group = self.identity.group_name.clone();
+            let user = cstr_as_str(&self.identity.user_name)
+                .map_err(|e| anyhow!("Failed to convert user name: {:?}", e))?
+                .to_string();
+            let group = cstr_as_str(&self.identity.group_name)
+                .map_err(|e| anyhow!("Failed to convert group name: {:?}", e))?
+                .to_string();
+
             let owned = [user, group];
-            args.extend_from_slice(&["-u", owned[0].as_str(), "-g", owned[1].as_str()]);
+            args.extend_from_slice(&["-u", &owned[0], "-g", &owned[1]]);
             self.run_daemon(Name::Persistenced, "/bin/nvidia-persistenced", &args, mode)
         }
         #[cfg(feature = "confidential")]
@@ -213,3 +219,4 @@ impl NVRC {
         )
     }
 }
+

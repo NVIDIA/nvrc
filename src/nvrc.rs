@@ -91,7 +91,7 @@ impl NVRC {
     }
 
     pub fn set_random_identity(&mut self) -> anyhow::Result<()> {
-        self.identity = crate::user_group::random_user_group()?;
+        self.identity = crate::user_group::random_user_group().unwrap();
         Ok(())
     }
 }
