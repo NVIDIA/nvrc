@@ -1,4 +1,4 @@
-use sc::syscall;
+use sc::{syscall, nr};
 /// Custom error type for no_std environment
 #[derive(Debug)]
 pub enum CoreUtilsError {
@@ -14,6 +14,11 @@ const AT_FDCWD: i32 = -100;
 
 // File type constants
 pub const S_IFCHR: u32 = 0o020000;
+
+// From <fcntl.h>
+const O_WRONLY: i32 = 1;
+const O_CREAT: i32 = 64;
+const O_TRUNC: i32 = 512;
 
 /// Copies a rust string slice into a stack-allocated buffer and null-terminates it.
 pub fn str_to_cstring(s: &str, buf: &mut [u8]) -> Result<*const u8> {
@@ -31,6 +36,56 @@ fn makedev(major: u64, minor: u64) -> u64 {
         | ((major & 0xfff) << 8)
         | ((minor & 0xffffff00) << 12)
         | (minor & 0xff)
+}
+
+/// Writes a byte slice to a file. Creates the file if it doesn't exist,
+/// and truncates it if it does.
+pub fn fs_write(path: &str, data: &[u8]) -> Result<()> {
+    let mut path_buf = [0u8; 256];
+    let path_ptr = str_to_cstring(path, &mut path_buf)?;
+
+    let flags = O_WRONLY | O_CREAT | O_TRUNC;
+    let mode = 0o666;
+
+    let fd = unsafe {
+        syscall!(
+            OPENAT,
+            AT_FDCWD as isize,
+            path_ptr as usize,
+            flags as isize,
+            mode as isize
+        )
+    } as isize;
+
+    if fd < 0 {
+        return Err(CoreUtilsError::Syscall(fd));
+    }
+
+    let mut written = 0;
+    while written < data.len() {
+        let res = unsafe {
+            syscall!(
+                WRITE,
+                fd as usize,
+                data.as_ptr().add(written) as usize,
+                data.len() - written
+            )
+        } as isize;
+
+        if res < 0 {
+            // Ensure we attempt to close the file descriptor on write error.
+            let _ = unsafe { syscall!(CLOSE, fd as usize) };
+            return Err(CoreUtilsError::Syscall(res));
+        }
+        written += res as usize;
+    }
+
+    let res = unsafe { syscall!(CLOSE, fd as usize) } as isize;
+    if res < 0 {
+        return Err(CoreUtilsError::Syscall(res));
+    }
+
+    Ok(())
 }
 
 /// Create (or update) a symbolic link from target to linkpath.
