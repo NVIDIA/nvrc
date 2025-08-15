@@ -1,4 +1,4 @@
-use crate::coreutils::{fs_append, Result};
+use crate::coreutils::{fs_append, BufferWriter, Result};
 use core::str;
 use sc::syscall;
 
@@ -14,21 +14,6 @@ pub struct UserGroup {
     pub group_name: [u8; NAME_LEN],
     user_name_len: usize,
     group_name_len: usize,
-}
-
-/// A helper to write a u32 to a buffer and return the written slice.
-fn u32_to_str<'a>(mut n: u32, buf: &'a mut [u8; 10]) -> &'a [u8] {
-    if n == 0 {
-        buf[0] = b'0';
-        return &buf[..1];
-    }
-    let mut i = buf.len();
-    while n > 0 {
-        i -= 1;
-        buf[i] = (n % 10) as u8 + b'0';
-        n /= 10;
-    }
-    &buf[i..]
 }
 
 impl UserGroup {
@@ -148,30 +133,3 @@ pub fn random_user_group() -> Result<UserGroup> {
     Ok(ug)
 }
 
-/// A simple helper to write data into a byte slice buffer.
-struct BufferWriter<'a> {
-    buf: &'a mut [u8],
-    pos: usize,
-}
-
-impl<'a> BufferWriter<'a> {
-    fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, pos: 0 }
-    }
-
-    fn write(&mut self, data: &[u8]) {
-        let len = data.len();
-        self.buf[self.pos..self.pos + len].copy_from_slice(data);
-        self.pos += len;
-    }
-
-    fn write_u32(&mut self, n: u32) {
-        let mut num_buf = [0u8; 10];
-        let s = u32_to_str(n, &mut num_buf);
-        self.write(s);
-    }
-
-    fn into_slice(self) -> &'a [u8] {
-        &self.buf[..self.pos]
-    }
-}

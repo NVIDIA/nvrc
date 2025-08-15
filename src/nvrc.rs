@@ -7,6 +7,7 @@ use std::os::unix::net::UnixDatagram;
 use crate::cpu::Cpu;
 use crate::daemon::Name;
 use crate::devices::NvidiaDevice;
+use crate::coreutils;
 #[cfg(feature = "confidential")]
 use crate::gpu::confidential::CC;
 use crate::user_group::UserGroup;
@@ -30,7 +31,7 @@ pub struct NVRC {
     pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC) -> Result<()>>,
     pub dcgm_enabled: Option<bool>,
     pub identity: UserGroup,
-    pub daemons: HashMap<Name, std::process::Child>,
+    pub daemons: HashMap<Name, coreutils::Child>,
     pub syslog_socket: Option<UnixDatagram>,
 }
 

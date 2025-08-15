@@ -1,18 +1,19 @@
 use anyhow::{anyhow, Context, Result};
 use nix::sys::stat::Mode;
 use nix::unistd::{chown, mkdir};
-use std::ffi::OsStr;
 use std::fmt;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use sysinfo::System;
 
-use crate::coreutils::cstr_as_str;
-use crate::kmsg::kmsg;
+
+use crate::coreutils::{cstr_as_str, background};
 use crate::nvrc::NVRC;
 
 #[cfg(feature = "confidential")]
 use crate::gpu::confidential::CC;
+#[cfg(feature = "confidential")]
+use crate::coreutils::foreground;
+
+use crate::coreutils::kill_processes_by_comm;
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub enum Action {
@@ -42,62 +43,10 @@ impl fmt::Display for Name {
     }
 }
 
-pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
-    debug!("{} {}", command, args.join(" "));
-
-    let kmsg_file = kmsg().context("Failed to open kmsg device")?;
-    let output = Command::new(command)
-        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg_file))
-        .args(args)
-        .output()
-        .context(format!("failed to execute {command}"))?;
-
-    if !output.status.success() {
-        return Err(anyhow!("{} failed with status: {}", command, output.status,));
-    }
-    Ok(())
-}
-
-fn background(command: &str, args: &[&str]) -> Result<std::process::Child> {
-    let kmsg_file = kmsg().context("Failed to open kmsg device")?;
-    let mut child = Command::new(command)
-        .args(args)
-        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg_file))
-        .spawn()
-        .with_context(|| format!("Failed to start {}", command))?;
-
-    match child.try_wait() {
-        Ok(Some(status)) => Err(anyhow!("{} exited with status: {}", command, status)),
-        Ok(None) => Ok(child),
-        Err(e) => Err(anyhow!("Error attempting to wait: {}", e)),
-    }
-}
-
-fn kill_processes_by_comm(target_name: &str) {
-    let mut system = System::new_all();
-    // Refresh process info so `system.processes_by_name()` is up‐to‐date
-    system.refresh_all();
-    let processes = system.processes_by_name(OsStr::new(target_name));
-
-    for process in processes {
-        debug!(
-            "found PID {} matching name: '{}'",
-            process.pid(),
-            target_name
-        );
-        if !process.kill() {
-            debug!("failed to send SIGTERM to PID {}", process.pid());
-        }
-        process.wait();
-    }
-}
-
 impl NVRC {
     fn start(&mut self, daemon: &Name, command: &str, args: &[&str]) -> Result<()> {
         debug!("start {} {}", command, args.join(" "));
-        let child = background(command, args)?;
+        let child = background(command, args).unwrap();
         self.daemons.insert(daemon.clone(), child);
         Ok(())
     }
@@ -105,11 +54,11 @@ impl NVRC {
     fn stop(&mut self, daemon: &Name) -> Result<()> {
         debug!("stop {}", daemon);
         if let Some(mut child) = self.daemons.remove(daemon) {
-            child.kill().context("Failed to kill daemon process")?;
-            child.wait().context("Failed to wait for daemon process")?;
+            child.kill().unwrap();
+            child.wait().unwrap();
             let comm_name = daemon.to_string();
             debug!("killing all processes named '{}'", comm_name);
-            kill_processes_by_comm(&comm_name);
+            kill_processes_by_comm(&comm_name).unwrap();
         } else {
             debug!("daemon not running: {:?}", daemon);
         }
@@ -209,7 +158,7 @@ impl NVRC {
             debug!("CC mode off; skip nvidia-smi conf-compute -srs");
             return Ok(());
         }
-        foreground(
+        let status = foreground(
             "/bin/nvidia-smi",
             &[
                 "conf-compute",
@@ -217,6 +166,13 @@ impl NVRC {
                 self.nvidia_smi_srs.as_deref().unwrap_or("0"),
             ],
         )
+        .map_err(|e| anyhow!("failed to run nvidia-smi: {:?}", e))?;
+
+        if status != 0 {
+            return Err(anyhow!("nvidia-smi failed with exit code: {}", status));
+        }
+
+        Ok(())
     }
 }
 

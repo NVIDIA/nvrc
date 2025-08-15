@@ -1,25 +1,13 @@
-use super::daemon::foreground;
-use anyhow::{Context, Result};
-use std::process::Command;
 
-#[allow(dead_code)]
-pub fn nvidia_smi() -> Result<()> {
-    debug!("nvidia-smi");
-
-    let output = Command::new("/bin/nvidia-smi")
-        .output()
-        .context("Failed to execute nvidia-smi")?;
-
-    println!(
-        "nvidia-smi output:\n{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(())
-}
+use crate::coreutils::{foreground, Result};
 
 fn ctk(args: &[&str]) -> Result<()> {
-    foreground("/bin/nvidia-ctk", args)
+    let status = foreground("/bin/nvidia-ctk", args)?;
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(crate::coreutils::CoreUtilsError::Syscall(status as isize))
+    }
 }
 
 pub fn nvidia_ctk_system() -> Result<()> {
