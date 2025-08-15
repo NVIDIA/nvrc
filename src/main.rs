@@ -24,12 +24,12 @@ extern crate kernlog;
 macro_rules! must {
     ($expr:expr) => {
         if let Err(e) = $expr {
-            panic!("init failure: {} => {e}", stringify!($expr));
+            panic!("init failure: {} => {:?}", stringify!($expr), e);
         }
     };
     ($expr:expr, $msg:literal) => {
         if let Err(e) = $expr {
-            panic!("init failure: {}: {e}", $msg);
+            panic!("init failure: {}: {:?}", $msg, e);
         }
     };
 }

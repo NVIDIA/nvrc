@@ -1,7 +1,6 @@
-use crate::coreutils::{ln, mknod};
+use crate::coreutils::{ln, mknod, S_IFCHR};
 use anyhow::{Context, Result};
 use nix::mount::{self, MsFlags};
-use nix::sys::stat;
 use std::fs;
 use std::path::Path;
 
@@ -59,7 +58,7 @@ fn proc_symlinks() -> Result<()> {
         ("/proc/self/fd/1", "/dev/stdout"),
         ("/proc/self/fd/2", "/dev/stderr"),
     ] {
-        ln(src, dst)?;
+        ln(src, dst).unwrap();
     }
     Ok(())
 }
@@ -72,7 +71,7 @@ fn device_nodes() -> Result<()> {
         ("/dev/random", 8u64),
         ("/dev/urandom", 9u64),
     ] {
-        mknod(path, stat::SFlag::S_IFCHR, 1, minor)?; // major 1 for memory devices
+        mknod(path, S_IFCHR, 1, minor).unwrap(); // major 1 for memory devices
     }
     Ok(())
 }
@@ -177,7 +176,7 @@ mod tests {
         if Path::new(device).exists() {
             cleanup_path(device);
         }
-        mknod(device, stat::SFlag::S_IFCHR, 1, 3).expect("Failed to create device node");
+        mknod(device, S_IFCHR, 1, 3).expect("Failed to create device node");
         assert!(Path::new(device).exists());
         cleanup_path(device);
     }
