@@ -17,7 +17,7 @@ impl NVRC {
         self.setup_gpu();
         match unsafe { fork() }.expect("fork cold-plug") {
             ForkResult::Parent { .. } => {
-                kata_agent().context("kata-agent cold-plug parent")?;
+                kata_agent().unwrap();
             }
             ForkResult::Child => loop {
                 sleep(Duration::from_secs(1));
@@ -45,7 +45,7 @@ impl NVRC {
         debug!("hot-plug mode");
         match unsafe { fork() }.expect("fork hot-plug") {
             ForkResult::Parent { .. } => {
-                kata_agent().context("kata-agent hot-plug parent")?;
+                kata_agent().unwrap();
             }
             ForkResult::Child => {
                 self.handle_hot_plug_events().context("hot-plug events")?;

@@ -4,7 +4,6 @@ mod cpu;
 mod daemon;
 mod devices;
 mod gpu;
-mod init;
 mod kata_agent;
 mod kmsg;
 mod lockdown;
@@ -24,12 +23,12 @@ extern crate kernlog;
 macro_rules! must {
     ($expr:expr) => {
         if let Err(e) = $expr {
-            panic!("init failure: {} => {e}", stringify!($expr));
+            panic!("init failure: {} => {:?}", stringify!($expr), e);
         }
     };
     ($expr:expr, $msg:literal) => {
         if let Err(e) = $expr {
-            panic!("init failure: {}: {e}", $msg);
+            panic!("init failure: {}: {:?}", $msg, e);
         }
     };
 }
@@ -48,7 +47,6 @@ fn main() {
     must!(init.set_random_identity());
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
-    debug!("init_or_sbin_init: {:?}", init::Invocation::from_argv0());
     must!(init.query_cpu_vendor());
     #[cfg(feature = "confidential")]
     must!(init.query_cpu_cc_mode());
