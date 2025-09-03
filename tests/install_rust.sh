@@ -20,7 +20,7 @@ RUSTARCH=$(arch_to_rust)
 VERSION="${1:-"1.85.1"}"
 
 echo "Install rust ${VERSION}"
-
+echo "THIS IS A TEST!!!!"
 if ! command -v rustup > /dev/null; then
 	curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain "${VERSION}"
 fi
