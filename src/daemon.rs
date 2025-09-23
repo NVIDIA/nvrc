@@ -25,6 +25,7 @@ pub enum Name {
     Persistenced,
     NVHostengine,
     DCGMExporter,
+    NVFabricmanager,
 }
 
 impl fmt::Display for Name {
@@ -33,6 +34,7 @@ impl fmt::Display for Name {
             Name::Persistenced => "nvidia-persistenced",
             Name::NVHostengine => "nv-hostengine",
             Name::DCGMExporter => "dcgm-exporter",
+            Name::NVFabricmanager => "nv-fabricmanager",
         };
         // Truncate to 15 characters if longer; since /proc/<pid>/comm is
         // limited to 16 - 15 characters plus \0
@@ -215,6 +217,21 @@ impl NVRC {
                 "-srs",
                 self.nvidia_smi_srs.as_deref().unwrap_or("0"),
             ],
+        )
+    }
+
+    pub fn nv_fabricmanager(&mut self, mode: Action) -> Result<()> {
+        if !self.fabricmanager_enabled.unwrap_or(false) {
+            return Ok(());
+        }
+        self.run_daemon(
+            Name::NVFabricmanager,
+            "/bin/nv-fabricmanager",
+            &[
+                "-c",
+                "/usr/share/nvidia/nvswitch/fabricmanager.cfg",
+            ],
+            mode,
         )
     }
 }
