@@ -35,6 +35,7 @@ impl NVRC {
             NVRC::nvidia_persistenced,
             NVRC::nv_hostengine,
             NVRC::dcgm_exporter,
+            NVRC::fabricmanager,
         ] {
             f(self, action.clone())?;
         }
