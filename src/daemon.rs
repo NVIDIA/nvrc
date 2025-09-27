@@ -194,7 +194,12 @@ impl NVRC {
         if !self.dcgm_enabled.unwrap_or(false) {
             return Ok(());
         }
-        self.run_daemon(Name::DCGMExporter, "/bin/dcgm-exporter", &["-k"], mode)
+        self.run_daemon(
+            Name::DCGMExporter,
+            "/bin/dcgm-exporter",
+            &["-k", "-f", "/etc/dcgm-exporter/default-counters.csv"],
+            mode,
+        )
     }
 
     #[cfg(feature = "confidential")]
