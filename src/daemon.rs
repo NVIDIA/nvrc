@@ -224,6 +224,11 @@ impl NVRC {
         if !self.fabricmanager_enabled.unwrap_or(false) {
             return Ok(());
         }
-        self.run_daemon(Name::Fabricmanager, "/bin/nv-fabricmanager", &["-c", "/etc/nvidia/nvswitch/fabricmanager.cfg"], mode)
+        self.run_daemon(
+            Name::Fabricmanager,
+            "/bin/nv-fabricmanager",
+            &["-c", "/etc/nvidia/nvswitch/fabricmanager.cfg"],
+            mode,
+        )
     }
 }
