@@ -34,6 +34,5 @@ rustup target add "${RUSTARCH}-unknown-linux-musl"
 
 rustup component add rustfmt
 rustup component add clippy
-# miri is currenlty in nightly 1.82, stable is 1.80 so will be available soon
-rustup component add miri || true
+rustup component add miri
 

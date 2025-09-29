@@ -38,7 +38,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@5c6e5e6e7e7e2e6e2e6e2e6e2e6e2e6e2e6e2e6e # stable as of 2024-06-01
+        uses: dtolnay/rust-toolchain@1.85.1
         with:
           targets: ${{ matrix.target }}
 
