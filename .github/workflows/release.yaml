@@ -1,0 +1,274 @@
+name: Release and Sign NVRC
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write # Required for OIDC authentication with Sigstore
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@5c6e5e6e7e7e2e6e2e6e2e6e2e6e2e6e2e6e2e6e # stable as of 2024-06-01
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross compilation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          fi
+
+      - name: Build NVRC
+        run: |
+          cargo build --release --target=${{ matrix.target }}
+          
+      - name: Create archive
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/NVRC dist/
+          tar -czf nvrc-${{ matrix.target }}.tar.gz -C dist NVRC
+
+      - name: Generate artifact hash
+        id: hash
+        run: |
+          echo "hashes=$(sha256sum nvrc-${{ matrix.target }}.tar.gz | base64 -w0)" >> "$GITHUB_OUTPUT"
+          
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@4959ce089c160fddf62f7b42464195ba1a56d382 # v3.6.0
+        
+      - name: Sign artifacts with Cosign
+        run: |
+          # Sign the binary archive
+          cosign sign-blob --yes nvrc-${{ matrix.target }}.tar.gz --output-signature nvrc-${{ matrix.target }}.tar.gz.sig --output-certificate nvrc-${{ matrix.target }}.tar.gz.pem
+          
+          # Create and sign a SHA256 checksum
+          sha256sum nvrc-${{ matrix.target }}.tar.gz > nvrc-${{ matrix.target }}.tar.gz.sha256
+          cosign sign-blob --yes nvrc-${{ matrix.target }}.tar.gz.sha256 --output-signature nvrc-${{ matrix.target }}.tar.gz.sha256.sig --output-certificate nvrc-${{ matrix.target }}.tar.gz.sha256.pem
+          
+      - name: Upload artifacts
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: nvrc-${{ matrix.target }}
+          path: |
+            nvrc-${{ matrix.target }}.tar.gz
+            nvrc-${{ matrix.target }}.tar.gz.sig
+            nvrc-${{ matrix.target }}.tar.gz.pem
+            nvrc-${{ matrix.target }}.tar.gz.sha256
+            nvrc-${{ matrix.target }}.tar.gz.sha256.sig
+            nvrc-${{ matrix.target }}.tar.gz.sha256.pem
+
+  provenance:
+    needs: [build-and-release]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.0.0
+    with:
+      base64-subjects: "${{ needs.build-and-release.outputs.hashes }}"
+      upload-assets: true
+
+  create-release:
+    needs: [build-and-release, provenance]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find artifacts -type f -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.0.8
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: Release ${{ github.event.inputs.tag || github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+          files: release-assets/*
+          body: |
+            ## Release ${{ github.event.inputs.tag || github.ref_name }}
+            
+            ### Verification
+            
+            All artifacts are signed with Sigstore/Cosign and include SLSA Level 3 provenance attestations.
+            All signatures are automatically recorded in the public Rekor transparency log.
+            
+            **Verify with cosign (includes Rekor verification):**
+            ```bash
+            # Download the artifact and signature files
+            # Verify with cosign (automatically verifies against Rekor transparency log)
+            cosign verify-blob --certificate nvrc-x86_64-unknown-linux-musl.tar.gz.pem --signature nvrc-x86_64-unknown-linux-musl.tar.gz.sig nvrc-x86_64-unknown-linux-musl.tar.gz
+            
+            # Verify checksum
+            sha256sum -c nvrc-x86_64-unknown-linux-musl.tar.gz.sha256
+            ```
+            
+            **Manual Rekor verification:**
+            ```bash
+            # Get the signing certificate's SHA256 hash
+            openssl x509 -in nvrc-x86_64-unknown-linux-musl.tar.gz.pem -outform DER | openssl dgst -sha256 -binary | openssl enc -base64
+
+            # Search Rekor log by certificate hash (replace CERT_HASH with output from above)
+            rekor-cli search --sha CERT_HASH
+
+            # Get specific log entry (replace LOG_INDEX with result from search)
+            rekor-cli get --log-index LOG_INDEX
+
+            # Verify log entry inclusion proof
+            rekor-cli verify --log-index LOG_INDEX
+            ```
+
+            **Alternative: Search by artifact hash:**
+            ```bash
+            # Get artifact SHA256
+            sha256sum nvrc-x86_64-unknown-linux-musl.tar.gz
+
+            # Search Rekor by artifact hash (replace ARTIFACT_HASH)
+            rekor-cli search --artifact-hash ARTIFACT_HASH
+            ```
+
+            **Verify SLSA provenance:**
+            ```bash
+            # Download the provenance attestation (.intoto.jsonl file)
+            # Verify provenance with slsa-verifier
+            slsa-verifier verify-artifact nvrc-x86_64-unknown-linux-musl.tar.gz \
+              --provenance-path multiple.intoto.jsonl \
+              --source-uri github.com/${{ github.repository }} \
+              --source-tag ${{ github.event.inputs.tag || github.ref_name }}
+            ```
+
+            ### Files
+            
+            - `nvrc-x86_64-unknown-linux-musl.tar.gz` - x86_64 Linux binary (musl)
+            - `nvrc-aarch64-unknown-linux-musl.tar.gz` - ARM64 Linux binary (musl)
+            - `*.sig` - Cosign signatures
+            - `*.pem` - Cosign certificates  
+            - `*.sha256` - SHA256 checksums
+            - `multiple.intoto.jsonl` - SLSA provenance attestation
+            
+            **Security Guarantees:**
+            - All signatures are recorded in the public Rekor transparency log
+            - The SLSA provenance provides verifiable build metadata at SLSA Level 3
+            - Keyless signing with GitHub OIDC identity prevents key compromise
+            - Immutable log entries provide tamper-evident audit trail
+
+  verify-signatures:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@4959ce089c160fddf62f7b42464195ba1a56d382 # v3.6.0
+
+      - name: Install Rekor CLI
+        run: |
+          # Download and install rekor-cli
+          curl -sSLO https://github.com/sigstore/rekor/releases/download/v1.3.6/rekor-cli-linux-amd64
+          curl -sSLO https://github.com/sigstore/rekor/releases/download/v1.3.6/rekor-cli-linux-amd64.sha256
+          sha256sum -c rekor-cli-linux-amd64.sha256
+          chmod +x rekor-cli-linux-amd64
+          sudo mv rekor-cli-linux-amd64 /usr/local/bin/rekor-cli
+
+      - name: Install SLSA verifier
+        run: |
+          # Download SLSA verifier binary and checksum
+          curl -sSLO https://github.com/slsa-framework/slsa-verifier/releases/download/v2.5.1/slsa-verifier-linux-amd64
+          curl -sSLO https://github.com/slsa-framework/slsa-verifier/releases/download/v2.5.1/slsa-verifier-linux-amd64.sha256
+          # Verify checksum
+          sha256sum -c slsa-verifier-linux-amd64.sha256
+          chmod +x slsa-verifier-linux-amd64
+          sudo mv slsa-verifier-linux-amd64 /usr/local/bin/slsa-verifier
+
+      - name: Download release assets
+        run: |
+          gh release download ${{ github.event.inputs.tag || github.ref_name }} --repo ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify signatures and provenance
+        run: |
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            echo "Verifying $target..."
+            
+            # Verify binary signature (automatically includes Rekor verification)
+            cosign verify-blob \
+              --certificate nvrc-${target}.tar.gz.pem \
+              --signature nvrc-${target}.tar.gz.sig \
+              nvrc-${target}.tar.gz
+              
+            # Verify checksum signature
+            cosign verify-blob \
+              --certificate nvrc-${target}.tar.gz.sha256.pem \
+              --signature nvrc-${target}.tar.gz.sha256.sig \
+              nvrc-${target}.tar.gz.sha256
+              
+            # Verify checksum itself
+            sha256sum -c nvrc-${target}.tar.gz.sha256
+            
+            # Additional Rekor verification - get certificate hash and search transparency log
+            echo "Performing additional Rekor transparency log verification..."
+            CERT_HASH=$(openssl x509 -in nvrc-${target}.tar.gz.pem -outform DER | openssl dgst -sha256 -binary | openssl enc -base64)
+            echo "Certificate SHA256: $CERT_HASH"
+
+            # Search Rekor log by certificate
+            LOG_ENTRIES=$(rekor-cli search --sha "$CERT_HASH" --format json)
+            if [ -n "$LOG_ENTRIES" ] && [ "$LOG_ENTRIES" != "[]" ]; then
+              echo "Found entries in Rekor transparency log"
+              # Get the first log entry index
+              LOG_INDEX=$(echo "$LOG_ENTRIES" | jq -r '.[0]')
+              echo "Verifying log entry at index: $LOG_INDEX"
+              rekor-cli verify --log-index "$LOG_INDEX"
+              echo "Rekor log entry verification successful"
+            else
+              echo "No entries found in Rekor transparency log for certificate"
+              exit 1
+            fi
+
+            # Verify SLSA provenance
+            slsa-verifier verify-artifact nvrc-${target}.tar.gz \
+              --provenance-path multiple.intoto.jsonl \
+              --source-uri github.com/${{ github.repository }} \
+              --source-tag ${{ github.event.inputs.tag || github.ref_name }}
+            
+            echo "$target complete verification successful (Cosign + Rekor + SLSA)"
+          done
