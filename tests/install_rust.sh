@@ -34,5 +34,5 @@ rustup target add "${RUSTARCH}-unknown-linux-musl"
 
 rustup component add rustfmt
 rustup component add clippy
-rustup component add miri
+rustup component add miri || true 
 
