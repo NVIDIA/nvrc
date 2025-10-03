@@ -29,6 +29,7 @@ pub struct NVRC {
     pub cold_plug: bool,
     pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC) -> Result<()>>,
     pub dcgm_enabled: Option<bool>,
+    pub fabricmanager_enabled: Option<bool>,
     pub identity: UserGroup,
     pub daemons: HashMap<Name, std::process::Child>,
     pub syslog_socket: Option<UnixDatagram>,
@@ -51,6 +52,7 @@ impl Default for NVRC {
                 (false, NVRC::hot_plug as fn(&mut NVRC) -> Result<()>),
             ]),
             dcgm_enabled: None,
+            fabricmanager_enabled: None,
             identity: UserGroup::new(),
             daemons: HashMap::new(),
             syslog_socket: None,
@@ -83,6 +85,7 @@ impl NVRC {
                 "nvrc.log" => nvrc_log(v, self)?,
                 "nvrc.uvm_persistence_mode" => uvm_persistenced_mode(v, self)?,
                 "nvrc.dcgm" => nvrc_dcgm(v, self)?,
+                "nvrc.fabricmanager" => nvrc_fabricmanager(v, self)?,
                 "nvrc.smi.srs" => nvidia_smi_srs(v, self)?,
                 _ => {}
             }
@@ -100,6 +103,13 @@ pub fn nvrc_dcgm(value: &str, ctx: &mut NVRC) -> Result<()> {
     let dcgm = parse_boolean(value);
     ctx.dcgm_enabled = Some(dcgm);
     debug!("nvrc.dcgm: {dcgm}");
+    Ok(())
+}
+
+pub fn nvrc_fabricmanager(value: &str, ctx: &mut NVRC) -> Result<()> {
+    let fabricmanager = parse_boolean(value);
+    ctx.fabricmanager_enabled = Some(fabricmanager);
+    debug!("nvrc.fabricmanager: {fabricmanager}");
     Ok(())
 }
 
