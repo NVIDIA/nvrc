@@ -166,12 +166,13 @@ impl NVRC {
         #[cfg(feature = "confidential")]
         warn!("GPU CC mode build: not setting user/group for nvidia-persistenced");
 
+        // TODO: nvidia-persistenced will not start with -u or -g flag in both modes
         #[cfg(not(feature = "confidential"))]
         {
             let user = self.identity.user_name.clone();
             let group = self.identity.group_name.clone();
-            let owned = [user, group];
-            args.extend_from_slice(&["-u", owned[0].as_str(), "-g", owned[1].as_str()]);
+            let _owned = [user, group];
+            //args.extend_from_slice(&["-u", owned[0].as_str(), "-g", owned[1].as_str()]);
             self.run_daemon(Name::Persistenced, "/bin/nvidia-persistenced", &args, mode)
         }
         #[cfg(feature = "confidential")]
@@ -227,10 +228,7 @@ impl NVRC {
         self.run_daemon(
             Name::NVFabricmanager,
             "/bin/nv-fabricmanager",
-            &[
-                "-c",
-                "/usr/share/nvidia/nvswitch/fabricmanager.cfg",
-            ],
+            &["-c", "/usr/share/nvidia/nvswitch/fabricmanager.cfg"],
             mode,
         )
     }

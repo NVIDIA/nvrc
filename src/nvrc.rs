@@ -3,6 +3,9 @@ use log::debug;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::net::UnixDatagram;
+use std::thread;
+use std::thread::sleep;
+use std::time::Duration;
 
 use crate::cpu::Cpu;
 use crate::daemon::Name;
@@ -70,6 +73,22 @@ impl NVRC {
     pub fn poll_syslog(&self) -> Result<()> {
         if let Some(socket) = &self.syslog_socket {
             crate::syslog::poll_dev_log(socket).context("poll syslog")?;
+        }
+        Ok(())
+    }
+
+    pub fn watch_poll_syslog(&self) -> Result<()> {
+        if let Some(socket) = &self.syslog_socket {
+            thread::spawn({
+                let socket = socket.try_clone().context("clone syslog socket")?;
+                move || loop {
+                    if let Err(e) = crate::syslog::poll_dev_log(&socket) {
+                        error!("poll syslog: {e}");
+                        break;
+                    }
+                    sleep(Duration::from_secs(1));
+                }
+            });
         }
         Ok(())
     }
