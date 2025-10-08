@@ -57,8 +57,14 @@ impl NVRC {
 
     fn handle_hot_plug_events(&mut self) -> Result<()> {
         let (tx, rx) = mpsc::channel::<&str>();
+
         ndev::udev(tx.clone());
         kmsg::watch_for_pattern("NVRM: Attempting to remove device", tx.clone());
+
+        if let Err(e) = self.watch_poll_syslog() {
+            error!("poll syslog: {e}");
+        }
+
         for ev in rx {
             debug!("event: {ev}");
             match ev {
