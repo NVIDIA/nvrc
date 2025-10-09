@@ -180,7 +180,6 @@ jobs:
             --output-certificate "${TARXZ}.cert" \
             --bundle "${TARXZ}.bundle.json"
 
-      
 
       - name: Upload dist as artifact (per combo)
         uses: actions/upload-artifact@v4
