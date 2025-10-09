@@ -15,7 +15,7 @@ jobs:
       tag: ${{ steps.reltag.outputs.tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
@@ -119,7 +119,7 @@ jobs:
           cp "${{ matrix.bin }}-${{ matrix.target }}.sha256" subjects.txt
 
       - name: Generate SBOM (SPDX JSON)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@61119d458adab75f756bc0b9e4bde25725f86a7a # v0
         with:
           file: dist/${{ matrix.bin }}-${{ matrix.target }}
           format: spdx-json
@@ -127,7 +127,7 @@ jobs:
           upload-artifact: false   # avoid matrix artifact name collisions (409)
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Keyless sign binary and SBOM
         env:
@@ -182,7 +182,7 @@ jobs:
 
 
       - name: Upload dist as artifact (per combo)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
         with:
           name: dist-${{ matrix.target }}-${{ matrix.flavor }}
           path: dist/*
@@ -190,7 +190,7 @@ jobs:
           overwrite: true
 
       - name: Create or update GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@e7a8f85e1c67a31e6ac94a1f65ba7b04214f754c # v2
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
           name: Release ${{ needs.preflight.outputs.tag }}
@@ -222,7 +222,7 @@ jobs:
       hashes: ${{ steps.sub.outputs.hashes }}
     steps:
       - name: Download all dist artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
         with:
           pattern: dist-*
           path: dist
@@ -290,12 +290,12 @@ jobs:
             bin: NVRC-confidential
     steps:
       - name: Download provenance artifact for this combo
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
         with:
           name: ${{ matrix.bin }}-${{ matrix.target }}.intoto.jsonl
           path: prov
       - name: Upload provenance to Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@e7a8f85e1c67a31e6ac94a1f65ba7b04214f754c # v2
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
           files: prov/${{ matrix.bin }}-${{ matrix.target }}.intoto.jsonl
@@ -305,11 +305,11 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repo (for VERIFY.md)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           fetch-depth: 1
       - name: Update Release body from repo file
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@e7a8f85e1c67a31e6ac94a1f65ba7b04214f754c # v2
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
           body_path: VERIFY.md
@@ -318,10 +318,10 @@ jobs:
     needs: [preflight, provenance-publish, build-and-release]
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Install Rekor CLI and jq
         env:
