@@ -19,11 +19,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install tomlq
+        run: |
+          python3 -m pip install --user yq
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Derive tag from Cargo.toml
         id: reltag
         shell: bash
         run: |
-          ver=$(awk -F" '/^version *=/ {print $2; exit}' Cargo.toml)
+          set -euo pipefail
+          ver=$(tomlq -r '.package.version' Cargo.toml)
           if [[ -z "$ver" ]]; then
             echo "Failed to extract version from Cargo.toml (package.version)" >&2
             exit 1
@@ -41,6 +47,14 @@ jobs:
             echo "Release $TAG already exists. Aborting to avoid overwrite." >&2
             exit 1
           fi
+
+      - name: Ensure git tag exists (lightweight)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch --tags --force
+          git tag "${{ steps.reltag.outputs.tag }}" "${GITHUB_SHA}"
+          git push origin "${{ steps.reltag.outputs.tag }}"
 
   build-and-release:
     needs: preflight
@@ -139,6 +153,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          # SOURCE_DATE_EPOCH isn't persisted across steps; compute a fallback here
+          export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --pretty=%ct)}"
           cd dist
           BASE="${{ matrix.bin }}-${{ matrix.target }}"
           TAR="${BASE}.tar"
@@ -164,36 +180,6 @@ jobs:
             --output-certificate "${TARXZ}.cert" \
             --bundle "${TARXZ}.bundle.json"
 
-      - name: Generate Rekor references (per combo)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          BASE="${{ matrix.bin }}-${{ matrix.target }}"
-          OUT_MD="dist/REKOR-REFS-${BASE}.md"
-          OUT_JSON="dist/rekor-refs-${BASE}.json"
-          echo "# Rekor references for ${BASE}" > "$OUT_MD"
-          echo "" >> "$OUT_MD"
-          add() {
-            local label="$1" file="$2"
-            if [ -f "dist/$file" ]; then
-              uuid=$(jq -r '.verificationMaterial.tlogEntries[0].uuid // empty' "dist/$file")
-              idx=$(jq -r '.verificationMaterial.tlogEntries[0].logIndex // empty' "dist/$file")
-              if [ -n "$uuid" ]; then
-                echo "- ${label}: UUID \`$uuid\`, logIndex \`$idx\`, API: https://rekor.sigstore.dev/api/v1/log/entries/$uuid" >> "$OUT_MD"
-                jq -n --arg name "$label" --arg uuid "$uuid" --argjson idx ${idx:-null} --arg api "https://rekor.sigstore.dev/api/v1/log/entries/$uuid" \
-                  '{artifacts:[{name:$name, uuid:$uuid, logIndex:$idx, api:$api}]}' > part.json
-                if [ -f "$OUT_JSON" ]; then
-                  jq -s 'reduce .[] as $i ({"artifacts":[]}; .artifacts += $i.artifacts)' "$OUT_JSON" part.json > tmp.json && mv tmp.json "$OUT_JSON"
-                else
-                  mv part.json "$OUT_JSON"
-                fi
-              fi
-            fi
-          }
-          add "${BASE}" "${BASE}.bundle.json"
-          add "sbom-${BASE}.spdx.json" "sbom-${BASE}.spdx.json.bundle.json"
-          add "${BASE}.tar.xz" "${BASE}.tar.xz.bundle.json"
 
       - name: Upload dist as artifact (per combo)
         uses: actions/upload-artifact@v4
@@ -201,13 +187,7 @@ jobs:
           name: dist-${{ matrix.target }}-${{ matrix.flavor }}
           path: dist/*
           if-no-files-found: error
-
-      - name: Ensure git tag exists (lightweight)
-        run: |
-          set -euxo pipefail
-          git fetch --tags --force
-          git tag "${{ needs.preflight.outputs.tag }}" "${GITHUB_SHA}"
-          git push origin "${{ needs.preflight.outputs.tag }}"
+          overwrite: true
 
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
@@ -219,10 +199,8 @@ jobs:
             dist/${{ matrix.bin }}-${{ matrix.target }}.tar.xz.sig
             dist/${{ matrix.bin }}-${{ matrix.target }}.tar.xz.cert
             dist/${{ matrix.bin }}-${{ matrix.target }}.tar.xz.bundle.json
-            dist/REKOR-REFS-${{ matrix.bin }}-${{ matrix.target }}.md
-            dist/rekor-refs-${{ matrix.bin }}-${{ matrix.target }}.json
 
-  provenance-hash:
+  provenance-hash-all:
     needs: build-and-release
     runs-on: ubuntu-24.04
     strategy:
@@ -243,20 +221,31 @@ jobs:
     outputs:
       hashes: ${{ steps.sub.outputs.hashes }}
     steps:
-      - name: Download dist for this combo
+      - name: Download all dist artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist-${{ matrix.target }}-${{ matrix.flavor }}
+          pattern: dist-*
           path: dist
-      - name: Compute base64 subjects (sha256sum output, then base64 -w0)
-        id: sub
+          merge-multiple: true
+      - name: Build base64 map from *.sha256
+        id: mkmap
         shell: bash
         run: |
+          set -euo pipefail
           cd dist
-          echo "hashes=$(base64 -w0 "${{ matrix.bin }}-${{ matrix.target }}.sha256")" >> "$GITHUB_OUTPUT"
+          # Build JSON map: { "<bin>-<target>": "<base64(sha256sum line)>", ... }
+          echo '{}' > map.json
+          for f in *.sha256; do
+            [ -f "$f" ] || continue
+            key="${f%.sha256}"
+            b64=$(base64 -w0 "$f")
+            jq --arg k "$key" --arg v "$b64" '. + {($k): $v}' map.json > tmp.json && mv tmp.json map.json
+          done
+          echo "map=$(jq -c . map.json)" >> "$GITHUB_OUTPUT"
 
   provenance:
-    needs: provenance-hash
+
+    needs: provenance-hash-all
     strategy:
       matrix:
         include:
@@ -278,11 +267,11 @@ jobs:
       contents: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a
     with:
-      base64-subjects: ${{ needs.provenance-hash.outputs.hashes }}
+      base64-subjects: ${{ fromJSON(needs.provenance-hash-all.outputs.map)[format('{0}-{1}', matrix.bin, matrix.target)] }}
       upload-assets: false
 
   provenance-publish:
-    needs: [provenance, build-and-release]
+    needs: [preflight, provenance, build-and-release]
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -308,10 +297,11 @@ jobs:
       - name: Upload provenance to Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.build-and-release.outputs.tag }}
+          tag_name: ${{ needs.preflight.outputs.tag }}
           files: prov/${{ matrix.bin }}-${{ matrix.target }}.intoto.jsonl
+
   release-notes:
-    needs: [provenance-publish, build-and-release]
+    needs: [preflight, provenance-publish, build-and-release]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repo (for VERIFY.md)
@@ -321,11 +311,11 @@ jobs:
       - name: Update Release body from repo file
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.build-and-release.outputs.tag }}
+          tag_name: ${{ needs.preflight.outputs.tag }}
           body_path: VERIFY.md
 
   verify-signatures:
-    needs: [provenance-publish, build-and-release]
+    needs: [preflight, provenance-publish, build-and-release]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -364,7 +354,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release download "${{ needs.build-and-release.outputs.tag }}" --repo "${{ github.repository }}" --dir .
+          gh release download "${{ needs.preflight.outputs.tag }}" --repo "${{ github.repository }}" --dir .
 
       - name: Verify binaries, SBOM signatures, Rekor, and SLSA provenance
         env:
