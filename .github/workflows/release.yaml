@@ -204,8 +204,23 @@ jobs:
   provenance-hash-all:
     needs: build-and-release
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            flavor: standard
+            bin: NVRC
+          - target: x86_64-unknown-linux-musl
+            flavor: confidential
+            bin: NVRC-confidential
+          - target: aarch64-unknown-linux-musl
+            flavor: standard
+            bin: NVRC
+          - target: aarch64-unknown-linux-musl
+            flavor: confidential
+            bin: NVRC-confidential
     outputs:
-      map: ${{ steps.mkmap.outputs.map }}
+      hashes: ${{ steps.sub.outputs.hashes }}
     steps:
       - name: Download all dist artifacts
         uses: actions/download-artifact@v4
@@ -251,7 +266,7 @@ jobs:
       actions: read
       id-token: write
       contents: write
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a
     with:
       base64-subjects: ${{ fromJSON(needs.provenance-hash-all.outputs.map)[format('{0}-{1}', matrix.bin, matrix.target)] }}
       upload-assets: false
