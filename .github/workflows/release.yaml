@@ -92,7 +92,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@2ae36166d3d3fcc53eaa7b030a26ca5ac4739e8c # v1.70
         with:
+          toolchain: stable minus 2 releases
           targets: ${{ matrix.target }}
+
 
       - name: Install dependencies
         run: |
