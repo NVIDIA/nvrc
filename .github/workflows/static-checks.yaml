@@ -15,6 +15,7 @@ concurrency:
 
 name: Static checks
 jobs:
+  # Run unit and integration tests
   test:
     name: cargo test
     runs-on: ubuntu-latest
@@ -26,6 +27,7 @@ jobs:
       - run: ./tests/install_rust.sh
       - run: cargo test --all-features
 
+  # Check code formatting against Rust style guidelines
   formatting:
     name: cargo fmt
     runs-on: ubuntu-latest
@@ -36,6 +38,7 @@ jobs:
       - run: ./tests/install_rust.sh
       - run: cargo fmt --all -- --check
 
+  # Lint for common mistakes and style issues
   linting:
     name: cargo clippy
     runs-on: ubuntu-latest
@@ -46,6 +49,7 @@ jobs:
       - run: ./tests/install_rust.sh
       - run: cargo clippy --all-features -- -D warnings
 
+  # Check dependencies for known security vulnerabilities
   security:
     name: cargo audit
     runs-on: ubuntu-latest
@@ -57,6 +61,7 @@ jobs:
       - run: cargo install cargo-audit
       - run: cargo audit
 
+  # Verify licenses, check for banned dependencies, and audit sources
   deny:
     name: cargo deny
     runs-on: ubuntu-latest
@@ -68,6 +73,7 @@ jobs:
       - run: cargo install cargo-deny
       - run: cargo deny check
 
+  # Detect unused dependencies in Cargo.toml
   unused-deps:
     name: cargo udeps
     runs-on: ubuntu-latest
@@ -79,6 +85,7 @@ jobs:
       - run: cargo install cargo-udeps --locked
       - run: cargo +nightly udeps --all-features
 
+  # Analyze binary size and identify largest functions
   bloat:
     name: cargo bloat
     runs-on: ubuntu-latest
@@ -90,6 +97,7 @@ jobs:
       - run: cargo install cargo-bloat
       - run: cargo bloat --release --all-features -n 20
 
+  # Detect undefined behavior in unsafe code using Miri interpreter
   miri:
     name: cargo miri
     runs-on: ubuntu-latest
