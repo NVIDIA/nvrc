@@ -36,18 +36,18 @@ jobs:
         run: |
           . "${HOME}/.cargo/env"
           cargo build --release --target=aarch64-unknown-linux-musl
-          sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC $ROOTFS_DIR/bin/NVRC
+          sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC "$ROOTFS_DIR/bin/NVRC"
       - name: Create initrd
         run: |
           cd "${INITRD_DIR}"
-          script -fec 'sudo -E AGENT_INIT=no USE_DOCKER=true ./initrd_builder.sh "${ROOTFS_DIR}"'
+          script -fec "sudo -E AGENT_INIT=no USE_DOCKER=true ./initrd_builder.sh \"${ROOTFS_DIR}\""
       # TODO: why does nerdctl fail here
       - name: Run nerdctl and verify nvidia-smi execution
         run: |
           image=ubuntu
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm $image nvidia-smi && dmesg 2>&1 || true)
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm "$image" nvidia-smi; dmesg 2>&1) || true
           echo "$output"
-          
+
           # Check if nvidia-smi actually executed and produced meaningful output
           if echo "$output" | grep -q "NVIDIA-SMI"; then
             echo "nvidia-smi executed successfully - found NVIDIA-SMI header"
@@ -57,4 +57,4 @@ jobs:
             echo "nvidia-smi did not execute properly or produced unexpected output"
             exit 1
           fi
-          
+
