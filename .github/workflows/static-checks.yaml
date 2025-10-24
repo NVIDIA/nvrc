@@ -23,8 +23,13 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable minus 2 releases
+
       - run: ls -l */*
-      - run: ./tests/install_rust.sh
       - run: cargo test --all-features
 
   # Check code formatting against Rust style guidelines
@@ -35,7 +40,13 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable minus 2 releases
+          components: rustfmt
+
       - run: cargo fmt --all -- --check
 
   # Lint for common mistakes and style issues
@@ -46,7 +57,13 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable minus 2 releases
+          components: clippy
+
       - run: cargo clippy --all-features -- -D warnings
 
   # Check dependencies for known security vulnerabilities
@@ -57,7 +74,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable minus 2 releases
+
       - run: cargo install cargo-audit
       - run: cargo audit
 
@@ -69,7 +91,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable minus 2 releases
+
       - run: cargo install cargo-deny
       - run: cargo deny check
 
@@ -81,9 +108,14 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh nightly
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
       - run: cargo install cargo-udeps --locked
-      - run: cargo +nightly udeps --all-features
+      - run: cargo udeps --all-features
 
   # Analyze binary size and identify largest functions
   bloat:
@@ -93,7 +125,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable minus 2 releases
+
       - run: cargo install cargo-bloat
       - run: cargo bloat --release --all-features -n 20
 
@@ -105,5 +142,11 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh nightly
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: miri
+
       - run: cargo miri test || true # ignore errors since miri is still experimental and complains about the std toolchain
