@@ -15,55 +15,137 @@ concurrency:
 
 name: Static checks
 jobs:
+  # Run unit and integration tests
   test:
     name: cargo test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ls -l */*
-      - run: ./tests/install_rust.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
       - run: cargo test --all-features
 
+  # Check code formatting against Rust style guidelines
   formatting:
     name: cargo fmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt
+
       - run: cargo fmt --all -- --check
 
-
+  # Lint for common mistakes and style issues
   linting:
     name: cargo clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: clippy
+
       - run: cargo clippy --all-features -- -D warnings
 
+  # Check dependencies for known security vulnerabilities
   security:
     name: cargo audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
       - run: cargo install cargo-audit
       - run: cargo audit
 
+  # Verify licenses, check for banned dependencies, and audit sources
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - run: cargo install cargo-deny
+      - run: cargo deny check
+
+  # Detect unused dependencies in Cargo.toml
+  unused-deps:
+    name: cargo udeps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - run: cargo install cargo-udeps --locked
+      - run: cargo udeps --all-features
+
+  # Analyze binary size and identify largest functions
+  bloat:
+    name: cargo bloat
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - run: cargo install cargo-bloat
+      - run: cargo bloat --release --all-features -n 20
+
+  # Detect undefined behavior in unsafe code using Miri interpreter
   miri:
     name: cargo miri
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
-      - run: ./tests/install_rust.sh nightly
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          components: miri
+
       - run: cargo miri test || true # ignore errors since miri is still experimental and complains about the std toolchain
