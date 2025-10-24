@@ -27,8 +27,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable minus 2 releases
-      
+          toolchain: stable
+
       - run: cargo test --all-features
 
   # Check code formatting against Rust style guidelines
@@ -43,7 +43,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable minus 2 releases
+          toolchain: stable
           components: rustfmt
 
       - run: cargo fmt --all -- --check
@@ -60,7 +60,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable minus 2 releases
+          toolchain: stable
           components: clippy
 
       - run: cargo clippy --all-features -- -D warnings
@@ -77,7 +77,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable minus 2 releases
+          toolchain: stable
 
       - run: cargo install cargo-audit
       - run: cargo audit
@@ -94,7 +94,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable minus 2 releases
+          toolchain: stable
 
       - run: cargo install cargo-deny
       - run: cargo deny check
@@ -128,7 +128,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable minus 2 releases
+          toolchain: stable
 
       - run: cargo install cargo-bloat
       - run: cargo bloat --release --all-features -n 20
