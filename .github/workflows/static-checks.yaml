@@ -28,8 +28,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable minus 2 releases
-
-      - run: ls -l */*
+      
       - run: cargo test --all-features
 
   # Check code formatting against Rust style guidelines
