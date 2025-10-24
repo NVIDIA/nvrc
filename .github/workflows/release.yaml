@@ -106,7 +106,8 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p dist
-          export SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
+          SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
+          export SOURCE_DATE_EPOCH
           cargo build --release --target "${{ matrix.target }}" ${{ matrix.cargo_features }}
           cp "target/${{ matrix.target }}/release/NVRC" "dist/${{ matrix.bin }}-${{ matrix.target }}"
 
@@ -160,7 +161,6 @@ jobs:
           cd dist
           BASE="${{ matrix.bin }}-${{ matrix.target }}"
           TAR="${BASE}.tar"
-          TARXZ="${BASE}.tar.xz"
           # Create reproducible tarball with stable mtimes/owners
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@${SOURCE_DATE_EPOCH}" \
             -cf "$TAR" \
