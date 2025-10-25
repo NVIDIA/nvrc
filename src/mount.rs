@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 use crate::coreutils::{ln, mknod};
 use anyhow::{Context, Result};
 use nix::mount::{self, MsFlags};

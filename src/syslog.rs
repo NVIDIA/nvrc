@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 use log::{debug, error, info, warn};
 use std::fs;
 use std::os::fd::AsFd;

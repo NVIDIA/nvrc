@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 use anyhow::{anyhow, Context, Result};
 use nix::sys::stat::Mode;
 use nix::unistd::{chown, mkdir};
