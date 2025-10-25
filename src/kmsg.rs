@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 use anyhow::{Context, Result};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader};

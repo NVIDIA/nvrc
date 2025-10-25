@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 mod attach;
 mod coreutils;
 mod cpu;
@@ -53,9 +56,11 @@ fn main() {
     #[cfg(feature = "confidential")]
     must!(init.query_cpu_cc_mode());
     must!(init.get_nvidia_devices(None));
-    must!(init.hot_or_cold_plug.get(&init.cold_plug).unwrap()(
-        &mut init
-    ));
+    let handler = init
+        .hot_or_cold_plug
+        .get(&init.cold_plug)
+        .expect("hot_or_cold_plug handler not found");
+    must!(handler(&mut init));
 }
 
 impl NVRC {
@@ -63,7 +68,6 @@ impl NVRC {
         must!(self.check_gpu_supported(None));
         #[cfg(feature = "confidential")]
         must!(self.query_gpu_cc_mode());
-        must!(self.check_gpu_supported(None));
         must!(nvidia_ctk_system());
         must!(self.manage_daemons(Action::Restart));
         must!(lockdown::disable_modules_loading());

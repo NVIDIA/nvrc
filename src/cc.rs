@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 pub mod confidential {
     use crate::cpu::Cpu;
     use cfg_if::cfg_if;
