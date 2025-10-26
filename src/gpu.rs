@@ -158,7 +158,9 @@ pub mod confidential {
                 File::open(&resource).with_context(|| format!("open BAR0 failed for {bdf}"))?;
             let ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize };
             let page = (reg as usize / ps) * ps;
-            let off = reg as usize - page; // Equivalent to reg % ps, always < ps
+            // 'off' is the offset of 'reg' within its memory page, always less than 'ps'.
+            // This is equivalent to 'reg % ps' because 'page' is the largest multiple of 'ps' <= 'reg'.
+            let off = reg as usize - page;
             let map_len = ps;
             let map = unsafe {
                 mmap(
