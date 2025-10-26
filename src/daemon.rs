@@ -154,9 +154,12 @@ impl NVRC {
                 }
                 debug!("daemon {:?} already exited", daemon);
             }
-            managed_child
-                .wait()
-                .context("Failed to wait for daemon process")?;
+            if let Err(e) = managed_child.wait() {
+                if e.kind() != std::io::ErrorKind::InvalidInput {
+                    return Err(anyhow!(e)).context("Failed to wait for daemon process");
+                }
+                debug!("daemon {:?} already exited (wait)", daemon);
+            }
             let comm_name = daemon.to_string();
             debug!("killing all processes named '{}'", comm_name);
             kill_processes_by_comm(&comm_name);
