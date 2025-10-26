@@ -170,14 +170,6 @@ pub mod confidential {
                     bar0_size
                 ));
             }
-            if page + map_len > bar0_size {
-                return Err(anyhow!(
-                    "Mapped region (page=0x{:x} + len=0x{:x}) exceeds BAR0 size 0x{:x} for {bdf}",
-                    page,
-                    map_len,
-                    bar0_size
-                ));
-            }
             let map = unsafe {
                 mmap(
                     None,
