@@ -163,7 +163,6 @@ impl NVRC {
             let comm_name = daemon.to_string();
             debug!("killing all processes named '{}'", comm_name);
             kill_processes_by_comm(&comm_name);
-            // ManagedChild will be dropped here, ensuring cleanup
         } else {
             debug!("daemon not running: {:?}", daemon);
         }
