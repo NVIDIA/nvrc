@@ -155,21 +155,11 @@ pub mod confidential {
             }
 
             let file =
-            // Calculate offset within page (reg % ps). The BAR0 bounds check above ensures this is safe.
-            // Since we validate above that 'reg' is within BAR0, this calculation is safe:
-            // 'off' is equivalent to 'reg % ps' because 'page' is the largest multiple of 'ps' <= 'reg'.
-            // This ensures we mmap only the page containing the register, and the offset is always valid.
-            let off = reg as usize - page;
+                File::open(&resource).with_context(|| format!("open BAR0 failed for {bdf}"))?;
+            let ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize };
+            let page = (reg as usize / ps) * ps;
+            let off = reg as usize - page; // Equivalent to reg % ps, always < ps
             let map_len = ps;
-            // Validate that the mapped region does not exceed BAR0 bounds
-            if page + map_len > bar0_size {
-                return Err(anyhow!(
-                    "Mapped region (page=0x{:x} + len=0x{:x}) exceeds BAR0 size 0x{:x} for {bdf}",
-                    page,
-                    map_len,
-                    bar0_size
-                ));
-            }
             let map = unsafe {
                 mmap(
                     None,
