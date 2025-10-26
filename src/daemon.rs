@@ -7,11 +7,48 @@ use nix::unistd::{chown, mkdir};
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use sysinfo::System;
 
 use crate::kmsg::kmsg;
 use crate::nvrc::NVRC;
+
+/// RAII wrapper for daemon Child processes to ensure cleanup on drop
+#[derive(Debug)]
+pub struct ManagedChild {
+    child: Child,
+    name: Name,
+}
+
+impl ManagedChild {
+    pub fn new(child: Child, name: Name) -> Self {
+        Self { child, name }
+    }
+
+    /// Attempt to kill the child process
+    pub fn kill(&mut self) -> std::io::Result<()> {
+        self.child.kill()
+    }
+
+    /// Wait for the child process to exit
+    pub fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.child.wait()
+    }
+}
+
+impl Drop for ManagedChild {
+    fn drop(&mut self) {
+        debug!(
+            "Cleaning up daemon {:?} (PID {})",
+            self.name,
+            self.child.id()
+        );
+        // Attempt to kill if still running
+        let _ = self.child.kill();
+        // Wait to prevent zombie processes
+        let _ = self.child.wait();
+    }
+}
 
 #[cfg(feature = "confidential")]
 use crate::gpu::confidential::CC;
@@ -102,18 +139,28 @@ impl NVRC {
     fn start(&mut self, daemon: &Name, command: &str, args: &[&str]) -> Result<()> {
         debug!("start {} {}", command, args.join(" "));
         let child = background(command, args)?;
-        self.daemons.insert(daemon.clone(), child);
+        let managed = ManagedChild::new(child, daemon.clone());
+        self.daemons.insert(daemon.clone(), managed);
         Ok(())
     }
 
     fn stop(&mut self, daemon: &Name) -> Result<()> {
         debug!("stop {}", daemon);
-        if let Some(mut child) = self.daemons.remove(daemon) {
-            child.kill().context("Failed to kill daemon process")?;
-            child.wait().context("Failed to wait for daemon process")?;
+        if let Some(mut managed_child) = self.daemons.remove(daemon) {
+            // Try to kill, but don't fail if already dead
+            if let Err(e) = managed_child.kill() {
+                if e.kind() != std::io::ErrorKind::InvalidInput {
+                    return Err(anyhow!(e)).context("Failed to kill daemon process");
+                }
+                debug!("daemon {:?} already exited", daemon);
+            }
+            managed_child
+                .wait()
+                .context("Failed to wait for daemon process")?;
             let comm_name = daemon.to_string();
             debug!("killing all processes named '{}'", comm_name);
             kill_processes_by_comm(&comm_name);
+            // ManagedChild will be dropped here, ensuring cleanup
         } else {
             debug!("daemon not running: {:?}", daemon);
         }
