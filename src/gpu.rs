@@ -164,6 +164,15 @@ pub mod confidential {
             // This ensures we mmap only the page containing the register, and the offset is always valid.
             let off = reg as usize - page;
             let map_len = ps;
+            // Validate that the mapped region does not exceed BAR0 bounds
+            if page + map_len > bar0_size {
+                return Err(anyhow!(
+                    "Mapped region (page=0x{:x} + len=0x{:x}) exceeds BAR0 size 0x{:x} for {bdf}",
+                    page,
+                    map_len,
+                    bar0_size
+                ));
+            }
             if page + map_len > bar0_size {
                 return Err(anyhow!(
                     "Mapped region (page=0x{:x} + len=0x{:x}) exceeds BAR0 size 0x{:x} for {bdf}",
