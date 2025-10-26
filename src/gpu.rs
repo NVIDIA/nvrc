@@ -159,7 +159,9 @@ pub mod confidential {
             let ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize };
             let page = (reg as usize / ps) * ps;
             // 'off' is the offset of 'reg' within its memory page, always less than 'ps'.
-            // This is equivalent to 'reg % ps' because 'page' is the largest multiple of 'ps' <= 'reg'.
+            // Since we validate above that 'reg' is within BAR0, this calculation is safe:
+            // 'off' is equivalent to 'reg % ps' because 'page' is the largest multiple of 'ps' <= 'reg'.
+            // This ensures we mmap only the page containing the register, and the offset is always valid.
             let off = reg as usize - page;
             let map_len = ps;
             let map = unsafe {
