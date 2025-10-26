@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 use std::process;
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};

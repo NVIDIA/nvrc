@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 use anyhow::{Context, Result};
 use log::debug;
 use std::collections::HashMap;

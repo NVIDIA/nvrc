@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 use crate::daemon::Action;
 use crate::kata_agent;
 use crate::kmsg;

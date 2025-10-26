@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 use anyhow::{anyhow, Context, Result};
 use rlimit::{setrlimit, Resource};
 use std::fs;

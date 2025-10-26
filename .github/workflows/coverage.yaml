@@ -33,7 +33,7 @@ jobs:
         run: cargo install cargo-tarpaulin --locked
 
       - name: Generate coverage
-        run: cargo tarpaulin --all-features --workspace --timeout 120 --out xml
+        run: sudo -E env "PATH=$PATH" cargo tarpaulin --all-features --workspace --timeout 120 --out xml
 
       - name: Upload coverage to Coveralls
         uses: coverallsapp/github-action@cfd0633edbd2411b532b808ba7a8b5e04f76d2c8 # v2.3.4
