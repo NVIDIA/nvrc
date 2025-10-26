@@ -10,14 +10,12 @@ dependencies = [
  "cfg-if",
  "kernlog",
  "kobject-uevent",
- "lazy_static",
  "libc",
  "log",
  "mktemp",
  "netlink-sys",
  "nix",
  "rand",
- "raw-cpuid",
  "rlimit",
  "serial_test",
  "sysinfo",
@@ -200,12 +198,6 @@ checksum = "b7f0d6a1db283ff342c373c82788157bb28293bbb3f41ceee9fd2c4d3f0d7780"
 dependencies = [
  "thiserror",
 ]
-
-[[package]]
-name = "lazy_static"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
@@ -397,15 +389,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "99d9a13982dcf210057a8a78572b2217b667c3beacbf3a0d8b454f6f82837d38"
 dependencies = [
  "getrandom 0.3.1",
-]
-
-[[package]]
-name = "raw-cpuid"
-version = "11.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6df7ab838ed27997ba19a4664507e6f82b41fe6e20be42929332156e5e85146"
-dependencies = [
- "bitflags",
 ]
 
 [[package]]

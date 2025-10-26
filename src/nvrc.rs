@@ -11,7 +11,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use crate::cpu::Cpu;
-use crate::daemon::Name;
+use crate::daemon::{ManagedChild, Name};
 use crate::devices::NvidiaDevice;
 #[cfg(feature = "confidential")]
 use crate::gpu::confidential::CC;
@@ -37,7 +37,7 @@ pub struct NVRC {
     pub dcgm_enabled: Option<bool>,
     pub fabricmanager_enabled: Option<bool>,
     pub identity: UserGroup,
-    pub daemons: HashMap<Name, std::process::Child>,
+    pub daemons: HashMap<Name, ManagedChild>,
     pub syslog_socket: Option<UnixDatagram>,
 }
 

@@ -23,7 +23,7 @@ fn is_nvidia_gpu(e: &UEvent) -> bool {
     }
 }
 
-pub fn udev(tx: mpsc::Sender<&'static str>) -> JoinHandle<()> {
+pub fn udev(tx: mpsc::SyncSender<&'static str>) -> JoinHandle<()> {
     debug!("udev monitor start");
 
     // Setup netlink socket for kernel uevents

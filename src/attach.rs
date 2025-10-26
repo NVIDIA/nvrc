@@ -59,7 +59,9 @@ impl NVRC {
     }
 
     fn handle_hot_plug_events(&mut self) -> Result<()> {
-        let (tx, rx) = mpsc::channel::<&str>();
+        // Use bounded channel to prevent unbounded memory growth
+        // Capacity of 100 should be sufficient for bursty hotplug events
+        let (tx, rx) = mpsc::sync_channel::<&str>(100);
 
         ndev::udev(tx.clone());
         kmsg::watch_for_pattern("NVRM: Attempting to remove device", tx.clone());
