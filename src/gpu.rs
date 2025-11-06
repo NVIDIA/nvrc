@@ -5,9 +5,9 @@
 pub mod confidential {
     use super::super::NVRC;
     use crate::pci_ids::DeviceType;
-    use anyhow::{Context, Result};
+    use anyhow::{anyhow, Context, Result};
     use nix::sys::mman::{mmap, munmap, MapFlags, ProtFlags};
-    use std::fs::File;
+    use std::fs::{self, File};
     use std::ptr;
 
     const EMBEDDED_PCI_IDS: &str = include_str!("pci_ids_embedded.txt");
@@ -109,6 +109,31 @@ pub mod confidential {
         ))
     }
 
+    /// Read BAR0 size from sysfs resource file
+    fn read_bar0_size(bdf: &str) -> Result<usize> {
+        let resource_path = format!("/sys/bus/pci/devices/{bdf}/resource");
+        let content = fs::read_to_string(&resource_path)
+            .with_context(|| format!("Failed to read {resource_path}"))?;
+
+        // First line contains BAR0: start_addr end_addr flags
+        let first_line = content
+            .lines()
+            .next()
+            .ok_or_else(|| anyhow!("Empty resource file for {bdf}"))?;
+
+        let parts: Vec<&str> = first_line.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Err(anyhow!("Invalid resource file format for {bdf}"));
+        }
+
+        let start_addr = u64::from_str_radix(parts[0].trim_start_matches("0x"), 16)
+            .with_context(|| format!("Failed to parse start address for {bdf}"))?;
+        let end_addr = u64::from_str_radix(parts[1].trim_start_matches("0x"), 16)
+            .with_context(|| format!("Failed to parse end address for {bdf}"))?;
+
+        Ok((end_addr - start_addr + 1) as usize)
+    }
+
     impl NVRC {
         fn query_cc_mode_bar0(&self, bdf: &str, device_id: u16) -> Result<CC> {
             let resource = format!("/sys/bus/pci/devices/{bdf}/resource0");
@@ -116,11 +141,24 @@ pub mod confidential {
                 .with_context(|| format!("arch lookup failed for BDF {bdf}"))?;
             let reg = arch.cc_register()?;
             debug!("BDF {bdf}: arch={:?} cc_reg=0x{:x}", arch, reg);
+
+            // Read BAR0 size and validate register offset
+            let bar0_size = read_bar0_size(bdf)
+                .with_context(|| format!("Failed to read BAR0 size for {bdf}"))?;
+
+            if reg as usize >= bar0_size {
+                return Err(anyhow!(
+                    "Register offset 0x{:x} exceeds BAR0 size 0x{:x} for {bdf}",
+                    reg,
+                    bar0_size
+                ));
+            }
+
             let file =
                 File::open(&resource).with_context(|| format!("open BAR0 failed for {bdf}"))?;
             let ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize };
             let page = (reg as usize / ps) * ps;
-            let off = reg as usize - page;
+            let off = reg as usize - page; // Equivalent to reg % ps, always < ps
             let map_len = ps;
             let map = unsafe {
                 mmap(

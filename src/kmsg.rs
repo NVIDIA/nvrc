@@ -38,7 +38,10 @@ pub fn kmsg() -> Result<File> {
         .with_context(|| format!("open {}", path))
 }
 
-pub fn watch_for_pattern(pattern: &'static str, tx: mpsc::Sender<&'static str>) -> JoinHandle<()> {
+pub fn watch_for_pattern(
+    pattern: &'static str,
+    tx: mpsc::SyncSender<&'static str>,
+) -> JoinHandle<()> {
     thread::spawn(move || {
         let file = match File::open("/dev/kmsg") {
             Ok(f) => f,
