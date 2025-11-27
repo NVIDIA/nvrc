@@ -1,0 +1,24 @@
+name: NVRC Nightly CI
+on:
+  schedule:
+    - cron: '0 0 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  nvrc-nightly-ci:
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/ci.yaml
+    with:
+      commit-hash: ${{ github.sha }}
+      pr-number: "nightly"
+      tag: ${{ github.sha }}-"nightly"
+      target-branch: ${{ github.ref_name }}
