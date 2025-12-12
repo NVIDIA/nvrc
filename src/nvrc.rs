@@ -6,15 +6,16 @@ use log::debug;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::net::UnixDatagram;
+use std::sync::Arc;
 use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
+use crate::core::traits::{CCProvider, PlatformInfo};
+use crate::core::PlugMode;
 use crate::cpu::Cpu;
 use crate::daemon::{ManagedChild, Name};
 use crate::devices::NvidiaDevice;
-#[cfg(feature = "confidential")]
-use crate::gpu_old::confidential::CC;
 use crate::user_group::UserGroup;
 
 fn parse_boolean(s: &str) -> bool {
@@ -24,18 +25,27 @@ fn parse_boolean(s: &str) -> bool {
 #[derive(Debug)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
+    // Configuration
     pub nvidia_smi_srs: Option<String>,
     pub nvidia_smi_lgc: Option<String>,
     pub uvm_persistence_mode: Option<String>,
+    pub dcgm_enabled: bool,
+    pub fabricmanager_enabled: bool,
+
+    // Hardware detection
     pub cpu_vendor: Option<Cpu>,
+    #[allow(dead_code)] // Will be used when we fully integrate platform detection
+    pub platform_info: Option<PlatformInfo>,
     pub nvidia_devices: Vec<NvidiaDevice>,
     pub gpu_supported: bool,
-    #[cfg(feature = "confidential")]
-    pub gpu_cc_mode: Option<CC>,
-    pub cold_plug: bool,
-    pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC) -> Result<()>>,
-    pub dcgm_enabled: Option<bool>,
-    pub fabricmanager_enabled: Option<bool>,
+
+    // CC provider (replaces scattered cfg attributes)
+    pub cc_provider: Arc<dyn CCProvider>,
+
+    // Plug mode (replaces HashMap dispatch)
+    pub plug_mode: PlugMode,
+
+    // Runtime state
     pub identity: UserGroup,
     pub daemons: HashMap<Name, ManagedChild>,
     pub syslog_socket: Option<UnixDatagram>,
@@ -43,22 +53,29 @@ pub struct NVRC {
 
 impl Default for NVRC {
     fn default() -> Self {
+        // Create default provider based on feature flag
+        #[cfg(feature = "confidential")]
+        let cc_provider: Arc<dyn CCProvider> = {
+            // In default(), we can't detect platform, so use a standard detector
+            // Real usage should use the builder
+            Arc::new(crate::providers::StandardProvider::new())
+        };
+
+        #[cfg(not(feature = "confidential"))]
+        let cc_provider: Arc<dyn CCProvider> = Arc::new(crate::providers::StandardProvider::new());
+
         Self {
             nvidia_smi_srs: None,
             nvidia_smi_lgc: None,
             uvm_persistence_mode: None,
+            dcgm_enabled: false,
+            fabricmanager_enabled: false,
             cpu_vendor: None,
+            platform_info: None,
             nvidia_devices: Vec::new(),
             gpu_supported: false,
-            #[cfg(feature = "confidential")]
-            gpu_cc_mode: None,
-            cold_plug: false,
-            hot_or_cold_plug: HashMap::from([
-                (true, NVRC::cold_plug as fn(&mut NVRC) -> Result<()>),
-                (false, NVRC::hot_plug as fn(&mut NVRC) -> Result<()>),
-            ]),
-            dcgm_enabled: None,
-            fabricmanager_enabled: None,
+            cc_provider,
+            plug_mode: PlugMode::default(),
             identity: UserGroup::new(),
             daemons: HashMap::new(),
             syslog_socket: None,
@@ -123,14 +140,14 @@ impl NVRC {
 
 pub fn nvrc_dcgm(value: &str, ctx: &mut NVRC) -> Result<()> {
     let dcgm = parse_boolean(value);
-    ctx.dcgm_enabled = Some(dcgm);
+    ctx.dcgm_enabled = dcgm;
     debug!("nvrc.dcgm: {dcgm}");
     Ok(())
 }
 
 pub fn nvrc_fabricmanager(value: &str, ctx: &mut NVRC) -> Result<()> {
     let fabricmanager = parse_boolean(value);
-    ctx.fabricmanager_enabled = Some(fabricmanager);
+    ctx.fabricmanager_enabled = fabricmanager;
     debug!("nvrc.fabricmanager: {fabricmanager}");
     Ok(())
 }
@@ -296,26 +313,26 @@ mod tests {
 
         // Test various "on" values
         nvrc_dcgm("on", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, Some(true));
+        assert_eq!(c.dcgm_enabled, true);
 
         nvrc_dcgm("true", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, Some(true));
+        assert_eq!(c.dcgm_enabled, true);
 
         nvrc_dcgm("1", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, Some(true));
+        assert_eq!(c.dcgm_enabled, true);
 
         nvrc_dcgm("yes", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, Some(true));
+        assert_eq!(c.dcgm_enabled, true);
 
         // Test "off" values
         nvrc_dcgm("off", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, Some(false));
+        assert_eq!(c.dcgm_enabled, false);
 
         nvrc_dcgm("false", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, Some(false));
+        assert_eq!(c.dcgm_enabled, false);
 
         nvrc_dcgm("invalid", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, Some(false));
+        assert_eq!(c.dcgm_enabled, false);
     }
 
     #[test]

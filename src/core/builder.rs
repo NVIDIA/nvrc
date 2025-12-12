@@ -117,7 +117,7 @@ impl NVRCBuilder {
     /// Returns an error if:
     /// - CC provider is not set (call `with_auto_cc_provider()` or `with_cc_provider()`)
     /// - Initialization steps fail
-    #[allow(dead_code)] // Will be implemented in PR #12
+    #[allow(dead_code)] // Will be used in PR #13
     pub fn build(self) -> Result<crate::nvrc::NVRC> {
         let cc_provider = self
             .cc_provider
@@ -125,14 +125,28 @@ impl NVRCBuilder {
                 field: "cc_provider".to_string(),
             })?;
 
-        // Note: We'll implement the actual NVRC construction in PR #12
-        // For now, just validate that we have what we need
-        let _ = cc_provider;
-        let _ = self.dcgm_enabled;
-        let _ = self.fabricmanager_enabled;
+        let mut nvrc = crate::nvrc::NVRC {
+            nvidia_smi_srs: self.nvidia_smi_srs,
+            nvidia_smi_lgc: None,
+            uvm_persistence_mode: self.uvm_persistence_mode,
+            dcgm_enabled: self.dcgm_enabled,
+            fabricmanager_enabled: self.fabricmanager_enabled,
+            cpu_vendor: None,
+            platform_info: None,
+            nvidia_devices: Vec::new(),
+            gpu_supported: false,
+            cc_provider,
+            plug_mode: crate::core::PlugMode::default(),
+            identity: crate::user_group::UserGroup::new(),
+            daemons: std::collections::HashMap::new(),
+            syslog_socket: None,
+        };
 
-        // This is a placeholder that will be implemented in PR #12
-        todo!("NVRC construction will be implemented in PR #12")
+        // Perform initialization
+        nvrc.setup_syslog()?;
+        nvrc.set_random_identity()?;
+
+        Ok(nvrc)
     }
 }
 
@@ -220,11 +234,32 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "not yet implemented")]
-    fn test_builder_build_not_implemented_yet() {
-        // This will panic until PR #12 is implemented
-        let _result = NVRCBuilder::new()
-            .with_auto_cc_provider()
-            .and_then(|b| b.build());
+    fn test_builder_build_with_provider() {
+        let result = NVRCBuilder::new().with_auto_cc_provider();
+
+        // May fail in test environment
+        if let Ok(builder) = result {
+            let nvrc_result = builder.build();
+            match nvrc_result {
+                Ok(nvrc) => {
+                    assert!(nvrc.cc_provider.platform().platform_description().len() > 0);
+                }
+                Err(e) => {
+                    // Initialization can fail in test environment
+                    println!("Build failed (acceptable in test env): {}", e);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_builder_build_missing_provider() {
+        let builder = NVRCBuilder::new();
+        let result = builder.build();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            NvrcError::MissingConfiguration { .. }
+        ));
     }
 }

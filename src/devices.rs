@@ -103,7 +103,7 @@ impl NVRC {
     }
 
     fn update_device_state(&mut self, devices: Vec<NvidiaDevice>) {
-        self.cold_plug = !devices.is_empty();
+        self.plug_mode = crate::core::PlugMode::from_devices_present(!devices.is_empty());
         if devices.is_empty() {
             debug!("No NVIDIA devices found");
         } else {
@@ -176,7 +176,7 @@ mod tests {
         create_mock_device(base, &NON_NVIDIA_DEVICE)?;
         nvrc.get_nvidia_devices(Some(base))?;
         assert_eq!(nvrc.nvidia_devices.len(), TEST_DEVICES.len());
-        assert!(nvrc.cold_plug);
+        assert_eq!(nvrc.plug_mode, crate::core::PlugMode::Cold);
         let (gpus, switches): (Vec<_>, Vec<_>) = nvrc
             .nvidia_devices
             .iter()

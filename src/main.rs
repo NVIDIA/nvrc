@@ -57,21 +57,18 @@ fn main() {
     must!(init.process_kernel_params(None));
     debug!("init_or_sbin_init: {:?}", init::Invocation::from_argv0());
     must!(init.query_cpu_vendor());
-    #[cfg(feature = "confidential")]
-    must!(init.query_cpu_cc_mode());
     must!(init.get_nvidia_devices(None));
-    let handler = init
-        .hot_or_cold_plug
-        .get(&init.cold_plug)
-        .expect("hot_or_cold_plug handler not found");
-    must!(handler(&mut init));
+
+    // Execute handler based on plug mode
+    match init.plug_mode {
+        crate::core::PlugMode::Cold => must!(init.cold_plug()),
+        crate::core::PlugMode::Hot => must!(init.hot_plug()),
+    }
 }
 
 impl NVRC {
     fn setup_gpu(&mut self) {
         must!(self.check_gpu_supported(None));
-        #[cfg(feature = "confidential")]
-        must!(self.query_gpu_cc_mode());
         must!(nvidia_ctk_system());
         must!(self.manage_daemons(Action::Restart));
         must!(lockdown::disable_modules_loading());

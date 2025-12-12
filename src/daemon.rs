@@ -51,6 +51,7 @@ impl Drop for ManagedChild {
 }
 
 #[cfg(feature = "confidential")]
+#[allow(unused_imports)] // Old code, will be removed in PR #15
 use crate::gpu_old::confidential::CC;
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
@@ -234,7 +235,7 @@ impl NVRC {
     }
 
     pub fn nv_hostengine(&mut self, mode: Action) -> Result<()> {
-        if !self.dcgm_enabled.unwrap_or(false) {
+        if !self.dcgm_enabled {
             return Ok(());
         }
         self.run_daemon(
@@ -246,7 +247,7 @@ impl NVRC {
     }
 
     pub fn dcgm_exporter(&mut self, mode: Action) -> Result<()> {
-        if !self.dcgm_enabled.unwrap_or(false) {
+        if !self.dcgm_enabled {
             return Ok(());
         }
         self.run_daemon(
@@ -259,22 +260,16 @@ impl NVRC {
 
     #[cfg(feature = "confidential")]
     pub fn nvidia_smi_srs(&self) -> Result<()> {
-        if self.gpu_cc_mode != Some(CC::On) {
-            debug!("CC mode off; skip nvidia-smi conf-compute -srs");
-            return Ok(());
-        }
-        foreground(
-            "/bin/nvidia-smi",
-            &[
-                "conf-compute",
-                "-srs",
-                self.nvidia_smi_srs.as_deref().unwrap_or("0"),
-            ],
-        )
+        // Use the CC provider to execute SRS command
+        // It will check if CC is enabled internally
+        self.cc_provider
+            .gpu()
+            .execute_srs_command(self.nvidia_smi_srs.as_deref())
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
     pub fn nv_fabricmanager(&mut self, mode: Action) -> Result<()> {
-        if !self.fabricmanager_enabled.unwrap_or(false) {
+        if !self.fabricmanager_enabled {
             return Ok(());
         }
         self.run_daemon(

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
@@ -204,10 +205,12 @@ pub mod confidential {
                     aggregate = Some(m);
                 }
             }
-            self.gpu_cc_mode = aggregate; // None if no GPUs
-            if self.gpu_cc_mode.is_none() {
+            // gpu_cc_mode field removed in PR #12 refactoring
+            // This functionality is now handled by cc_provider
+            if aggregate.is_none() {
                 debug!("No GPUs for CC mode query");
             }
+            let _ = aggregate; // Suppress unused warning
             Ok(())
         }
     }
