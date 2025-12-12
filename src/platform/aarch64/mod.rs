@@ -60,10 +60,7 @@ mod tests {
         #[cfg(not(feature = "confidential"))]
         {
             let detector = create_detector(CpuVendor::Arm);
-            assert_eq!(
-                detector.platform_description(),
-                "aarch64 (standard, no CC)"
-            );
+            assert_eq!(detector.platform_description(), "aarch64 (standard, no CC)");
         }
     }
 
