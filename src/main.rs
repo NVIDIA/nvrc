@@ -9,7 +9,6 @@ mod cpu;
 mod daemon;
 mod devices;
 mod gpu;
-mod init;
 mod kata_agent;
 mod kmsg;
 mod lockdown;
@@ -89,7 +88,6 @@ fn main() {
 
     // Hardware detection
     must!(mount::readonly("/"));
-    debug!("init_or_sbin_init: {:?}", init::Invocation::from_argv0());
     must!(init.query_cpu_vendor());
     must!(init.get_nvidia_devices(None));
 
@@ -99,10 +97,18 @@ fn main() {
         init.cc_provider.platform().platform_description()
     );
 
-    // Execute handler based on plug mode
+    // Validate and execute handler based on plug mode
+    init.plug_mode.validate(); // Enforces cold-plug for confidential builds
+
     match init.plug_mode {
-        PlugMode::Cold => must!(init.cold_plug()),
-        PlugMode::Hot => must!(init.hot_plug()),
+        PlugMode::Cold => {
+            debug!("Executing cold-plug handler");
+            must!(init.cold_plug())
+        }
+        PlugMode::Hot => {
+            debug!("Executing hot-plug handler");
+            must!(init.hot_plug())
+        }
     }
 }
 
