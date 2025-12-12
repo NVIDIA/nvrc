@@ -2,6 +2,7 @@
 // Copyright (c) NVIDIA CORPORATION
 
 mod attach;
+mod core;
 mod coreutils;
 mod cpu;
 mod daemon;
