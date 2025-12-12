@@ -27,4 +27,3 @@ impl GpuCCProvider for StandardGpuProvider {
         Ok(())
     }
 }
-

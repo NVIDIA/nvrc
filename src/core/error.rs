@@ -28,9 +28,11 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 /// Result type alias for NVRC operations
+#[allow(dead_code)] // Will be used in future PRs
 pub type Result<T> = std::result::Result<T, NvrcError>;
 
 /// Main error type for NVRC operations
+#[allow(dead_code)] // Will be used in future PRs
 #[derive(Error, Debug)]
 pub enum NvrcError {
     // ========================================================================
@@ -235,6 +237,7 @@ pub enum NvrcError {
 
 impl NvrcError {
     /// Create a new "other" error with context
+    #[allow(dead_code)] // Will be used in future PRs
     pub fn other(
         context: impl Into<String>,
         source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -246,11 +249,13 @@ impl NvrcError {
     }
 
     /// Create a device not found error
+    #[allow(dead_code)] // Will be used in future PRs
     pub fn device_not_found(bdf: impl Into<String>) -> Self {
         Self::DeviceNotFound { bdf: bdf.into() }
     }
 
     /// Create a CPU vendor detection failed error
+    #[allow(dead_code)] // Will be used in future PRs
     pub fn cpu_vendor_detection_failed(details: impl Into<String>) -> Self {
         Self::CpuVendorDetectionFailed {
             details: details.into(),
@@ -258,11 +263,13 @@ impl NvrcError {
     }
 
     /// Create an unsupported GPU error
+    #[allow(dead_code)] // Will be used in future PRs
     pub fn unsupported_gpu(device_id: u16) -> Self {
         Self::UnsupportedGpu { device_id }
     }
 
     /// Create an unknown GPU architecture error
+    #[allow(dead_code)] // Will be used in future PRs
     pub fn unknown_gpu_architecture(device_id: u16, device_name: impl Into<String>) -> Self {
         Self::UnknownGpuArchitecture {
             device_id,

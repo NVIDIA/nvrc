@@ -7,5 +7,6 @@
 //! and provides GPU-specific extensions.
 
 // Re-export core GPU traits
+// These will be used in future PRs
+#[allow(unused_imports)]
 pub use crate::core::traits::{GpuArchitecture, GpuCCProvider};
-

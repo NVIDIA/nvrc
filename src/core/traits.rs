@@ -13,6 +13,7 @@ use crate::core::error::Result;
 use crate::devices::NvidiaDevice;
 
 /// Confidential Computing mode states
+#[allow(dead_code)] // Will be used in future PRs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CCMode {
     /// Confidential computing is enabled
@@ -25,12 +26,14 @@ pub enum CCMode {
 
 impl CCMode {
     /// Check if any form of CC is active
+    #[allow(dead_code)] // Will be used in future PRs
     pub fn is_active(self) -> bool {
         !matches!(self, CCMode::Off)
     }
 }
 
 /// CPU vendor identification
+#[allow(dead_code)] // Will be used in future PRs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CpuVendor {
     /// AMD processors
@@ -42,6 +45,7 @@ pub enum CpuVendor {
 }
 
 /// CPU architecture
+#[allow(dead_code)] // Will be used in future PRs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CpuArch {
     /// x86_64 / amd64 architecture
@@ -51,6 +55,7 @@ pub enum CpuArch {
 }
 
 /// Platform information combining vendor and architecture
+#[allow(dead_code)] // Will be used in future PRs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlatformInfo {
     pub vendor: CpuVendor,
@@ -59,6 +64,7 @@ pub struct PlatformInfo {
 
 impl PlatformInfo {
     /// Create new platform info
+    #[allow(dead_code)] // Will be used in future PRs
     pub const fn new(vendor: CpuVendor, arch: CpuArch) -> Self {
         Self { vendor, arch }
     }
@@ -70,6 +76,7 @@ impl PlatformInfo {
 /// - AMD SEV-SNP (x86_64)
 /// - Intel TDX (x86_64)
 /// - ARM CCA (aarch64)
+#[allow(dead_code)] // Will be used in future PRs
 pub trait PlatformCCDetector: Send + Sync + Debug {
     /// Check if confidential computing is available on this platform
     ///
@@ -105,6 +112,7 @@ pub trait PlatformCCDetector: Send + Sync + Debug {
 ///
 /// Each GPU architecture (Hopper, Blackwell, etc.) has different
 /// register layouts and CC mode detection mechanisms.
+#[allow(dead_code)] // Will be used in future PRs
 pub trait GpuArchitecture: Send + Sync + Debug {
     /// Get the name of this GPU architecture
     fn name(&self) -> &str;
@@ -131,6 +139,7 @@ pub trait GpuArchitecture: Send + Sync + Debug {
 }
 
 /// Trait for GPU confidential computing operations
+#[allow(dead_code)] // Will be used in future PRs
 pub trait GpuCCProvider: Send + Sync + Debug {
     /// Query CC mode for a specific GPU device
     ///
@@ -156,6 +165,7 @@ pub trait GpuCCProvider: Send + Sync + Debug {
 ///
 /// This is the main trait that NVRC uses to interact with both
 /// platform and GPU CC detection.
+#[allow(dead_code)] // Will be used in future PRs
 pub trait CCProvider: Send + Sync + Debug {
     /// Get the platform CC detector
     fn platform(&self) -> &dyn PlatformCCDetector;
@@ -179,6 +189,7 @@ pub trait CCProvider: Send + Sync + Debug {
 }
 
 /// System-wide CC mode combining platform and GPU states
+#[allow(dead_code)] // Will be used in future PRs
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemCCMode {
     /// Platform (CPU) CC mode
@@ -191,16 +202,19 @@ impl SystemCCMode {
     /// Check if the entire system is in CC mode
     ///
     /// Returns true only if both platform and all GPUs have CC enabled.
+    #[allow(dead_code)] // Will be used in future PRs
     pub fn is_fully_enabled(&self) -> bool {
         self.platform == CCMode::On && self.gpu == Some(CCMode::On)
     }
 
     /// Check if any CC is enabled (platform or GPU)
+    #[allow(dead_code)] // Will be used in future PRs
     pub fn has_any_cc(&self) -> bool {
         self.platform.is_active() || self.gpu.is_some_and(|m| m.is_active())
     }
 
     /// Check if platform and GPU CC modes are consistent
+    #[allow(dead_code)] // Will be used in future PRs
     pub fn is_consistent(&self) -> bool {
         match self.gpu {
             Some(gpu_mode) => self.platform == gpu_mode,

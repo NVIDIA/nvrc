@@ -12,6 +12,7 @@ use crate::core::traits::{CpuVendor, PlatformCCDetector};
 /// Factory function to create x86_64 platform detector
 ///
 /// Creates the appropriate detector based on CPU vendor.
+#[allow(dead_code)] // Will be used in future PRs
 pub fn create_detector(_vendor: CpuVendor) -> Box<dyn PlatformCCDetector> {
     // Placeholder implementation
     // Will be implemented in PR #5
@@ -19,6 +20,7 @@ pub fn create_detector(_vendor: CpuVendor) -> Box<dyn PlatformCCDetector> {
 }
 
 /// Standard (non-CC) x86_64 detector
+#[allow(dead_code)] // Will be used in future PRs
 #[derive(Debug)]
 struct X86StandardDetector;
 
@@ -35,4 +37,3 @@ impl PlatformCCDetector for X86StandardDetector {
         "x86_64 (standard, no CC)"
     }
 }
-

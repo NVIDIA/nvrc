@@ -12,4 +12,6 @@ pub mod traits;
 pub mod types;
 
 // Re-export commonly used items
+// These will be used in future PRs
+#[allow(unused_imports)]
 pub use error::{NvrcError, Result};

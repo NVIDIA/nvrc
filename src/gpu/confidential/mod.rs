@@ -11,6 +11,7 @@ use crate::core::traits::{CCMode, GpuCCProvider};
 use crate::devices::NvidiaDevice;
 
 /// Confidential GPU provider (placeholder)
+#[allow(dead_code)] // Will be implemented in PR #9
 #[derive(Debug)]
 pub struct ConfidentialGpuProvider;
 
@@ -31,4 +32,3 @@ impl GpuCCProvider for ConfidentialGpuProvider {
         Ok(())
     }
 }
-

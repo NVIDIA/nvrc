@@ -8,4 +8,3 @@
 
 // Placeholder for future architecture implementations
 // Will be added in PR #8
-

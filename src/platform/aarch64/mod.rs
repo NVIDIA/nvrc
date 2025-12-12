@@ -11,6 +11,7 @@ use crate::core::traits::{CpuVendor, PlatformCCDetector};
 /// Factory function to create aarch64 platform detector
 ///
 /// Creates the appropriate detector based on CPU vendor.
+#[allow(dead_code)] // Will be used in future PRs
 pub fn create_detector(_vendor: CpuVendor) -> Box<dyn PlatformCCDetector> {
     // Placeholder implementation
     // Will be implemented in PR #6
@@ -18,6 +19,7 @@ pub fn create_detector(_vendor: CpuVendor) -> Box<dyn PlatformCCDetector> {
 }
 
 /// Standard (non-CC) aarch64 detector
+#[allow(dead_code)] // Will be used in future PRs
 #[derive(Debug)]
 struct Aarch64StandardDetector;
 
@@ -34,4 +36,3 @@ impl PlatformCCDetector for Aarch64StandardDetector {
         "aarch64 (standard, no CC)"
     }
 }
-

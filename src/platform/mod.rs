@@ -56,6 +56,7 @@ use crate::core::traits::{PlatformCCDetector, PlatformInfo};
 /// let cc_mode = detector.query_cc_mode()?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+#[allow(dead_code)] // Will be used in future PRs
 pub fn create_platform_detector(platform: PlatformInfo) -> Box<dyn PlatformCCDetector> {
     #[cfg(target_arch = "x86_64")]
     {
@@ -72,4 +73,3 @@ pub fn create_platform_detector(platform: PlatformInfo) -> Box<dyn PlatformCCDet
         compile_error!("Unsupported architecture. Only x86_64 and aarch64 are supported.");
     }
 }
-

@@ -38,4 +38,3 @@ pub mod confidential;
 
 #[cfg(not(feature = "confidential"))]
 pub mod standard;
-

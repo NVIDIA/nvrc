@@ -22,12 +22,11 @@ use std::fs;
 /// Returns an error if:
 /// - `/proc/cpuinfo` cannot be read
 /// - No recognized vendor string is found
+#[allow(dead_code)] // Used in tests and will be used in future PRs
 pub fn detect_cpu_vendor() -> Result<CpuVendor> {
-    let data = fs::read_to_string("/proc/cpuinfo").map_err(|e| {
-        NvrcError::FileOperationFailed {
-            path: "/proc/cpuinfo".into(),
-            source: e,
-        }
+    let data = fs::read_to_string("/proc/cpuinfo").map_err(|e| NvrcError::FileOperationFailed {
+        path: "/proc/cpuinfo".into(),
+        source: e,
     })?;
 
     for line in data.lines() {
@@ -51,6 +50,7 @@ pub fn detect_cpu_vendor() -> Result<CpuVendor> {
 ///
 /// Returns the current architecture based on the compilation target.
 /// This is a zero-cost abstraction resolved at compile time.
+#[allow(dead_code)] // Used in tests and will be used in future PRs
 pub const fn detect_cpu_arch() -> CpuArch {
     #[cfg(target_arch = "x86_64")]
     return CpuArch::X86_64;
@@ -76,6 +76,7 @@ pub const fn detect_cpu_arch() -> CpuArch {
 /// println!("Running on {:?} {:?}", platform.vendor, platform.arch);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
+#[allow(dead_code)] // Used in tests and will be used in future PRs
 pub fn detect_platform() -> Result<PlatformInfo> {
     let vendor = detect_cpu_vendor()?;
     let arch = detect_cpu_arch();
@@ -123,10 +124,7 @@ mod tests {
         #[cfg(target_arch = "x86_64")]
         {
             assert_eq!(platform.arch, CpuArch::X86_64);
-            assert!(matches!(
-                platform.vendor,
-                CpuVendor::Amd | CpuVendor::Intel
-            ));
+            assert!(matches!(platform.vendor, CpuVendor::Amd | CpuVendor::Intel));
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -136,4 +134,3 @@ mod tests {
         }
     }
 }
-
