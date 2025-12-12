@@ -7,6 +7,7 @@
 //! of confidential computing detection across different platforms and GPU
 //! architectures.
 
+pub mod builder;
 pub mod error;
 pub mod traits;
 pub mod types;

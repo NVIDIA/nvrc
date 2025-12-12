@@ -18,6 +18,7 @@ mod ndev;
 mod nvrc;
 mod pci_ids;
 mod platform;
+mod providers;
 mod supported;
 mod syslog;
 mod toolkit;
