@@ -8,6 +8,7 @@ mod cpu;
 mod daemon;
 mod devices;
 mod gpu;
+mod gpu_old; // Old GPU module, will be migrated
 mod init;
 mod kata_agent;
 mod kmsg;
@@ -16,6 +17,7 @@ mod mount;
 mod ndev;
 mod nvrc;
 mod pci_ids;
+mod platform;
 mod supported;
 mod syslog;
 mod toolkit;

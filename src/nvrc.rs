@@ -14,7 +14,7 @@ use crate::cpu::Cpu;
 use crate::daemon::{ManagedChild, Name};
 use crate::devices::NvidiaDevice;
 #[cfg(feature = "confidential")]
-use crate::gpu::confidential::CC;
+use crate::gpu_old::confidential::CC;
 use crate::user_group::UserGroup;
 
 fn parse_boolean(s: &str) -> bool {
