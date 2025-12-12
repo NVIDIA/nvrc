@@ -129,4 +129,3 @@ mod tests {
         assert_eq!(BlackwellArchitecture::CC_STATE_MASK, 0x3);
     }
 }
-

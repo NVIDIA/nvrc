@@ -137,4 +137,3 @@ mod tests {
         assert_eq!(HopperArchitecture::CC_STATE_MASK, 0x3);
     }
 }
-
