@@ -173,9 +173,18 @@ mod tests {
 
     #[test]
     fn test_device_id_from_hex_str() {
-        assert_eq!(DeviceId::from_hex_str("0x1234").unwrap(), DeviceId::new(0x1234));
-        assert_eq!(DeviceId::from_hex_str("1234").unwrap(), DeviceId::new(0x1234));
-        assert_eq!(DeviceId::from_hex_str("  0x1234  ").unwrap(), DeviceId::new(0x1234));
+        assert_eq!(
+            DeviceId::from_hex_str("0x1234").unwrap(),
+            DeviceId::new(0x1234)
+        );
+        assert_eq!(
+            DeviceId::from_hex_str("1234").unwrap(),
+            DeviceId::new(0x1234)
+        );
+        assert_eq!(
+            DeviceId::from_hex_str("  0x1234  ").unwrap(),
+            DeviceId::new(0x1234)
+        );
     }
 
     #[test]
@@ -226,4 +235,3 @@ mod tests {
         assert_eq!(raw, 0x1234);
     }
 }
-

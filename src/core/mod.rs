@@ -7,6 +7,9 @@
 //! of confidential computing detection across different platforms and GPU
 //! architectures.
 
+pub mod error;
 pub mod traits;
 pub mod types;
 
+// Re-export commonly used items
+pub use error::{NvrcError, Result};

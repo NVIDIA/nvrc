@@ -7,9 +7,9 @@
 //! for different platform implementations (AMD SNP, Intel TDX, ARM CCA) and
 //! GPU architectures (Hopper, Blackwell, etc.).
 
-use anyhow::Result;
 use std::fmt::Debug;
 
+use crate::core::error::Result;
 use crate::devices::NvidiaDevice;
 
 /// Confidential Computing mode states
@@ -290,4 +290,3 @@ mod tests {
         assert_eq!(info.arch, CpuArch::X86_64);
     }
 }
-
