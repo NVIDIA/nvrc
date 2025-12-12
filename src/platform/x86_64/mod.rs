@@ -7,33 +7,84 @@
 //! - AMD SEV-SNP
 //! - Intel TDX
 
+mod amd;
+mod intel;
+mod standard;
+
+pub use amd::AmdSnpDetector;
+pub use intel::IntelTdxDetector;
+pub use standard::X86StandardDetector;
+
 use crate::core::traits::{CpuVendor, PlatformCCDetector};
 
 /// Factory function to create x86_64 platform detector
 ///
-/// Creates the appropriate detector based on CPU vendor.
-#[allow(dead_code)] // Will be used in future PRs
-pub fn create_detector(_vendor: CpuVendor) -> Box<dyn PlatformCCDetector> {
-    // Placeholder implementation
-    // Will be implemented in PR #5
-    Box::new(X86StandardDetector)
+/// Creates the appropriate detector based on CPU vendor and feature flags.
+///
+/// # Arguments
+///
+/// * `vendor` - The detected CPU vendor (AMD, Intel, or Arm)
+///
+/// # Returns
+///
+/// A boxed platform detector appropriate for the vendor and build configuration:
+/// - AMD + confidential feature: `AmdSnpDetector`
+/// - Intel + confidential feature: `IntelTdxDetector`
+/// - Otherwise: `X86StandardDetector`
+pub fn create_detector(vendor: CpuVendor) -> Box<dyn PlatformCCDetector> {
+    #[cfg(feature = "confidential")]
+    {
+        match vendor {
+            CpuVendor::Amd => {
+                debug!("Creating AMD SEV-SNP detector");
+                Box::new(AmdSnpDetector::new())
+            }
+            CpuVendor::Intel => {
+                debug!("Creating Intel TDX detector");
+                Box::new(IntelTdxDetector::new())
+            }
+            _ => {
+                debug!("Non-x86 vendor on x86_64, using standard detector");
+                Box::new(X86StandardDetector::new())
+            }
+        }
+    }
+
+    #[cfg(not(feature = "confidential"))]
+    {
+        let _ = vendor; // Suppress unused warning
+        debug!("Standard build, using standard detector");
+        Box::new(X86StandardDetector::new())
+    }
 }
 
-/// Standard (non-CC) x86_64 detector
-#[allow(dead_code)] // Will be used in future PRs
-#[derive(Debug)]
-struct X86StandardDetector;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-impl PlatformCCDetector for X86StandardDetector {
-    fn is_cc_available(&self) -> bool {
-        false
+    #[test]
+    fn test_create_detector_standard() {
+        // Standard build should always return X86StandardDetector
+        #[cfg(not(feature = "confidential"))]
+        {
+            let detector = create_detector(CpuVendor::Amd);
+            assert_eq!(detector.platform_description(), "x86_64 (standard, no CC)");
+
+            let detector = create_detector(CpuVendor::Intel);
+            assert_eq!(detector.platform_description(), "x86_64 (standard, no CC)");
+        }
     }
 
-    fn query_cc_mode(&self) -> crate::core::error::Result<crate::core::traits::CCMode> {
-        Ok(crate::core::traits::CCMode::Off)
-    }
+    #[test]
+    fn test_create_detector_confidential() {
+        // Confidential build should return vendor-specific detectors
+        #[cfg(feature = "confidential")]
+        {
+            let detector = create_detector(CpuVendor::Amd);
+            assert!(detector.platform_description().contains("AMD SEV-SNP"));
 
-    fn platform_description(&self) -> &str {
-        "x86_64 (standard, no CC)"
+            let detector = create_detector(CpuVendor::Intel);
+            assert!(detector.platform_description().contains("Intel TDX"));
+        }
     }
 }
