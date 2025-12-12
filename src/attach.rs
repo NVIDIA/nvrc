@@ -2,7 +2,7 @@
 // Copyright (c) NVIDIA CORPORATION
 
 use crate::daemon::Action;
-use crate::kata_agent;
+use crate::kata_agent::kata_agent;
 use crate::kmsg;
 use crate::ndev;
 use crate::nvrc::NVRC;

@@ -40,7 +40,6 @@ impl PlugMode {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -10,8 +10,15 @@ use crate::core::traits::{CCMode, GpuCCProvider};
 use crate::devices::NvidiaDevice;
 
 /// Standard GPU provider (no CC support)
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct StandardGpuProvider;
+
+impl StandardGpuProvider {
+    /// Create a new standard GPU provider
+    pub fn new() -> Self {
+        Self
+    }
+}
 
 impl GpuCCProvider for StandardGpuProvider {
     fn query_device_cc_mode(&self, _bdf: &str, _device_id: u16) -> Result<CCMode> {

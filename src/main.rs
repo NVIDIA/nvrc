@@ -8,7 +8,6 @@ mod cpu;
 mod daemon;
 mod devices;
 mod gpu;
-mod gpu_old; // Old GPU module, will be migrated
 mod init;
 mod kata_agent;
 mod kmsg;
@@ -41,28 +40,51 @@ macro_rules! must {
     };
 }
 
+macro_rules! must_build {
+    ($expr:expr) => {
+        match $expr {
+            Ok(builder) => match builder.build() {
+                Ok(nvrc) => nvrc,
+                Err(e) => panic!("build failure: {e}"),
+            },
+            Err(e) => panic!("provider setup failure: {e}"),
+        }
+    };
+}
+
+use core::builder::NVRCBuilder;
+use core::PlugMode;
 use daemon::Action;
-use kata_agent::kata_agent;
 use nvrc::NVRC;
 use toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
 
 fn main() {
     lockdown::set_panic_hook();
-    let mut init = NVRC::default();
+
+    // System-level setup (before NVRC initialization)
     must!(mount::setup());
     must!(kmsg::kernlog_setup());
-    must!(init.setup_syslog());
-    must!(init.set_random_identity());
+
+    // Build NVRC with auto-detected CC provider
+    let mut init = must_build!(NVRCBuilder::new().with_auto_cc_provider());
+
+    // Continue initialization
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
     debug!("init_or_sbin_init: {:?}", init::Invocation::from_argv0());
     must!(init.query_cpu_vendor());
     must!(init.get_nvidia_devices(None));
 
+    // Log platform information
+    info!(
+        "Platform: {}",
+        init.cc_provider.platform().platform_description()
+    );
+
     // Execute handler based on plug mode
     match init.plug_mode {
-        crate::core::PlugMode::Cold => must!(init.cold_plug()),
-        crate::core::PlugMode::Hot => must!(init.hot_plug()),
+        PlugMode::Cold => must!(init.cold_plug()),
+        PlugMode::Hot => must!(init.hot_plug()),
     }
 }
 

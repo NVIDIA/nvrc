@@ -8,8 +8,14 @@
 
 use crate::core::error::Result;
 use crate::core::traits::{CCProvider, PlatformCCDetector};
-use crate::gpu::confidential::ConfidentialGpuProvider;
 use crate::platform;
+
+#[cfg(feature = "confidential")]
+use crate::gpu::confidential::ConfidentialGpuProvider;
+
+#[cfg(not(feature = "confidential"))]
+// Use standard GPU provider when confidential feature is not enabled
+type ConfidentialGpuProvider = crate::gpu::standard::StandardGpuProvider;
 
 /// Top-level confidential computing provider
 ///

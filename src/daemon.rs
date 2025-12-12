@@ -50,10 +50,6 @@ impl Drop for ManagedChild {
     }
 }
 
-#[cfg(feature = "confidential")]
-#[allow(unused_imports)] // Old code, will be removed in PR #15
-use crate::gpu_old::confidential::CC;
-
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub enum Action {
     Start,
