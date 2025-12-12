@@ -32,7 +32,6 @@ use std::sync::LazyLock;
 ///
 /// This trait allows the registry to clone architecture implementations
 /// when returning them from the registry lookup.
-#[allow(dead_code)] // Will be used in PR #8
 pub trait CloneableGpuArchitecture: GpuArchitecture {
     /// Clone this architecture into a new box
     fn clone_box(&self) -> Box<dyn GpuArchitecture>;
@@ -52,14 +51,12 @@ where
 ///
 /// Maintains a list of known GPU architectures and provides lookup
 /// functionality based on device ID or device name.
-#[allow(dead_code)] // Will be used in PR #8
 pub struct GpuArchitectureRegistry {
     architectures: Vec<Box<dyn CloneableGpuArchitecture>>,
 }
 
 impl GpuArchitectureRegistry {
     /// Create a new empty registry
-    #[allow(dead_code)] // Will be used in PR #8
     pub fn new() -> Self {
         Self {
             architectures: Vec::new(),
@@ -69,7 +66,6 @@ impl GpuArchitectureRegistry {
     /// Get the global registry instance
     ///
     /// This is initialized once on first access with all known architectures.
-    #[allow(dead_code)] // Will be used in PR #8
     pub fn global() -> &'static Self {
         static REGISTRY: LazyLock<GpuArchitectureRegistry> =
             LazyLock::new(GpuArchitectureRegistry::init);
@@ -96,7 +92,6 @@ impl GpuArchitectureRegistry {
     ///
     /// This adds an architecture to the registry. Architectures are checked
     /// in the order they are registered.
-    #[allow(dead_code)] // Will be used in PR #8
     pub fn register<T>(&mut self, arch: T)
     where
         T: CloneableGpuArchitecture + 'static,
@@ -155,7 +150,6 @@ impl GpuArchitectureRegistry {
     /// # Errors
     ///
     /// Returns an error if no matching architecture is found.
-    #[allow(dead_code)] // Will be used in PR #8
     pub fn get_architecture(
         &self,
         device_id: u16,
@@ -186,13 +180,12 @@ impl GpuArchitectureRegistry {
     }
 
     /// Get the number of registered architectures
-    #[allow(dead_code)] // Will be used in PR #8
     pub fn len(&self) -> usize {
         self.architectures.len()
     }
 
     /// Check if the registry is empty
-    #[allow(dead_code)] // Will be used in PR #8
+    #[allow(dead_code)] // Public API
     pub fn is_empty(&self) -> bool {
         self.architectures.is_empty()
     }
@@ -215,7 +208,6 @@ impl Default for GpuArchitectureRegistry {
 /// println!("Detected: {}", arch.name());
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[allow(dead_code)] // Will be used in PR #8
 pub fn detect_architecture(device_id: u16, device_name: &str) -> Result<Box<dyn GpuArchitecture>> {
     GpuArchitectureRegistry::global().get_architecture(device_id, device_name)
 }
@@ -367,7 +359,7 @@ mod tests {
     #[test]
     fn test_global_registry() {
         let registry = GpuArchitectureRegistry::global();
-        // Global registry might be empty initially (architectures added in PR #8)
+        // Global registry initialized with known architectures
         assert!(registry.len() >= 0);
     }
 }

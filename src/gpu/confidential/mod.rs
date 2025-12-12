@@ -23,13 +23,11 @@ use anyhow::Context;
 /// 1. Detecting GPU architecture from device ID
 /// 2. Reading CC register from BAR0
 /// 3. Parsing CC mode from register value
-#[allow(dead_code)] // Will be used in PR #10
 #[derive(Debug, Default)]
 pub struct ConfidentialGpuProvider;
 
 impl ConfidentialGpuProvider {
     /// Create a new confidential GPU provider
-    #[allow(dead_code)] // Will be used in PR #10
     pub fn new() -> Self {
         Self
     }

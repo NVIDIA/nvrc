@@ -34,7 +34,7 @@ pub struct NVRC {
 
     // Hardware detection
     pub cpu_vendor: Option<Cpu>,
-    #[allow(dead_code)] // Will be used when we fully integrate platform detection
+    #[allow(dead_code)]
     pub platform_info: Option<PlatformInfo>,
     pub nvidia_devices: Vec<NvidiaDevice>,
     pub gpu_supported: bool,

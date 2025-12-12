@@ -89,7 +89,7 @@ fn read_bar0_size(bdf: &str) -> Result<usize> {
 /// - Memory mapping via `mmap()`
 /// - Volatile register reads
 /// - Memory unmapping
-#[allow(dead_code)] // Will be used in existing code migration
+#[allow(dead_code)]
 pub fn read_bar0_register(bdf: &str, register_offset: u64) -> Result<u32> {
     let resource_path = format!("/sys/bus/pci/devices/{}/resource0", bdf);
 

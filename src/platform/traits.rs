@@ -6,7 +6,7 @@
 /// Platform-specific capabilities
 ///
 /// This trait allows querying platform information at compile time.
-#[allow(dead_code)] // Will be used in future PRs
+#[allow(dead_code)]
 pub trait PlatformCapabilities {
     /// Check if running on this platform
     fn is_current_platform() -> bool;

@@ -25,11 +25,11 @@ pub struct BlackwellArchitecture;
 
 impl BlackwellArchitecture {
     /// CC register offset for Blackwell
-    #[allow(dead_code)] // Used in tests
+    #[allow(dead_code)]
     pub const CC_REGISTER: u64 = 0x590;
 
     /// CC state mask (bits [1:0])
-    #[allow(dead_code)] // Used in tests
+    #[allow(dead_code)]
     const CC_STATE_MASK: u32 = 0x3;
 
     /// Known Blackwell device IDs

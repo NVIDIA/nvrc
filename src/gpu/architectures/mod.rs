@@ -30,6 +30,5 @@ pub use blackwell::BlackwellArchitecture;
 pub use hopper::HopperArchitecture;
 
 // Re-export main functions
-// Will be used in PR #9
 #[allow(unused_imports)]
 pub use registry::{detect_architecture, GpuArchitectureRegistry};

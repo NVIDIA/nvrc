@@ -56,7 +56,7 @@ use crate::core::traits::{PlatformCCDetector, PlatformInfo};
 /// let cc_mode = detector.query_cc_mode()?;
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-#[allow(dead_code)] // Will be used in future PRs
+#[allow(dead_code)]
 pub fn create_platform_detector(platform: PlatformInfo) -> Box<dyn PlatformCCDetector> {
     #[cfg(target_arch = "x86_64")]
     {

@@ -22,7 +22,6 @@ type ConfidentialGpuProvider = crate::gpu::standard::StandardGpuProvider;
 /// Combines platform and GPU CC detection into a single provider.
 /// Automatically detects the current platform and creates the
 /// appropriate platform detector.
-#[allow(dead_code)] // Will be used in PR #11
 #[derive(Debug)]
 pub struct ConfidentialProvider {
     platform_detector: Box<dyn PlatformCCDetector>,
@@ -38,7 +37,6 @@ impl ConfidentialProvider {
     /// # Errors
     ///
     /// Returns an error if platform detection fails.
-    #[allow(dead_code)] // Will be used in PR #11
     pub fn new() -> Result<Self> {
         let platform_info = platform::detector::detect_platform()?;
         Self::with_platform(platform_info)
@@ -47,7 +45,6 @@ impl ConfidentialProvider {
     /// Create with specific platform info
     ///
     /// Useful for testing or when platform info is already known.
-    #[allow(dead_code)] // Will be used in PR #11
     pub fn with_platform(platform_info: crate::core::traits::PlatformInfo) -> Result<Self> {
         let platform_detector = platform::create_platform_detector(platform_info);
         let gpu_provider = ConfidentialGpuProvider::new();
@@ -66,7 +63,7 @@ impl ConfidentialProvider {
     /// Create with custom detectors (for testing)
     ///
     /// Allows injecting custom platform and GPU detectors for unit testing.
-    #[allow(dead_code)] // Used in tests
+    #[allow(dead_code)]
     pub fn with_detectors(
         platform_detector: Box<dyn PlatformCCDetector>,
         gpu_provider: ConfidentialGpuProvider,

@@ -30,11 +30,11 @@ pub use confidential::ConfidentialProvider;
 #[allow(unused_imports)] // Used based on feature flag
 pub use standard::StandardProvider;
 
-// Feature-based default provider
-#[allow(dead_code)] // Will be used in PR #11
+// Feature-based default provider for library users
+#[allow(dead_code)] // Public API for library usage
 #[cfg(feature = "confidential")]
 pub type DefaultProvider = ConfidentialProvider;
 
-#[allow(dead_code)] // Will be used in PR #11
+#[allow(dead_code)] // Public API for library usage
 #[cfg(not(feature = "confidential"))]
 pub type DefaultProvider = StandardProvider;

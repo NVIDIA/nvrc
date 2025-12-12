@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
@@ -49,6 +48,7 @@ impl NVRC {
 }
 
 #[cfg(feature = "confidential")]
+#[allow(dead_code)] // Old CC detection code, replaced by platform module
 pub mod confidential {
     use super::{Cpu, NVRC};
     use log::debug;

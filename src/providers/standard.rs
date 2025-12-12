@@ -13,7 +13,6 @@ use crate::devices::NvidiaDevice;
 /// Standard (non-CC) provider
 ///
 /// Always reports CC as disabled. Used for standard (non-confidential) builds.
-#[allow(dead_code)] // Will be used in PR #11
 #[derive(Debug)]
 pub struct StandardProvider {
     platform_detector: StandardPlatformDetector,
@@ -27,7 +26,6 @@ struct StandardGpuProvider;
 
 impl StandardProvider {
     /// Create a new standard provider
-    #[allow(dead_code)] // Will be used in PR #11
     pub fn new() -> Self {
         debug!("Created StandardProvider (no CC support)");
         Self {

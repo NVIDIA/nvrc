@@ -27,6 +27,7 @@ use std::sync::Arc;
 ///
 /// Provides a fluent API for configuring and creating NVRC instances.
 /// Ensures all required configuration is set before building.
+#[allow(dead_code)] // Public API, not all methods used internally yet
 pub struct NVRCBuilder {
     cc_provider: Option<Arc<dyn CCProvider>>,
     dcgm_enabled: bool,
@@ -35,9 +36,9 @@ pub struct NVRCBuilder {
     nvidia_smi_srs: Option<String>,
 }
 
+#[allow(dead_code)] // Public API, not all methods used internally yet
 impl NVRCBuilder {
     /// Create a new builder with default settings
-    #[allow(dead_code)] // Will be used in PR #13
     pub fn new() -> Self {
         Self {
             cc_provider: None,
@@ -56,7 +57,6 @@ impl NVRCBuilder {
     /// # Errors
     ///
     /// Returns an error if platform detection fails (confidential builds only).
-    #[allow(dead_code)] // Will be used in PR #13
     pub fn with_auto_cc_provider(mut self) -> Result<Self> {
         #[cfg(feature = "confidential")]
         {
@@ -76,35 +76,31 @@ impl NVRCBuilder {
     /// Set a custom CC provider
     ///
     /// Useful for testing or advanced customization.
-    #[allow(dead_code)] // Used in tests
+    #[allow(dead_code)]
     pub fn with_cc_provider(mut self, provider: Arc<dyn CCProvider>) -> Self {
         self.cc_provider = Some(provider);
         self
     }
 
     /// Enable or disable DCGM
-    #[allow(dead_code)] // Will be used in PR #13
     pub fn with_dcgm(mut self, enabled: bool) -> Self {
         self.dcgm_enabled = enabled;
         self
     }
 
     /// Enable or disable Fabric Manager
-    #[allow(dead_code)] // Will be used in PR #13
     pub fn with_fabricmanager(mut self, enabled: bool) -> Self {
         self.fabricmanager_enabled = enabled;
         self
     }
 
     /// Set UVM persistence mode
-    #[allow(dead_code)] // Will be used in PR #13
     pub fn with_uvm_persistence_mode(mut self, mode: String) -> Self {
         self.uvm_persistence_mode = Some(mode);
         self
     }
 
     /// Set nvidia-smi SRS value
-    #[allow(dead_code)] // Will be used in PR #13
     pub fn with_nvidia_smi_srs(mut self, srs: String) -> Self {
         self.nvidia_smi_srs = Some(srs);
         self
@@ -117,7 +113,6 @@ impl NVRCBuilder {
     /// Returns an error if:
     /// - CC provider is not set (call `with_auto_cc_provider()` or `with_cc_provider()`)
     /// - Initialization steps fail
-    #[allow(dead_code)] // Will be used in PR #13
     pub fn build(self) -> Result<crate::nvrc::NVRC> {
         let cc_provider = self
             .cc_provider

@@ -65,8 +65,10 @@ fn main() {
     must!(mount::setup());
     must!(kmsg::kernlog_setup());
 
-    // Build NVRC with auto-detected CC provider
-    let mut init = must_build!(NVRCBuilder::new().with_auto_cc_provider());
+    // Build NVRC with auto-detected CC provider and configuration
+    let mut init = must_build!(NVRCBuilder::new()
+        .with_auto_cc_provider()
+        .map(|b| b.with_dcgm(true).with_fabricmanager(false)));
 
     // Continue initialization
     must!(mount::readonly("/"));
