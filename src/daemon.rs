@@ -51,7 +51,7 @@ impl Drop for ManagedChild {
 }
 
 #[cfg(feature = "confidential")]
-use crate::gpu::confidential::CC;
+use crate::gpu_old::confidential::CC;
 
 #[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub enum Action {
