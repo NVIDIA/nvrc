@@ -18,6 +18,8 @@ use crate::daemon::{ManagedChild, Name};
 use crate::devices::NvidiaDevice;
 use crate::user_group::UserGroup;
 
+// Old parsing function - replaced by config::parser::parse_boolean
+#[allow(dead_code)]
 fn parse_boolean(s: &str) -> bool {
     matches!(s.to_ascii_lowercase().as_str(), "on" | "true" | "1" | "yes")
 }
@@ -113,6 +115,9 @@ impl NVRC {
         Ok(())
     }
 
+    // Old method - replaced by KernelParams + Builder pattern
+    // Kept for backward compatibility with existing tests
+    #[allow(dead_code)]
     pub fn process_kernel_params(&mut self, cmdline: Option<&str>) -> Result<()> {
         let content = match cmdline {
             Some(c) => c.to_owned(),
@@ -138,6 +143,8 @@ impl NVRC {
     }
 }
 
+// Old parameter handlers - replaced by KernelParams
+#[allow(dead_code)]
 pub fn nvrc_dcgm(value: &str, ctx: &mut NVRC) -> Result<()> {
     let dcgm = parse_boolean(value);
     ctx.dcgm_enabled = dcgm;
@@ -145,6 +152,7 @@ pub fn nvrc_dcgm(value: &str, ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn nvrc_fabricmanager(value: &str, ctx: &mut NVRC) -> Result<()> {
     let fabricmanager = parse_boolean(value);
     ctx.fabricmanager_enabled = fabricmanager;
@@ -152,6 +160,7 @@ pub fn nvrc_fabricmanager(value: &str, ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn nvrc_log(value: &str, _ctx: &mut NVRC) -> Result<()> {
     let lvl = match value.to_ascii_lowercase().as_str() {
         "off" | "0" | "" => log::LevelFilter::Off,
@@ -171,6 +180,7 @@ pub fn nvrc_log(value: &str, _ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn nvidia_smi_srs(value: &str, ctx: &mut NVRC) -> Result<()> {
     ctx.nvidia_smi_srs = Some(value.to_owned());
     debug!("nvidia_smi_srs: {value}");
@@ -184,6 +194,7 @@ pub fn nvidia_smi_lgc(value: &str, ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn uvm_persistenced_mode(value: &str, ctx: &mut NVRC) -> Result<()> {
     ctx.uvm_persistence_mode = Some(value.to_owned());
     debug!("nvrc.uvm_persistence_mode: {value}");

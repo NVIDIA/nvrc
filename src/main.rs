@@ -2,6 +2,7 @@
 // Copyright (c) NVIDIA CORPORATION
 
 mod attach;
+mod config;
 mod core;
 mod coreutils;
 mod cpu;
@@ -52,6 +53,16 @@ macro_rules! must_build {
     };
 }
 
+macro_rules! must_value {
+    ($expr:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(e) => panic!("value creation failure: {e}"),
+        }
+    };
+}
+
+use config::KernelParams;
 use core::builder::NVRCBuilder;
 use core::PlugMode;
 use daemon::Action;
@@ -65,14 +76,19 @@ fn main() {
     must!(mount::setup());
     must!(kmsg::kernlog_setup());
 
-    // Build NVRC with auto-detected CC provider and configuration
+    // Parse kernel configuration (immutable, idiomatic)
+    let kernel_params = must_value!(KernelParams::from_cmdline(None));
+
+    // Apply log configuration early (affects global state)
+    must!(kernel_params.apply_log_config());
+
+    // Build NVRC with configuration (no mutation after build!)
     let mut init = must_build!(NVRCBuilder::new()
         .with_auto_cc_provider()
-        .map(|b| b.with_dcgm(true).with_fabricmanager(false)));
+        .map(|b| b.with_kernel_params(kernel_params)));
 
-    // Continue initialization
+    // Hardware detection
     must!(mount::readonly("/"));
-    must!(init.process_kernel_params(None));
     debug!("init_or_sbin_init: {:?}", init::Invocation::from_argv0());
     must!(init.query_cpu_vendor());
     must!(init.get_nvidia_devices(None));

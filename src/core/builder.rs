@@ -19,6 +19,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+use crate::config::KernelParams;
 use crate::core::error::{NvrcError, Result};
 use crate::core::traits::CCProvider;
 use std::sync::Arc;
@@ -34,6 +35,7 @@ pub struct NVRCBuilder {
     fabricmanager_enabled: bool,
     uvm_persistence_mode: Option<String>,
     nvidia_smi_srs: Option<String>,
+    nvidia_smi_lgc: Option<String>,
 }
 
 #[allow(dead_code)] // Public API, not all methods used internally yet
@@ -46,6 +48,7 @@ impl NVRCBuilder {
             fabricmanager_enabled: false,
             uvm_persistence_mode: None,
             nvidia_smi_srs: None,
+            nvidia_smi_lgc: None,
         }
     }
 
@@ -106,6 +109,71 @@ impl NVRCBuilder {
         self
     }
 
+    /// Apply kernel configuration
+    ///
+    /// This method consumes a `KernelParams` object and applies all
+    /// its settings to the builder. This is the idiomatic way to handle
+    /// kernel parameters.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use nvrc::config::KernelParams;
+    /// use nvrc::core::builder::NVRCBuilder;
+    ///
+    /// let config = KernelParams::from_cmdline(None)?;
+    /// let nvrc = NVRCBuilder::new()
+    ///     .with_auto_cc_provider()?
+    ///     .with_kernel_params(config)
+    ///     .build()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn with_kernel_params(mut self, config: KernelParams) -> Self {
+        // Apply log level if specified
+        if config.log_level.is_some() {
+            if let Err(e) = config.apply_log_config() {
+                warn!("Failed to apply log config: {}", e);
+            }
+        }
+
+        // Apply configuration values
+        if let Some(dcgm) = config.dcgm_enabled {
+            self.dcgm_enabled = dcgm;
+        }
+        if let Some(fm) = config.fabricmanager_enabled {
+            self.fabricmanager_enabled = fm;
+        }
+        if let Some(uvm) = config.uvm_persistence_mode {
+            self.uvm_persistence_mode = Some(uvm);
+        }
+        if let Some(srs) = config.nvidia_smi_srs {
+            self.nvidia_smi_srs = Some(srs);
+        }
+        if let Some(lgc) = config.nvidia_smi_lgc {
+            self.nvidia_smi_lgc = Some(lgc);
+        }
+
+        self
+    }
+
+    /// Convenience method to parse kernel params from cmdline and apply in one step
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use nvrc::core::builder::NVRCBuilder;
+    ///
+    /// let nvrc = NVRCBuilder::new()
+    ///     .with_auto_cc_provider()?
+    ///     .with_kernel_params_from_cmdline(None)?  // Reads /proc/cmdline
+    ///     .build()?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn with_kernel_params_from_cmdline(self, cmdline: Option<&str>) -> Result<Self> {
+        let params = KernelParams::from_cmdline(cmdline)?;
+        Ok(self.with_kernel_params(params))
+    }
+
     /// Build the NVRC instance
     ///
     /// # Errors
@@ -122,7 +190,7 @@ impl NVRCBuilder {
 
         let mut nvrc = crate::nvrc::NVRC {
             nvidia_smi_srs: self.nvidia_smi_srs,
-            nvidia_smi_lgc: None,
+            nvidia_smi_lgc: self.nvidia_smi_lgc,
             uvm_persistence_mode: self.uvm_persistence_mode,
             dcgm_enabled: self.dcgm_enabled,
             fabricmanager_enabled: self.fabricmanager_enabled,
