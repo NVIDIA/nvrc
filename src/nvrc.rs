@@ -17,12 +17,6 @@ use crate::daemon::{ManagedChild, Name};
 use crate::devices::NvidiaDevice;
 use crate::user_group::UserGroup;
 
-// Old parsing function - replaced by config::parser::parse_boolean
-#[allow(dead_code)]
-fn parse_boolean(s: &str) -> bool {
-    matches!(s.to_ascii_lowercase().as_str(), "on" | "true" | "1" | "yes")
-}
-
 #[derive(Debug)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
@@ -54,17 +48,8 @@ pub struct NVRC {
 
 impl Default for NVRC {
     fn default() -> Self {
-        // Create default provider based on feature flag
-        #[cfg(feature = "confidential")]
-        let cc_provider: Arc<dyn CCProvider> = {
-            // In default(), we can't detect platform, so use a standard detector
-            // Real usage should use the builder
-            Arc::new(crate::providers::StandardProvider::new())
-        };
-
-        #[cfg(not(feature = "confidential"))]
-        let cc_provider: Arc<dyn CCProvider> = Arc::new(crate::providers::StandardProvider::new());
-
+        // Note: Default uses StandardProvider. For real usage, use NVRCBuilder
+        // which properly detects platform and creates the correct provider.
         Self {
             nvidia_smi_srs: None,
             nvidia_smi_lgc: None,
@@ -75,7 +60,7 @@ impl Default for NVRC {
             platform_info: None,
             nvidia_devices: Vec::new(),
             gpu_supported: false,
-            cc_provider,
+            cc_provider: Arc::new(crate::providers::StandardProvider::new()),
             plug_mode: PlugMode::default(),
             identity: UserGroup::new(),
             daemons: HashMap::new(),
@@ -114,28 +99,6 @@ impl NVRC {
         Ok(())
     }
 
-    // Old method - replaced by KernelParams + Builder pattern
-    // Kept for backward compatibility with existing tests
-    #[allow(dead_code)]
-    pub fn process_kernel_params(&mut self, cmdline: Option<&str>) -> Result<()> {
-        let content = match cmdline {
-            Some(c) => c.to_owned(),
-            None => fs::read_to_string("/proc/cmdline").context("read /proc/cmdline")?,
-        };
-
-        for (k, v) in content.split_whitespace().filter_map(|p| p.split_once('=')) {
-            match k {
-                "nvrc.log" => nvrc_log(v, self)?,
-                "nvrc.uvm.persistence.mode" => uvm_persistenced_mode(v, self)?,
-                "nvrc.dcgm" => nvrc_dcgm(v, self)?,
-                "nvrc.fabricmanager" => nvrc_fabricmanager(v, self)?,
-                "nvrc.smi.srs" => nvidia_smi_srs(v, self)?,
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-
     pub fn set_random_identity(&mut self) -> anyhow::Result<()> {
         self.identity = crate::user_group::random_user_group()?;
         Ok(())
@@ -154,224 +117,10 @@ impl NVRC {
     }
 }
 
-// Old parameter handlers - replaced by KernelParams
-#[allow(dead_code)]
-pub fn nvrc_dcgm(value: &str, ctx: &mut NVRC) -> Result<()> {
-    let dcgm = parse_boolean(value);
-    ctx.dcgm_enabled = dcgm;
-    debug!("nvrc.dcgm: {dcgm}");
-    Ok(())
-}
+// Old parameter handlers removed - all functionality now in config module
+// See: src/config/mod.rs for KernelParams parsing
+// See: src/config/parser.rs for parse_boolean() and other utilities
 
-#[allow(dead_code)]
-pub fn nvrc_fabricmanager(value: &str, ctx: &mut NVRC) -> Result<()> {
-    let fabricmanager = parse_boolean(value);
-    ctx.fabricmanager_enabled = fabricmanager;
-    debug!("nvrc.fabricmanager: {fabricmanager}");
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub fn nvrc_log(value: &str, _ctx: &mut NVRC) -> Result<()> {
-    let lvl = match value.to_ascii_lowercase().as_str() {
-        "off" | "0" | "" => log::LevelFilter::Off,
-        "error" => log::LevelFilter::Error,
-        "warn" => log::LevelFilter::Warn,
-        "info" => log::LevelFilter::Info,
-        "debug" => log::LevelFilter::Debug,
-        "trace" => log::LevelFilter::Trace,
-        _ => log::LevelFilter::Off,
-    };
-
-    log::set_max_level(lvl);
-    debug!("nvrc.log: {}", log::max_level());
-
-    fs::write("/proc/sys/kernel/printk_devkmsg", b"on\n").context("printk_devkmsg")?;
-
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub fn nvidia_smi_srs(value: &str, ctx: &mut NVRC) -> Result<()> {
-    ctx.nvidia_smi_srs = Some(value.to_owned());
-    debug!("nvidia_smi_srs: {value}");
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub fn nvidia_smi_lgc(value: &str, ctx: &mut NVRC) -> Result<()> {
-    ctx.nvidia_smi_lgc = Some(value.to_owned());
-    debug!("nvidia_smi_lgc: {value}");
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub fn uvm_persistenced_mode(value: &str, ctx: &mut NVRC) -> Result<()> {
-    ctx.uvm_persistence_mode = Some(value.to_owned());
-    debug!("nvrc.uvm_persistence_mode: {value}");
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nix::unistd::Uid;
-    use serial_test::serial;
-    use std::env;
-    use std::process::Command;
-    use std::sync::{LazyLock, Once};
-
-    static LOG: LazyLock<Once> = LazyLock::new(Once::new);
-
-    fn log_setup() {
-        LOG.call_once(|| {
-            kernlog::init().unwrap();
-        });
-    }
-
-    fn rerun_with_sudo() {
-        let args: Vec<String> = env::args().collect();
-        let output = Command::new("sudo").args(&args).status();
-
-        match output {
-            Ok(o) => {
-                if o.success() {
-                    println!("running with sudo")
-                } else {
-                    panic!("not running with sudo")
-                }
-            }
-            Err(e) => {
-                panic!("Failed to escalate privileges: {e:?}")
-            }
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn test_nvrc_log_debug() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
-        log_setup();
-        let mut c = NVRC::default();
-
-        nvrc_log("debug", &mut c).unwrap();
-        assert!(log_enabled!(log::Level::Debug));
-    }
-
-    #[test]
-    #[serial]
-    fn test_process_kernel_params_nvrc_log_debug() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
-        log_setup();
-        let mut init = NVRC::default();
-
-        init.process_kernel_params(Some(
-            "nvidia.smi.lgc=1500 nvrc.log=debug nvidia.smi.lgc=1500",
-        ))
-        .unwrap();
-
-        assert_eq!(log::max_level(), log::LevelFilter::Debug);
-        assert!(!log_enabled!(log::Level::Trace));
-    }
-
-    #[test]
-    #[serial]
-    fn test_process_kernel_params_nvrc_log_info() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
-        log_setup();
-        let mut init = NVRC::default();
-
-        init.process_kernel_params(Some(
-            "nvidia.smi.lgc=1500 nvrc.log=info nvidia.smi.lgc=1500",
-        ))
-        .unwrap();
-
-        assert_eq!(log::max_level(), log::LevelFilter::Info);
-        assert!(!log_enabled!(log::Level::Debug));
-    }
-
-    #[test]
-    #[serial]
-    fn test_process_kernel_params_nvrc_log_0() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
-        log_setup();
-        let mut init = NVRC::default();
-
-        init.process_kernel_params(Some("nvidia.smi.lgc=1500 nvrc.log=0 nvidia.smi.lgc=1500"))
-            .unwrap();
-        assert_eq!(log::max_level(), log::LevelFilter::Off);
-    }
-
-    #[test]
-    #[serial]
-    fn test_process_kernel_params_nvrc_log_none() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
-        log_setup();
-        let mut init = NVRC::default();
-
-        init.process_kernel_params(Some("nvidia.smi.lgc=1500 nvrc.log= "))
-            .unwrap();
-        assert_eq!(log::max_level(), log::LevelFilter::Off);
-    }
-
-    #[test]
-    fn test_nvrc_dcgm_parameter_handling() {
-        let mut c = NVRC::default();
-
-        // Test various "on" values
-        nvrc_dcgm("on", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, true);
-
-        nvrc_dcgm("true", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, true);
-
-        nvrc_dcgm("1", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, true);
-
-        nvrc_dcgm("yes", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, true);
-
-        // Test "off" values
-        nvrc_dcgm("off", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, false);
-
-        nvrc_dcgm("false", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, false);
-
-        nvrc_dcgm("invalid", &mut c).unwrap();
-        assert_eq!(c.dcgm_enabled, false);
-    }
-
-    #[test]
-    fn test_parse_boolean() {
-        assert!(parse_boolean("on"));
-        assert!(parse_boolean("true"));
-        assert!(parse_boolean("1"));
-        assert!(parse_boolean("yes"));
-        assert!(parse_boolean("ON"));
-        assert!(parse_boolean("True"));
-        assert!(parse_boolean("YES"));
-
-        assert!(!parse_boolean("off"));
-        assert!(!parse_boolean("false"));
-        assert!(!parse_boolean("0"));
-        assert!(!parse_boolean("no"));
-        assert!(!parse_boolean("invalid"));
-        assert!(!parse_boolean(""));
-    }
-}
+// Old tests removed - all parameter parsing now tested in config module
+// See: src/config/mod.rs tests for KernelParams parsing tests
+// See: src/config/parser.rs tests for parse_boolean() tests
