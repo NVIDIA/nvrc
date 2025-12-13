@@ -33,6 +33,9 @@ impl BlackwellArchitecture {
     const CC_STATE_MASK: u32 = 0x3;
 
     /// Known Blackwell device IDs
+    /// Used by matches_device_id() → registry → confidential GPU provider
+    /// Appears unused in standard builds (no CC provider), but IS used in confidential builds
+    #[allow(dead_code)]
     const DEVICE_IDS: &'static [u16] = &[
         // B100 family
         0x2900, // B100
