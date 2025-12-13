@@ -32,23 +32,6 @@ impl HopperArchitecture {
     #[allow(dead_code)]
     const CC_STATE_MASK: u32 = 0x3;
 
-    /// Known Hopper device IDs
-    /// Used by matches_device_id() → registry → confidential GPU provider
-    /// Appears unused in standard builds (no CC provider), but IS used in confidential builds
-    #[allow(dead_code)]
-    const DEVICE_IDS: &'static [u16] = &[
-        // H100 family
-        0x2330, // H100 PCIe
-        0x2331, // H100 SXM5 80GB
-        0x2332, // H100 SXM5 64GB
-        0x2336, // H100 NVL
-        // H800 family
-        0x233A, // H800 PCIe
-        0x233B, // H800 SXM5
-        // GH100 base
-        0x2302, // GH100
-        0x2303, // GH100 GL
-    ];
 }
 
 impl GpuArchitecture for HopperArchitecture {
@@ -70,8 +53,11 @@ impl GpuArchitecture for HopperArchitecture {
         })
     }
 
-    fn matches_device_id(&self, device_id: u16) -> bool {
-        Self::DEVICE_IDS.contains(&device_id)
+    fn matches_device_id(&self, _device_id: u16) -> bool {
+        // Not used - we rely on name-based detection via get_by_device_name()
+        // This method exists for trait compatibility but always returns false
+        // to force the registry to use name-based detection
+        false
     }
 }
 
@@ -112,26 +98,18 @@ mod tests {
     }
 
     #[test]
-    fn test_hopper_device_ids() {
+    fn test_hopper_name_detection() {
         let arch = HopperArchitecture;
 
-        // H100 family
-        assert!(arch.matches_device_id(0x2330)); // H100 PCIe
-        assert!(arch.matches_device_id(0x2331)); // H100 SXM5 80GB
-        assert!(arch.matches_device_id(0x2332)); // H100 SXM5 64GB
-        assert!(arch.matches_device_id(0x2336)); // H100 NVL
+        // matches_device_id() is not used - we use name-based detection
+        // The registry calls get_by_device_name() which checks if arch.name()
+        // appears in the device name from PCI database
 
-        // H800 family
-        assert!(arch.matches_device_id(0x233A)); // H800 PCIe
-        assert!(arch.matches_device_id(0x233B)); // H800 SXM5
+        // Test that arch.name() returns correct value
+        assert_eq!(arch.name(), "Hopper");
 
-        // GH100 base
-        assert!(arch.matches_device_id(0x2302)); // GH100
-        assert!(arch.matches_device_id(0x2303)); // GH100 GL
-
-        // Not Hopper
-        assert!(!arch.matches_device_id(0x1234));
-        assert!(!arch.matches_device_id(0x2900)); // Blackwell
+        // For device IDs not in PCI database, use kernel parameter:
+        // nvrc.pci.device.id=hopper,10de,XXXX
     }
 
     #[test]

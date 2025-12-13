@@ -43,11 +43,13 @@ fi
 
 ORIGINAL_SIZE=$(wc -l < "$TEMP_FILE")
 
-# AWK script to extract header comments, NVIDIA Hopper+ generation devices, and Mellanox vendors
-# NVIDIA Device ID ranges for Hopper and newer:
-# - Hopper (GH100): 23xx (NOT 22xx which is Ampere GA102)
-# - Blackwell (GB100/GB200): 29xx, 2axx, 2bxx, 2cxx, 2dxx, 2exx, 2fxx
-# - Future generations: 3xxx and higher
+# AWK script to extract NVIDIA devices and Mellanox vendors
+# NO COMMENTS - embedded file should be data only
+#
+# NVIDIA filtering strategy:
+# - GPUs: Hopper+ generation only (23xx and higher)
+# - NVSwitch: ALL generations (needed for fabric management)
+# - Mellanox: ALL devices (NIC infrastructure)
 awk '
 BEGIN {
     in_nvidia = 0
@@ -57,15 +59,13 @@ BEGIN {
     last_nvidia_device_printed = 0
 }
 
-# Keep all header comments (lines starting with #)
+# Skip all comments (lines starting with #)
 /^#/ {
-    print
     next
 }
 
-# Empty lines - print them
+# Skip empty lines
 /^$/ {
-    print
     next
 }
 
@@ -102,29 +102,31 @@ BEGIN {
 # Device lines (start with tab but not double tab)
 /^\t[^\t]/ {
     if (in_nvidia) {
-        # Extract device ID (first 4 hex chars after tab)
+        # Extract device ID and device name
         device_id = substr($1, 1, 4)
-        
-        # Check if this is a Hopper or newer device
-        # Hopper: 23xx (NOT 22xx which is Ampere)
-        # Blackwell: 29xx-2fxx  
-        # Future: 3xxx and higher
-        is_hopper_plus = 0
-        
-        # Check for Hopper generation (23xx only, exclude 22xx Ampere)
-        if (device_id ~ /^23/) {
-            is_hopper_plus = 1
+        device_line = $0
+
+        # Strategy: Include GPUs from Hopper+, but include ALL NVSwitch devices
+        should_include = 0
+
+        # Check if device name contains "NVSwitch" (case insensitive)
+        if (tolower(device_line) ~ /nvswitch/) {
+            should_include = 1  # Include ALL NVSwitch devices (any generation)
+        }
+        # Check for Hopper generation GPUs (23xx only, exclude 22xx Ampere)
+        else if (device_id ~ /^23/) {
+            should_include = 1
         }
         # Check for Blackwell generation (29xx-2fxx)
         else if (device_id ~ /^2[9a-f]/) {
-            is_hopper_plus = 1
+            should_include = 1
         }
         # Check for future generations (3xxx and higher)
         else if (device_id ~ /^[3-9a-f]/) {
-            is_hopper_plus = 1
+            should_include = 1
         }
-        
-        if (is_hopper_plus) {
+
+        if (should_include) {
             # Print NVIDIA vendor line if we haven'\''t already
             if (!nvidia_vendor_printed) {
                 print nvidia_vendor_line
@@ -197,15 +199,15 @@ grep "^[0-9a-f][0-9a-f][0-9a-f][0-9a-f]  " "$OUTPUT_FILE" | while read -r line; 
     vendor_id=$(echo "$line" | awk '{print $1}')
     vendor_name=$(echo "$line" | cut -d' ' -f3-)
     device_count=$(awk -v vid="$vendor_id" 'BEGIN{count=0} /^\t[0-9a-f]/ && prev_vendor==vid {count++} /^[0-9a-f][0-9a-f][0-9a-f][0-9a-f]  / {prev_vendor=$1} END{print count}' "$OUTPUT_FILE")
-    
+
     if [[ "$vendor_id" == "10de" ]]; then
         echo "${vendor_id}: ${vendor_name} (${device_count} Hopper+ generation devices)"
-        
+
         # Show breakdown by generation
         hopper_count=$(awk '/^\t23/ {count++} END {print count+0}' "$OUTPUT_FILE")
         blackwell_count=$(awk '/^\t2[9a-f]/ {count++} END {print count+0}' "$OUTPUT_FILE")
         future_count=$(awk '/^\t[3-9a-f]/ {count++} END {print count+0}' "$OUTPUT_FILE")
-        
+
         echo "  - Hopper (23xx): ${hopper_count} devices"
         echo "  - Blackwell (29xx-2fxx): ${blackwell_count} devices"
         if [[ "$future_count" -gt 0 ]]; then

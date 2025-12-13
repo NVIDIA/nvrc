@@ -32,6 +32,17 @@ use std::str::FromStr;
 
 use crate::core::error::Result;
 
+/// PCI device ID override entry
+///
+/// Format: arch_name,vendor_id,device_id
+/// Example: "hopper,10de,2334"
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PciDeviceOverride {
+    pub arch_name: String,
+    pub vendor_id: u16,
+    pub device_id: u16,
+}
+
 /// Parsed kernel configuration
 ///
 /// This struct represents the parsed kernel command-line parameters
@@ -51,6 +62,12 @@ pub struct KernelParams {
     pub nvidia_smi_srs: Option<String>,
     /// nvidia-smi LGC value (nvrc.smi.lgc) - for future use
     pub nvidia_smi_lgc: Option<String>,
+    /// PCI device ID overrides (nvrc.pci.device.id)
+    ///
+    /// Allows adding device IDs not yet in PCI database.
+    /// Format: "arch_name,vendor_id,device_id" (e.g., "hopper,10de,2334")
+    /// Can be specified multiple times.
+    pub pci_device_overrides: Vec<PciDeviceOverride>,
 }
 
 /// Log level setting
@@ -152,12 +169,41 @@ impl KernelParams {
                 "nvrc.smi.lgc" => {
                     config.nvidia_smi_lgc = Some(value.to_owned());
                 }
+                "nvrc.pci.device.id" => {
+                    // Parse: "arch_name,vendor_id,device_id"
+                    if let Some(override_entry) = Self::parse_pci_override(value) {
+                        config.pci_device_overrides.push(override_entry);
+                    } else {
+                        warn!("Invalid PCI device override format: {}", value);
+                    }
+                }
                 _ => {} // Ignore unknown parameters
             }
         }
 
         debug!("Parsed kernel config: {:?}", config);
         Ok(config)
+    }
+
+    /// Parse PCI device override from kernel parameter
+    ///
+    /// Format: "arch_name,vendor_id,device_id"
+    /// Example: "hopper,10de,2334"
+    fn parse_pci_override(value: &str) -> Option<PciDeviceOverride> {
+        let parts: Vec<&str> = value.split(',').collect();
+        if parts.len() != 3 {
+            return None;
+        }
+
+        let arch_name = parts[0].to_string();
+        let vendor_id = u16::from_str_radix(parts[1].trim_start_matches("0x"), 16).ok()?;
+        let device_id = u16::from_str_radix(parts[2].trim_start_matches("0x"), 16).ok()?;
+
+        Some(PciDeviceOverride {
+            arch_name,
+            vendor_id,
+            device_id,
+        })
     }
 
     /// Apply this configuration to the log system
@@ -285,5 +331,37 @@ mod tests {
         assert_eq!(merged.dcgm_enabled, Some(false)); // Overridden
         assert_eq!(merged.log_level, Some(LogLevel::Info)); // Kept
         assert_eq!(merged.fabricmanager_enabled, Some(true)); // Added
+    }
+
+    #[test]
+    fn test_parse_pci_override() {
+        // Valid formats
+        let override1 = KernelParams::parse_pci_override("hopper,10de,2334");
+        assert!(override1.is_some());
+        let o = override1.unwrap();
+        assert_eq!(o.arch_name, "hopper");
+        assert_eq!(o.vendor_id, 0x10de);
+        assert_eq!(o.device_id, 0x2334);
+
+        // With 0x prefix
+        let override2 = KernelParams::parse_pci_override("blackwell,0x10de,0x2900");
+        assert!(override2.is_some());
+        let o = override2.unwrap();
+        assert_eq!(o.vendor_id, 0x10de);
+        assert_eq!(o.device_id, 0x2900);
+
+        // Invalid formats
+        assert!(KernelParams::parse_pci_override("invalid").is_none());
+        assert!(KernelParams::parse_pci_override("hopper,10de").is_none());
+        assert!(KernelParams::parse_pci_override("hopper,XXXX,2334").is_none());
+    }
+
+    #[test]
+    fn test_parse_with_pci_overrides() {
+        let config = KernelParams::parse("nvrc.pci.device.id=hopper,10de,2334 nvrc.pci.device.id=blackwell,10de,2900")
+            .unwrap();
+        assert_eq!(config.pci_device_overrides.len(), 2);
+        assert_eq!(config.pci_device_overrides[0].arch_name, "hopper");
+        assert_eq!(config.pci_device_overrides[1].arch_name, "blackwell");
     }
 }

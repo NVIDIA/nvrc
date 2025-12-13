@@ -32,19 +32,6 @@ impl BlackwellArchitecture {
     #[allow(dead_code)]
     const CC_STATE_MASK: u32 = 0x3;
 
-    /// Known Blackwell device IDs
-    /// Used by matches_device_id() → registry → confidential GPU provider
-    /// Appears unused in standard builds (no CC provider), but IS used in confidential builds
-    #[allow(dead_code)]
-    const DEVICE_IDS: &'static [u16] = &[
-        // B100 family
-        0x2900, // B100
-        // B200 family
-        0x2901, // B200
-        0x2902, // B200A
-        // GB100 base
-        0x2910, // GB100
-    ];
 }
 
 impl GpuArchitecture for BlackwellArchitecture {
@@ -66,8 +53,11 @@ impl GpuArchitecture for BlackwellArchitecture {
         })
     }
 
-    fn matches_device_id(&self, device_id: u16) -> bool {
-        Self::DEVICE_IDS.contains(&device_id)
+    fn matches_device_id(&self, _device_id: u16) -> bool {
+        // Not used - we rely on name-based detection via get_by_device_name()
+        // This method exists for trait compatibility but always returns false
+        // to force the registry to use name-based detection
+        false
     }
 }
 
@@ -108,22 +98,18 @@ mod tests {
     }
 
     #[test]
-    fn test_blackwell_device_ids() {
+    fn test_blackwell_name_detection() {
         let arch = BlackwellArchitecture;
 
-        // B100 family
-        assert!(arch.matches_device_id(0x2900)); // B100
+        // matches_device_id() is not used - we use name-based detection
+        // The registry calls get_by_device_name() which checks if arch.name()
+        // appears in the device name from PCI database
 
-        // B200 family
-        assert!(arch.matches_device_id(0x2901)); // B200
-        assert!(arch.matches_device_id(0x2902)); // B200A
+        // Test that arch.name() returns correct value
+        assert_eq!(arch.name(), "Blackwell");
 
-        // GB100 base
-        assert!(arch.matches_device_id(0x2910)); // GB100
-
-        // Not Blackwell
-        assert!(!arch.matches_device_id(0x1234));
-        assert!(!arch.matches_device_id(0x2330)); // Hopper
+        // For device IDs not in PCI database, use kernel parameter:
+        // nvrc.pci.device.id=blackwell,10de,XXXX
     }
 
     #[test]

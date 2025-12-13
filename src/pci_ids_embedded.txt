@@ -1,210 +1,94 @@
-#
-#	List of PCI ID's
-#
-#	Version: 2025.07.11
-#	Date:    2025-07-11 03:15:02
-#
-#	Maintained by Albert Pool, Martin Mares, and other volunteers from
-#	the PCI ID Project at https://pci-ids.ucw.cz/.
-#
-#	New data are always welcome, especially if they are accurate. If you have
-#	anything to contribute, please follow the instructions at the web site.
-#
-#	This file can be distributed under either the GNU General Public License
-#	(version 2 or higher) or the 3-clause BSD License.
-#
-#	The database is a compilation of factual data, and as such the copyright
-#	only covers the aggregation and formatting. The copyright is held by
-#	Martin Mares and Albert Pool.
-#
-
-# Vendors, devices and subsystems. Please keep sorted.
-
-# Syntax:
-# vendor  vendor_name
-#	device  device_name				<-- single tab
-#		subvendor subdevice  subsystem_name	<-- two tabs
-
-# This is a relabelled RTL-8139
-# Found on some boards with two sockets
-# Found on 7A2000 PCH
-# Found on 7A2000 PCH
-# Real TJN ID is e159, but they got it wrong several times --mj
-# Wrong ID used in subsystem ID of the TELES.S0/PCI 2.x ISDN adapter
-# 018a is not LevelOne but there is a board misprogrammed
-# probably misprogrammed Intel Atom C2338 on Dell 0K8Y0N board
-# 021b is not Compaq but there is a board misprogrammed
-# SpeedStream is Efficient Networks, Inc, a Siemens Company
-# Fujitsu D2607 SAS2008 HBA controller
-# IBM SAS3008 HBA controller
-# Supermicro AOC-S3008L-L8e uses 0808 for their SAS3008 SAS controller
-# eHBA 9602W-16e Tri-Mode Storage Adapter
-# 8 Internal and 8 External port channel 9400 HBA
-# Channel 16 internal port HBA
-# Channel 16 external port HBA
-# 9400 Channel 8 external port HBA
-# 24G SAS/PCIe storage adapter chip
-# 9760W 32 internal port RAID controller
-# 9760W 16 internal port RAID controller
-# 9760W 16 internal and 16 external port RAID controller
-# 9700W 32 internal port Storage controller
-# 9700W 16 internal port Storage controller
-# 9700 16 external port Storage controller
-# 9760W 32 internal port RAID controller
-# 9760W 16 internal port RAID controller
-# 9760W 16 internal and 16 external port RAID controller
-# 9700W 32 internal port Storage controller
-# 9700W 16 internal port Storage controller
-# 9700 16 external port Storage controller
-# Broadcom next-gen MPT PCIe switch
-# SAS 9305 16 internal port HBA
-# SAS 9305 24 internal port HBA
-# 9305 16 external port SAS HBA
-# 9405W 16 internal port channel HBA
-# 9405W 8 internal and 8 external port channel HBA
-# 9405W 16 external port Channel HBA
-# 9405W 16 internal port Channel HBA
-# Invalid part
-# Invalid part
-# Invalid part
-# Invalid part
-# Soft Secure
-# Soft Secure
-# Soft Secure
-# Soft Secure
-# Soft Secure
-# Tampered part
-# Tampered part
-# Tampered part
-# Tampered part
-# Virtual endpoint used in Broadcom synthetic PCIe switches for resource reservation
-# 9560 16 internal port RAID controller
-# 9561 16 internal port RAID controller
-# 9560 8 internal port RAID controller
-# 9550 8 internal port RAID controller
-# 9580 8 internal & 8 external port RAID controller
-# MegaRAID 9562-16i 9562 16 internal port RAID controller
-# String pulled from Broadcom storcli "Product Name"
-# String pulled from Broadcom storcli "Product Name"
-# Virtual endpoint used in Broadcom synthetic PCIe switches for resource reservation
-# For secure part version of this chip
-# For secure part version of this chip
-# For secure part version of this chip
-# For secure part version of this chip
-# For secure part version of this chip
-# For secure part version of this chip
-# For secure part version of this chip
-# Lower lane count PEX89000 switch
-# Lower lane count PEX89000 switch
-# Lower lane count PEX89000 switch
-# Lower lane count PEX89000 switch
-# Lower lane count PEX89000 switch
-# Lower lane count PEX89000 switch
-# nee ATI Technologies, Inc.
-# Used in the Steam Deck OLED
-# Used in the Steam Deck LCD
-# The IBM card doubles as an ATI PCI video adapter
-# RX300SE-TD128E
-# The 'AMD Radeon R5 430' instead of 240/340 is NOT a typo! It's actually correct.
-# OEM-card for Dell; verified through AMD's own drivers (*.inf) and a TPU BIOS in database
-# OEM-card from Fujitsu; verified through AMD's own drivers (*.inf)
-# GV-R726XOC-1GD
-# R7790-1GD5/OC
-# FX-779A-CDB4 / FX-779A-CDBC
-# 100356OCL / 11210-01-20G
-# HD-687A-ZDFC
-# GV-R928XOC-3GD
-# FX-797A-TNBC
-# Radeon HD 7970 X2
-# ROG-STRIX-RXVEGA64-O8G-GAMING
-# R5870-PM2D1G
-# EAH5850
-# GV-R545SC-1GI
-# Reference
-# Dual fan version
-# Gaming 1440/QHD Overclock edition with 12 Gb GDDR6 and PCIe 4.0 of Radeon RX 6700 XT by Sapphire PULSE manufactured on autumn 2022 / C1 reviseion
-# This is the refreshed MSI MECH series card equipped with the same Navi 23 GPU as ID 5021
-# GV-R435OC-512I/FF1
-# GV-R455HM-512I/F41
-# 113-100928-J01
-# 113-2E172001-003
-# ID is probably a copy-paste error by a MSI developer from another mainboard, since all other ID numbers on this mainboard including the sub-device of this device has used subsystem ID 1462:7596
-# Radeon HD 6250 too?
-# AMD A10-5800K CPU
-# AMD Quad-Core A8-Series APU A8-6500T with Radeon HD 8550D
-# 5500, 5600 and mobile 5700 series
-# AS400 iSeries PCI sync serial card
-# Internal debugging card for CELL based systems
-# Maxim VSC452 Super BMC Controller with Video
-# ID for Newly Acquired Storage Products from Vitesse
-# Server device
-# Via AMD's own technical reference on their Am79C978 NICs; https://www.amd.com/system/files/TechDocs/22206.pdf
-# or ASM106X Serial ATA Controller
-# maybe
-# Takes over NVMe PCI ID when RAID is enabled
-# should be 1022:9602
-# PowerEdge Codename Iguana
-# NV-RAM Adapter used in Dell DR appliances
-# DJ: I've a suspicion that 0010 is a duplicate of 0d10.
-# There are may be different modem codecs here (Intel537 compatible and incompatible)
-# Virtual serial port which is presented on a Java applet
-# HP DL380 G6
-# Should be 1022:9602
-# nee SGS Thomson Microelectronics
-# Found in Philips ADSL ANNEX A WLAN Router SNA6500/18 sold by Belgacom
-# 2nd ID
-# 2nd ID
-# Motorola made a mistake and used 1507 instead of 1057 in some chips. Please look at the 1507 entry as well when updating this.
-# MPC7410 PowerPC microprocessor and PCI host bridge
-# should be 14e4:1645
-# formerly Gateway 2000 / acquired by Acer Inc.
-# Formerly Bit3 Computer Corp.
-# nee CMD Technology Inc
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# Vendor/ID appear to be randomly chosen
-# PCIe x1 Low Profile
-# MIL-STD-1553B Board
-# wrong ID?
-# Split off ALi Corporation in 2003
-# nee Mentor ARC Inc
-# nee Citicorp TTI
-# S26361-D1243-V116
-# S26361-D1243-V216
-# Foxconn has used a wrong vendor ID for this one
-# Xbox Graphics Processing Unit (Integrated). GeForce3 derivative (NV20 < NV2A < NV25).
-# Overclocked
-# Overclocked
-# has a Realtek ALC1200 HDAudio Codec
-# 1024MB with passive cooling (heatsink)
-# GRID K1 USM
-# GRID K1 Quadro USM
-# Reference Model
-# 06G-P4-2790-KR
-# 06G-P4-2791-KR
-# 06G-P4-2793-KR
-# 06G-P4-2794-KR
-# 06G-P4-2795-KR
-# 1024MB with passive cooling (heatsink)
-# GRID K2 USM
-# via Lenovo 496.90
 10de  NVIDIA Corporation
-	1af1  GA100GL [A100 NVSwitch]
-	22a3  GA100 [H100 NVSwitch] 
+	1af1  GA100 [A100 NVSwitch]
+		1458 1651  GeForce GTX 1070 Max-Q
+		1462 11e8  GeForce GTX 1070 Max-Q
+		1462 11e9  GeForce GTX 1070 Max-Q
+		1558 9501  GeForce GTX 1070 Max-Q
+		103c 842f  P5200 [Zbook 17 G5 mobile workstation]
+		1462 11e9  Quadro P4000 Max-Q
+		103c 842f  P4200 [Zbook 17 G5 mobile workstation]
+		103c 842f  P3200 [Zbook 17 G5 moble workstation]
+		1028 07c0  GeForce GTX 1080 Max-Q
+		1458 355b  GeForce GTX 1080 Max-Q
+		1043 85b6  DUAL-GTX1060-O6G [GeForce GTX 1060 6GB Dual]
+		17aa 39b9  GeForce GTX 1060 Max-Q 3GB
+		1414 0020  GTX 1060 Mobile
+		103c 8390  GeForce GTX 1060 Max-Q 6GB
+		1043 8613  PH-GTX1050TI-4G
+		1458 3763  GV-N105TOC-4GD
+		103c 842c  P2000 [Zbook 15 G5 mobile workstation]
+		103c 842f  P2000 [Zbook 17 G5 mobile workstation]
+		103c 8429  P1000 [Zbook Studio G5 mobile workstation]
+		103c 842c  P1000 [Zbook 15 G5 mobile workstation]
+		103c 842f  P1000 [Zbook 17 G5 mobile workstation]
+		103c 8451  P1000 [Zbook Studio x360 G5 mobile workstation]
+		17aa 225e  ThinkPad T480
+		1d72 1701  Mi Notebook Pro [GeForce MX150]
+		10de 131d  Tesla V100-SXM3-32GB-H
+		10de 12eb  TITAN V CEO Edition
+		1462 3715  RTX 2080 Ti GAMING X TRIO
+		10de 129e  Quadro RTX 8000
+		10de 12ba  Quadro RTX 6000
+		10de 1304  Tesla T10 16GB
+		10de 1347  GRID RTX T10-8
+		10de 1348  GRID RTX T10-4
+		10de 1349  GRID RTX T10-2
+		10de 1370  Tesla T10 16GB
+		10de 13a5  GRID RTX T10-8
+		10de 13d8  Quadro RTX 8000
+		10de 13d9  Quadro RTX 6000
+		1043 8673  TURBO RTX 2070
+		1028 0b10  Precision 3571
+	2200  GA102
+	2203  GA102 [GeForce RTX 3090 Ti]
+	2204  GA102 [GeForce RTX 3090]
+		10de 147d  GeForce RTX 3090 Founders Edition
+		3842 3973  GeForce RTX 3090 XC3
+	2205  GA102 [GeForce RTX 3080 Ti 20GB]
+	2206  GA102 [GeForce RTX 3080]
+		10de 1467  GA102 [GeForce RTX 3080]
+		10de 146d  GA102 [GeForce RTX 3080 20GB]
+		1462 3892  RTX 3080 10GB GAMING X TRIO
+	2207  GA102 [GeForce RTX 3070 Ti]
+	2208  GA102 [GeForce RTX 3080 Ti]
+	220a  GA102 [GeForce RTX 3080 12GB]
+	220d  GA102 [CMP 90HX]
+	2216  GA102 [GeForce RTX 3080 Lite Hash Rate]
+	222b  GA102 [GeForce RTX 3090 Engineering Sample]
+	222f  GA102 [GeForce RTX 3080 11GB / 12GB Engineering Sample]
+	2230  GA102GL [RTX A6000]
+	2231  GA102GL [RTX A5000]
+	2232  GA102GL [RTX A4500]
+	2233  GA102GL [RTX A5500]
+	2235  GA102GL [A40]
+	2236  GA102GL [A10]
+	2237  GA102GL [A10G]
+	2238  GA102GL [A10M]
+	223f  GA102GL
+	228b  GA104 High Definition Audio Controller
+	228e  GA106 High Definition Audio Controller
+	2291  GA107 High Definition Audio Controller
+	2296  Tegra PCIe Endpoint Virtual Network
+	229a  Orin PCIe x8 Root Complex
+	229c  Orin PCIe x4/x8 Endpoint/Root Complex
+	229e  Orin PCIe x1 Root Complex
+	22a3  GH100 [H100 NVSwitch]
+	22ba  AD102 High Definition Audio Controller
+	22bb  AD103 High Definition Audio Controller
+	22bc  AD104 High Definition Audio Controller
+	22bd  AD106M High Definition Audio Controller
+	22be  AD107 High Definition Audio Controller
+	22ce  GB10 GEN5 X4 PCIe host
+	22d0  GB10 GEN4 X1 PCIe host
+	22d1  GB20B PCI bridge
+	22d8  THOR Processor PCI Express Root Port
+	22e6  THOR Processor PCI Express x16 Controller
+	22e8  GB202 High Definition Audio Controller
+	22e9  GB203 High Definition Audio Controller
+	22eb  GB206 High Definition Audio Controller
+	22ec  GB207 High Definition Audio Controller
 	2302  GH100
+	230c  GH100 [H20 NVL16]
 	230e  GH100 [H20 NVL16]
 	2313  GH100 [H100 CNX]
 	2321  GH100 [H100L 94GB]
@@ -227,10 +111,13 @@
 	2343  GH100
 	2345  GH100 [GH100-88K-A1]
 	2348  GH100 [GH200 144G HBM3e]
+	237e  GH100 [H100 GH3]
 	237f  GH100 [Skinny Joe]
 	23b0  GH100
 	23f0  GH100
-# A16 - 25B6 10DE 14A9 / A2 - 25B6 10DE 157E
+		10de 146b  GA104 [GeForce RTX 3070]
+		10de 14ae  GA104 [GeForce RTX 3070 16GB]
+		19da 6630  ZT-A30610H-10M [RTX 3060 Ti Twin Edge OC]
 	2900  GB100 [Reserved Dev ID A]
 	2901  GB100 [B200]
 	2920  GB100 [TS4 / B100]
@@ -241,178 +128,69 @@
 	2941  GB100 [HGX GB200]
 	297e  GB100
 	2980  GB102 [Reserved Dev ID A]
+	29bb  GB102 [DRIVE P2021]
 	29bc  GB102 [B100]
 	29c0  GB102 [Reserved Dev ID B]
 	29f1  GB102
-	2b00  TA1090SA [THOR]
+	2b00  GB10B [Jetson AGX Thor]
 	2b85  GB202 [GeForce RTX 5090]
 	2b87  GB202 [GeForce RTX 5090 D]
+	2b8c  GB202 [GeForce RTX 5090 D V2]
 	2bb1  GB202GL [RTX PRO 6000 Blackwell Workstation Edition]
-	2bb3  GB202GL [RTX PRO 5000 Blackwell]
+	2bb2  GB202GL [RTX PRO 6000D Blackwell Workstation Edition]
+	2bb3  GB202GL [RTX PRO 5000 Blackwell / RTX PRO 5000 72GB Blackwell]
 	2bb4  GB202GL [RTX PRO 6000 Blackwell Max-Q Workstation Edition]
 	2bb5  GB202GL [RTX PRO 6000 Blackwell Server Edition]
+	2bb9  GB202GL [RTX 6000D]
+	2bbc  GB202GL [RTX PRO 6000D Blackwell Max-Q Workstation Edition]
 	2c02  GB203 [GeForce RTX 5080]
 	2c05  GB203 [GeForce RTX 5070 Ti]
 	2c18  GB203M / GN22 [GeForce RTX 5090 Max-Q / Mobile]
 	2c19  GB203M / GN22 [GeForce RTX 5080 Max-Q / Mobile]
 	2c2c  GB6-256(N22W-ES-A1)
 	2c31  GB203GL [RTX PRO 4500 Blackwell]
+	2c33  GB203GL [RTX PRO 4000 Blackwell SFF Edition]
 	2c34  GB203GL [RTX PRO 4000 Blackwell]
 	2c38  GB203GLM [RTX PRO 5000 Blackwell Generation Laptop GPU]
 	2c39  GB203GLM [RTX PRO 4000 Blackwell Generation Laptop GPU]
+	2c3a  GB203GL [RTX PRO 4500 Blackwell]
 	2c58  GB203M / GN22-X11 [GeForce RTX 5090 Max-Q / Mobile]
 	2c59  GB203M / GN22-X9 [GeForce RTX 5080 Max-Q / Mobile]
+	2c77  GB203GLM [RTX PRO 5000 Blackwell Embedded GPU]
+	2c79  GB203GLM [RTX PRO 4000 Blackwell Embedded GPU]
 	2d04  GB206 [GeForce RTX 5060 Ti]
 	2d05  GB206 [GeForce RTX 5060]
 	2d18  GB206M [GeForce RTX 5070 Max-Q / Mobile]
 	2d19  GB206M [GeForce RTX 5060 Max-Q / Mobile]
 	2d2c  GB6-128 (N22Y-ES-A1)
+	2d30  GB206GL [RTX PRO 2000 Blackwell]
 	2d39  GB206GLM [RTX PRO 2000 Blackwell Generation Laptop GPU]
 	2d58  GB206M [GeForce RTX 5070 Max-Q / Mobile]
 	2d59  GB206M [GeForce RTX 5060 Max-Q / Mobile]
+	2d79  GB206GLM [RTX PRO 2000 Blackwell Embedded GPU]
 	2d83  GB207 [GeForce RTX 5050]
 	2d98  GB207M [GeForce RTX 5050 Max-Q / Mobile]
 	2db8  GB207GLM [RTX PRO 1000 Blackwell Generation Laptop GPU]
 	2db9  GB207GLM [RTX PRO 500 Blackwell Generation Laptop GPU]
 	2dd8  GB207M [GeForce RTX 5050 Max-Q / Mobile]
-	2e2a  GB20B
+	2df9  GB207GLM [RTX PRO 500 Blackwell Embedded GPU]
+	2e12  GB20B [GB10]
+	2e2a  GB20B [JMJWOA-Generic-GPU]
 	2f04  GB205 [GeForce RTX 5070]
 	2f18  GB205M [GeForce RTX 5070 Ti Mobile]
 	2f38  GB205GLM [RTX PRO 3000 Blackwell Generation Laptop GPU]
 	2f58  GB205M [GeForce RTX 5070 Ti Mobile]
-	31c0  GB110
+	2f80  GB205 High Definition Audio Controller
+	3180  GB110 [Reserved Dev ID A]
+	3182  GB110 [B300 SXM6 AC]
+	31a1  GB110 [GB300 MaxQ]
+	31c0  GB110 [Reserved Dev ID B]
+	31c2  GB110 [GB300]
+	31fe  GB110
+	3200  GB112
+	3224  GB112
+	323e  GB112
 	3340  GB120
-# Also IBM FC 5759 / FC 1910 for POWER
-# CyberPro5202 Audio Function
-# Rev 29, uses r8169 Driver on Linux
-# SED is assigned Xilinx PCI device IDs ebf0 through ebff
-# What's in the cardbus end of a Sony ACR-A01 card, comes with newer Vaio CD-RW drives
-# EMU8008 PCI version of emu8000 chip
-# Probably an early engineering sample
-# This chip is also known as CA0103 on Sound Blaster 5.1 SB0680 card.
-# nee Triones Technologies, Inc.
-# SFF-8087 Mini-SAS 16 port internal
-# SFF-8088 Mini-SAS 16 port external
-# SFF-8088 8 port external / SFF-8087 24 port internal
-# Found in Cisco DMP-4305G
-# Shares chip with :0576. The VT82C576M has :1571 instead of :0561.
-# probably all K7VT2/4*/6
-# Upgrade bios to get correct ID: 5324 instead of 0581
-# probably all K7VT2/4*/6
-# probably all K7VT2/4*/6
-# probably all K7VT2/4*/6
-# This hosts more than just the Intel 537 codec, it also hosts PCtel (SIL33) and SmartLink (SIL34) codecs
-# probably all K7VT2/4*/6
-# probably all K7VT2/4*/6
-# probably all K7VT2/4*/6
-# Superfastcom-PCI (Commtech, Inc.) or DSCC4 WAN Adapter
-# S30807-Q5474
-# Also claimed to be RNS or Rockwell International, current PCISIG records list Osicom
-# now owned by Microchip Technology
-# 32-lanes 24-ports Gen.2
-# 32-lanes 24-ports Gen.2
-# formerly EMC Corporation
-# nee Linotype - Hell AG
-# Nee Schneider & Koch
-# nee ServerWorks
-# The device starts as 024A, and changes to 024B if set to PATA mode in BIOS
-# nee Polaris Communications
-# Unknown card with Altera ACE EP1K50TC144-2 as the PCI interface and has 4 BNC inputs connected to 4 TL3016 Comparators and one TRS output connected to two LTC1650 DACs
-# rev. B1; RealTek RTL8168E.
-# BXI stands for Bull eXascale Interconnect
-# BXI stands for Bull eXascale Interconnect
-# Nee Galileo Technology, Inc.
-# AVB = "Audio Video Bridging"
-# 6111: 1 SATA port; 6121: 2 SATA ports
-# This device ID was used for earlier chips.
-# nee Agere Systems nee Lucent Microelectronics
-# Actiontech eth+modem card as used by Dell &c.
-# InPorte Home Internal 56k Modem/fax/answering machine/SMS Features
-# née PMC-Sierra Inc.
-# nee Comtrol, Inc.
-# 16954 UART
-# nee Risq Modular Systems, Inc.
-# nee C-Cube Microsystems / acquired by Magnum Semiconductor
-# Formerly Jaycor Networks, Inc.
-# Audio-Visuelles Marketing und Computersysteme
-# nee Allied Telesyn International
-# 4x serial ports, 2x printer ports
-# 4x serial ports, 2x printer ports
-# 4x serial ports, RS422
-# This is probably more likely a HW fault, but I am keeping it for now --mj
-# nee Thomson-CSF/TTM
-# MBIM on top of MHI
-# Subsystem ID is main ID reveresed.
-# Nee US Robotics
-# 12 Line, 6 port, CT-BUS/SC-BUS, loopstart FXO adaptor.
-# 24 Channel, 1 Port, CT-BUS/SC-BUS, T1/PRI adaptor.
-# 4 Line, 4 port, CT-BUS/SC-BUS, loopstart FXO adaptor. Revision 01
-# 48 Channel, 2 Port, CT-BUS/SC-BUS, T1/PRI adaptor.
-# acquired by Diodes Inc.
-# 3Port-3Lane PCI Express Switch GreenPacket Family
-# PI7C9X20508GP 5Port-8Lane PCI Express Switch GreenPacket Family
-# Nee ComputerBoards
-# nee Crucial Technology
-# nee Vierling Communication SAS, nee Thales Idatys
-# This board has two PCI functions, appears as two PCI devices
-# This board has two PCI functions, appears as two PCI devices
-# FPGA bridge to two SJA1000
-# Single DC-37 connector
-# Single DC-62 connector
-# 4x 8p8c connectors
-# Formerly RAMiX, GE Fanuc, GE Intelligent Platforms
-# Nee IC Ensemble Inc.
-# Virtual Video Card Device for Windows Remote Desktop (RDP)
-# Model IO1085, Part No: JJ-P46012
-# Multifunction device with 3 function bits in ID
-# Multifunction device with reset straps and function bits in ID
-# Multifunction device with 4 function bits in ID
-# Multifunction device with 4 function bits in ID
-# Multifunction device with 8 function bits in ID
-# Nee Real Time Devices US Inc.
-# 2-16 MB SRAM, 4x UART, I2C, misc I/O
-# nee Loronix Information Systems Inc.
-# Used by different variants of SSD 970 EVO and PRO
-# Actually 88SS1322 according to techpowerup
-# This is MSI refreshed variant of their MECH series Navi 23 GPU card (73EF)
-# formerly IFR.
-# 1.5 GHz to 3.0 GHz x 1Hz
-# Wrong vendor ID used
-# nee Mentor Graphics Corp.
-# ARCNET interface card based on SMSC COM20022 chip and manufactured for SMSC Japan
-# now owned by CSP, Inc.
-# MT7612E too?
-# WiFi 6E capable
-# Formerly SiPackets, Inc., formerly API NetWorks, Inc., formerly Alpha Processor, Inc.
-# NIC-ETH330T-3S-4P 4xGE 1000Base-T for OCP3.0
-# Dual NIC server
-# Dell 5720 LOM
-# Integrated on the motherboard
-# The Broadcom 57800 device has two 1Gig ports and two 10Gig ports. The subsystem information can be used to differentiate.
-# SFP+ ports
-# RJ-45 ports
-# The Broadcom 57800 device has two 1Gig ports and two 10Gig ports. The subsystem information can be used to differentiate.
-# The Broadcom 57800 device has two 1Gig ports and two 10Gig ports. The subsystem information can be used to differentiate.
-# NIC-ETH531F-LP-2P BCM57412 2 x 10G SFP+ Ethernet PCIe Card
-# NIC-ETH531F-3S-2P 2x10GbE SFP+ Adapter for OCP3.0
-# BCM957414M4143C
-# NIC-ETH630F-LP-2P SFP28 2x25GbE PCIe Network Adapter
-# VSE-225-31S Dual-port 10Gb/25Gb Ethernet PCIe
-# Manufactured by Foxconn for Lenovo
-# brcmfmac reports it as BCM4377/4 but macOS drivers call it BCM4377b
-# Bluetooth PCI function of the BRCM4378 Wireless Network Adapter
-# Bluetooth PCI function of the BRCM4387 Wireless Network Adapter
-# Bluetooth PCI function of the BRCM4377 Wireless Network Adapter
-# Switch ASIC
-# nee ACQIRIS
-# Integrated in CX86111/CX86113 processors
-# Should be HTEC Ltd, but there are no known HTEC chips and 1507 is already used by mistake by Motorola (see vendor ID 1057).
-# old ID, now 1059
-# nee American Microsystems Inc
-# Terratec seems to use several IDs for the same card.
-# nee VIVID Technology Inc.
-# formerly 3PAR Inc.
-# now NVIDIA
 15b3  Mellanox Technologies
 	0191  MT25408 [ConnectX IB Flash Recovery]
 	01f6  MT27500 Family [ConnectX-3 Flash Recovery]
@@ -475,8 +253,9 @@
 	0278  Quantum-4 in Flash Recovery Mode
 	0279  Quantum-4 RMA
 	027a  Eros Chiplet
-	027c  Quantum-5 in Flash Recovery Mode
-	027d  Quantum-5 RMA
+	027c  Nvlink-7 Switch in Flash Recovery Mode
+	027d  Nvlink-7 Switch RMA
+	027e  Spectrum-7 Tile
 	0281  NPS-600 Flash Recovery
 	0282  ArcusE Flash recovery
 	0283  ArcusE RMA
@@ -484,23 +263,18 @@
 	0285  Sagitta RMA
 	0286  LibraE Flash Recovery
 	0287  LibraE RMA
-# Flash recovery
 	0288  Arcus2
 	0289  Arcus2 RMA
 	0290  SagittaZ
 	0292  Arcus3 Flash Recovery
 	0293  Arcus3 RMA
 	0294  Ophy 2.1 (SagittaZ)
-# Sagitta
 	0296  OPHY2.6
-# Sagitta
 	0298  OPHY3.0
-# Sagitta
 	029a  OPHY3.1
-# Sagitta
 	029c  OPHY3.5
-	02a0  Quantum-6 in Flash Recovery Mode
-	02a1  Quantum-6 RMA
+	02a0  Nvlink-8 Switch in Flash Recovery Mode
+	02a1  Nvlink-8 RMA
 	02a2  Spectrum-7 in Flash Recovery Mode
 	02a3  Spectrum-7 RMA
 	1002  MT25400 Family [ConnectX-2 Virtual Function]
@@ -577,12 +351,9 @@
 		15b3 0021  MCX4421A-ACQN ConnectX-4 Lx EN OCP,2x25G
 		15b3 0025  ConnectX-4 Lx 25 GbE Dual Port SFP28 rNDC
 		193d 100a  620F-B
-# NIC-ETH540F-LP-2P SFP+ Ethernet Card
 		193d 1023  NIC-ETH540F-LP-2P
 		193d 1031  NIC-ETH640i-Mb-2x25G
-# NIC-ETH640F-3S-2P OCP3.0 Card
 		193d 1083  NIC-ETH640F-3S-2P
-# NIC-ETH540F-3S-2P OCP3.0 2x10G Card
 		193d 1084  NIC-ETH540F-3S-2P
 		1e81 0c10  25GbE dual-port SFP28, PCIe3.0 x8 [3SC10]
 		1f3f 0c10  25GbE dual-port SFP28, PCIe3.0 x8, 3SC10
@@ -672,7 +443,6 @@
 		1014 0416  PCIe2 2-Port 10GbE RoCE SFP+ Adapter
 		1014 0461  PCIe2 2-Port 10GbE RoCE SR Adapter
 		15b3 0018  HP 10 GbE PCI-e G2 Dual-Port NIC (rev C1)
-# FC EC26
 		15b3 6572  IBM Flex System EN4132 2-port 10Gb RoCE Adapter
 	675a  MT26458 ConnectX EN 10GBASE-T PCIe Gen2 5.0 GT/s
 	6764  MT26468 [ConnectX EN 10GigE, PCIe 2.0 5GT/s Virtualization+]
@@ -712,15 +482,14 @@
 	c2d4  MT43162 BlueField-3 Lx SoC Management Interface
 	c2d5  MT43244 BlueField-3 SoC Management Interface
 	c2d6  BF4 Family Management Interface [BlueField-4 SoC Management Interface]
-# SwitchX-2, 40GbE switch
 	c738  MT51136
 	c739  MT51136 GW
 	c838  MT52236
 	c839  MT52236 router
 	caf1  ConnectX-4 CAPI Function
-# Spectrum, 100GbE Switch
 	cb84  MT52100
 	cf08  Switch-IB2
+	cf09  Quantum Aggregation Node
 	cf6c  MT53100 [Spectrum-2]
 	cf70  Spectrum-3
 	cf80  Spectrum-4
@@ -732,341 +501,5 @@
 	d2f4  Quantum-3
 	d2f6  Quantum-3CPO
 	d2f8  Quantum-4
-	d2fa  Quantum-5
-	d2fc  Quantum-6
-# nee Brocade Communications Systems, Inc.
-# Mezz card for IBM
-# Same Device_ID used for 410 (1port) and 420 (2 port) HBAs.
-# Gidel Reconfigurable Computing
-# P/N 4035.006.19720
-# P/N 4035.065.20000
-# Formerly SiByte, Inc.
-# nee Atheros Communications, Inc.
-# Atheros AR5414 32-bit mini-PCI type IIIB
-# the name AR5005VL is used for some AR5513 based designs
-# Also used as Gigabyte GC-WB150 on a PCIe-to-mini-PCIe converter
-# compatible with Lenovo's BIOS lock
-# Found in "AVM Fritz!Box FON WLAN 7270v3"
-# The right ID is 196d, but they got it nibble-swapped in 2202.
-# misused vendor ID 0001
-# nee Innocore Gaming Ltd., nee Densitron Gaming Ltd., a division of Densitron Technologies
-# nee Geotest-MTS
-# Seems to be a 2nd ID for Vitesse Semiconductor
-# nee Fujitsu Siemens Computers GmbH
-# This was changed during the production phase to 10GbE adapter.
-# MAC found on OcteonTx2 series of silicons
-# MAC found on Octeon 10 series of silicons
-# Octeon Tx2 Loopback Interface block
-# Octeon Tx2 Resource Virtualization Unit Physical Function
-# Octeon Tx2 Resource Virtualization Unit Virtual Function
-# Octeon Tx2 Resource Virtualization Unit Admin Function
-# PTP Timestamping unit on Octeon 10 silicon series
-# Cryptographic Accelerator found on Octeon 10 series of silicons
-# Octeon Tx2 System DPI Interface (SDP) Physical Function
-# Octeon Tx2 System DPI Interface (SDP) Virtual Function
-# Cryptographic Accelerator found on OcteonTx2 series of silicons
-# Cryptographic Accelerator found on OcteonTx2 series of silicons
-# also used by Struck Innovative Systeme for joint developments
-# nee Techwell, Inc.
-# port 5 of 8
-# port 6 of 8
-# port 7 of 8
-# channel 8 of 8
-# Example MuniPCI-E card: http://www.commell.com.tw/product/surveillance/MPX-6864.htm
-# cPCI Carrier for Mezzanine Modules
-# 250GB nvme ssd from lenovo, can be found in Thinkpad x380 yoga
-# nee Airgo Networks, Inc.
-# nee Neterion Inc., previously S2io Inc.
-# nee Entropic Communications Inc.
-# Integrated in Vortex86EX, Vortex86EX2 SoC
-# Integrated in Vortex86EX, Vortex86EX2 SoCs
-# Found in the Vortex86EX2 SoC
-# IGP = on-chip integrated in the MSTI-PMX-1000 (Vortex86MX).
-# IGP = on-chip integrated in the Vortex86DX3. Basic 2D accel. UMA architecture.
-# Found in the Vortex86EX SoC
-# Found in the Vortex86EX2 SoC
-# Integrated in the Vortex86DX2 SoC
-# Found in the Vortex86DX3 SoC
-# Found in the Vortex86EX SoC
-# Found in the Vortex86EX2 SoC
-# Found in the Vortex86DX3 SoC
-# Found in MSTI-PMX-1000 (Vortex86MX) SoC.
-# HFC-based ISDN card
-# Strange vendor ID used by BCM5785 when in RAID mode
-# HT1000 uses 3 IDs 1166:024a (Native SATA Mode), 1166:024b (PATA/IDE Mode), 182f:000b (RAID Mode) depends on SATA BIOS setting
-# formally Info-Tek Corp.
-# Nee Octigabay System
-# should be 182d
-# Sitecom HFC-S based ISDN controller card DC-105v2
-# OCP-TAP
-# 8 x 1 Gbps / 10 Gbps PCIe Optical Bypass Adapter
-# 4-Port Adapter for 1 GbE In-Line Bypass Applications
-# Software UARTs
-# Software UARTs
-# Software UARTs
-# Software UARTs
-# RS-644 Only
-# Software UARTs
-# RS-644 Only
-# Software UARTs
-# RS-644 Only, Software UARTs
-# RS-644 Only, Software UARTs
-# Software UARTs
-# since the merger with NEC Electronics in 2010
-# nee Curtis, Inc.
-# PCIe interface for emulator
-# CFI device over PCIe
-# nee Atheros Communications, Inc. nee Attansic Technology Corp.
-# E2200, E2201, E2205
-# The PCI and PCIe versions have a different PID
-# nee Eberspaecher Electronics
-# IO card for std ethernet and automotive ethernet (ieee 1000Base-T1)
-# IO card for std ethernet and automotive ethernet (ieee 1000Base-T1)
-# nee ServerEngines Corp.
-# FC 5287 / FC 5284; CCIN 5287
-# FC 5288 / FC 5286; CCIN 5288
-# nee NextNet Wireless
-# nee Metalink Ltd.
-# nee Bigfoot Networks, now owned by Intel
-# nee MEN Mikro Elektronik
-# Parallels VM virtual devices
-# NVMe drive in GCP
-# nee Silicon Software GmbH
-# CameraLink frame grabber for Visual Applets
-# CameraLink HS frame grabber
-# CoaXpress frame grabber
-# CameraLink frame grabber
-# CoaXpress frame grabber
-# CoaXpress frame grabber
-# CoaXpress frame grabber for Visual Applets
-# CameraLink HS frame grabber for Visual Applets
-# CameraLink frame grabber for Visual Applets / AI applications
-# CameraLink frame grabber
-# CameraLink frame grabber for Visual Applets
-# CameraLink frame grabber
-# CameraLink frame grabber for Visual Applets
-# CameraLink frame grabber
-# CoaXpress frame grabber
-# CoaXpress frame grabber for Visual Applets
-# CoaXpress frame grabber for Visual Applets
-# CoaXpress frame grabber
-# CameraLink frame grabber for Visual Applets
-# CameraLink frame grabber
-# CoaXpress frame grabber
-# OEM product
-# OEM product
-# OEM product
-# CoaXpress frame grabber
-# CoaXpress frame grabber
-# CoaXpress frame grabber
-# CoaXpress Thunderbolt frame grabber
-# GigE Vision frame grabber
-# GigE Vision frame grabber for Visual Applets
-# nee Fusion-io
-# nee Qumranet, Inc.
-# now owned by HGST (a Western Digital subsidiary)
-# also used by some PROXIM (14b7) devices erroneously
-# device 1b4b:0100 reports incorrect vendor id due to hw erratum (correct is 11ab)
-# 2xHDMI and 2xHD-SDI inputs
-# 2TB Nytro PCIe controller
-# 4TB Nytro PCIe controller
-# 2GB DRAM variant of Nytro card
-# 8GB variant of Nytro PCIe controller
-# 1.5 TB Nytro PCIe controller
-# 2TB Nytro PCIe controller
-# 4TB Nytro PCIe controller
-# Larkspur 2.5"
-# Larkspur 2.5" TCG
-# Kiowa M.2
-# Kiowa M.2 TCG
-# Larkspur M.2 22110mm
-# Larkspur M.2 22110mm TCG
-# Larkspur M.2 2280mm
-# Larkspur M.2 2280mm TCG
-# Larkspur E1.S
-# Larkspur E1.S TCG
-# Kersey 2.5"
-# Kersey 2.5" TCG
-# Nytro 5050H (Ebonhawk - High Performance)
-# Nytro 5050H TCG (Ebonhawk High Performance)
-# Nytro 5050M (Ebonhawk Mainstream Performance)
-# Nytro 5050M TCG (Ebonhawk Mainstream Performance)
-# Nytro 5050M (Ebonhawk Mainstream Performance) - 7mm
-# Nytro 5050M (Ebonhawk Mainstream Performance) TCG - 7mm
-# Nytro 5060M (Rocinante Mainstream Performance) - 15mm
-# Nytro 5050M TCG (Rocinante Mainstream Performance) - 15mm
-# Nytro 5060M 7mm (Rocinante Mainstream Performance)
-# Nytro 5060M TCG (Rocinante Mainstream Performance) - 7mm
-# Nytro 5060H (Rocinante High Performance)
-# Nytro 5060H TCG (Rocinante High Performance)
-# Nytro 5060H (Rocinante - High Performance) - E3.S 1T
-# Nytro 5060H (Rocinante - High Performance) - E3.S 1T TCG
-# Nytro 5060H (Rocinante - High Performance) - E3.L 1T
-# Nytro 5060H (Rocinante - High Performance) - E3.L 1T TCG
-# Nytro 5060M (Rocinante Mainstream Performance) - E3.S 1T
-# Nytro 5060M (Rocinante Mainstream Performance) - E3.S 1T TCG
-# Nytro 5060M (Rocinante Mainstream Performance) - E3.L 1T
-# Nytro 5060M (Rocinante Mainstream Performance) - E3.L 1T TCG
-# Nytro 5060M (Rocinante Mainstream Performance) - E1.S
-# Nytro 5060M (Rocinante Mainstream Performance) - E1.S TCG
-# Nytro 5350S (Ebonhawk Single Port) - 15mm
-# Nytro 5350S (Ebonhawk Single Port) TCG - 15mm
-# Nytro 5360S (Rocinante Single Port) - 15mm
-# Nytro 5360S (Rocinante Single Port) TCG - 15mm
-# Nytro 5360S (Rocinante Single Port) - E3.S
-# Nytro 5360S (Rocinante Single Port) TCG - E3.S
-# Nytro 5060H (Rocinante High Performance) non-SED
-# 2TB
-# 1TB
-# Device ID reused: CH352 is for PCI bus, CH382 for PCIe.
-# previously Fiberblaze
-# Used on V120 VME Crate Controller
-# http://www.accensusllc.com/accensustelas2.html
-# A Western Digital Subsidiary
-# Other World Computing
-# This is a EB7200 card compatibly with a EB PCIe driver
-# Venice-E Series NVMe U.2 SSD(1.92T/3.84T/7.68T)
-# Venice Series NVMe U.2 SSD(2T/4T/8T)
-# Venice-X Series NVMe U.2 SSD(1.6T/3.2T/6.4T)
-# Venice-E Series NVMe AIC SSD(1.92T/3.84T/7.68T)
-# Venice-X Series NVMe AIC SSD(1.6T/3.2T/6.4T)
-# SX6000LNP
-# PREMIUM NVMe SSD for PlayStation 5
-# 1TB
-# 500GB
-# supports 8x CAN (-FD) interfaces
-# 8-Channel ADC
-# acquired by Intel
-# CEM Solutions Pvt. Ltd.
-# nee Celeno Communications
-# Older revision of QNAP QM2 M.2 2280 PCIe SSD & 10GbE Expansion Card
-# Newer revision of QNAP QM2 M.2 2280 PCIe SSD & 10GbE Expansion Card
-# Fiber-optic HyperWire motion control bus from Aerotech.
-# nee Fuzhou Rockchip Electronics Co., Ltd
-# nee Facebook, Inc.
-# PCIe accelerator card for Deep Learning inference tasks
-# PCIe accelerator card for Deep Learning training tasks
-# PCIe accelerator card for Deep Learning training tasks with secured firmware
-# PCIe accelerator card for Deep Learning training tasks
-# Root Complex A (RCA)
-# RCA port 0
-# RCA port 1
-# RCA port 2
-# RAC port 3
-# RCA port 4
-# RCA port 5
-# RCA port 6
-# RCA port 7
-# Root Complex B (RCB)
-# RCB port 0
-# RCB port 1
-# RCB port 2
-# RCB port 3
-# RCB port 4
-# RCB port 5
-# RCB port 6
-# RCB port 7
-# VU33P FPGA Accelerator
-# JungleCat VU33P Module
-# JungleCat VU35P Module
-# nee Bitmain Technologies Ltd.
-# HHHL PCIe card, single slot, 3rd generation from Enflame
-# HHHL PCIe card, single slot, 3rd generation from Enflame, 24GB device memory
-# FHFL PCIe card, single slot, 3rd generation from Enflame
-# FHFL PCIe card, dual slot, 3rd generation from Enflame, 48GB device memory
-# FHFL PCIe card, dual slot, 3rd generation from Enflame, 48GB device memory
-# FHFL PCIe card, dual slot, 3rd generation from Enflame, 48GB device memory
-# nee Thinci, Inc
-# the actual PCI-SIG member is Elektrobit, a daughter company of Continental
-# YMTC
-# aka SED Systems
-# nee Innosilicon Co Ltd
-# XConn XC50256 CXL2.0/PCIe5.0 switch
-# RDMA-PF
-# Network Accelerating Card
-# Network Accelerating Card
-# UnifabriX Smart Memory Node Generic CXL Port
-# UnifabriX Smart Memory Node Generic CXL Port
-# NF1000 Series GPU
-# nee Tumsan Oy
-# nee PathScale, Inc
-# Linkdata Technology (Tianjin) Co., LTD
-# 128GB
-# Wrong ID in board programmed sub-did in place of sub-vid
-# Dev versions of TaSR, not for production.
-# First versions of UberNIC, not for production.
-# Found in VIA Embedded uH4 graphics card
-# alternately Extreme Engineering Solutions, Inc.
-# nee Qumranet
-# Wrong ID used in subsystem ID of AsusTek PCI-USB2 PCI card.
-# and registers common to both SPs
-# and global performance monitoring
-# (bi-interleave 0) and global registers that are neither per-port nor per-interleave
-# (bi-interleave 1)
-# uninitialized SRCU32 RAID Controller
-# PowerVR SGX 545
-# 375-3481-01 REV:50
-# NIC-ETH360T-3S-4P OCP3.0 4x1G Base-T Card
-# NIC-ETH561F-3S-2P OCP3.0 2x10G SFP+ Card
-# UEFI PXE Disabled
-# With UEFI PXE Enabled
-# UEFI PXE Disabled
-# With UEFI PXE Enabled
-# PCIe x8 Bifurcated as x4x4, UEFI PXE Disabled, low profile
-# PCIe x8 Bifurcated as x4x4, UEFI PXE Enabled, low profile
-# PCIe x16 Bifurcated as x8x8, UEFI PXE Disabled, low profile
-# PCIe x16 Bifurcated as x8x8, UEFI PXE Enabled, low profile
-# NIC-ETH660F-3S-2P 2x25GbE SFP28 Network Adapter for OCP 3.0
-# NIC-ETH565T-3S-2P OCP3.0 2x10G Base-T Card
-# Also rebranded as Montage IOH M88IO3020
-# Realtek ALC656
-# Realtek ALC888 audio codec
-# Engineering sample GPU
-# same ID possibly also on other ASUS boards
-# Conexant HSF Softmodem (CXT22)
-# based on the PTGD1-LA motherboard
-# Synopsys DesignWare Core SuperSpeed USB 3.0 Controller
-# Seems to be different than ID 4602
-# https://edc.intel.com/content/www/us/en/design/products/platforms/processor-and-core-i3-n-series-datasheet-volume-1-of-2/002/pch-device-and-revision-ids/
-# Unlike other PCH components. The eSPI controller is specific to each chipset model
-# Refer from Intel Meteor Lake EDS (doc#640228) under its "Device IDs" section.
-# SATA controller on Intel Tiger Lake based mobile platforms in AHCI mode. Could be found on Panasonic Let's Note CF-SV2.
-# AMT serial over LAN
-# observed, and documented in Intel revision note; new mask of 1011:0026
-# nee ScaleMP
-# Wuxi Micro Innovation Integrated Circuit Design Co.,Ltd.
-# NIC-ETH3M0T-3S-4P Quad-Port RJ45 Adapter for OCP 3.0
-# 8c4a is not Winbond but there is a board misprogrammed
-# Acquired by Microchip Technology
-# Some early versions reported 2020S
-# Some early versions reported 2025S
-# nee Netmos Technology
-# Serial ports at BAR0-3
-# Serial ports at BAR0-3, Parallel port at BAR4
-# Parallel port at BAR0. Serial ports at BAR2-5
-# Parallel ports at BAR0,BAR2. Serial ports at BAR4-5
-# 2-port Serial 1-port Parallel Adaptor
-# Subsystem ID on a 3c985B-SX network card
-# NVMe Gen5 Controller 16ch
-# Not registered officially
-# Pinnacle should be 11bd, but they got it wrong several times --mj
-# nee Chrysalis-ITS
-# VPX format Receiver Controller Board
-# PMC Format FPGA design with 8 high speed UART channels
-# 8 port 16550 compatible UART, PMC format, RS-232 IO, RTS, CTS, DTR, DSR supported
-# formerly SoftHard Technology Ltd.
-# The main chip of all these devices is by Xilinx -> It could also be a Xilinx ID.
-# Found on M2N68-AM Motherboard
-# Subsystem ID for PATA controller on nForce motherboard
-# Nee Epigram
-# Used in some old VMWare products before they got a real ID assigned
-
-
-# List of known device classes, subclasses and programming interfaces
-
-# Syntax:
-# C class	class_name
-#	subclass	subclass_name  		<-- single tab
-#		prog-if  prog-if_name  	<-- two tabs
-
-# PTP Grandmaster Source Clock
+	d2fa  Nvlink-7 Switch
+	d2fc  Nvlink-8 Switch
