@@ -11,8 +11,8 @@ mod amd;
 mod intel;
 mod standard;
 
-pub use amd::AmdSnpDetector;
-pub use intel::IntelTdxDetector;
+use amd::AmdSnpDetector;
+use intel::IntelTdxDetector;
 pub use standard::X86StandardDetector;
 
 use crate::core::traits::{CpuVendor, PlatformCCDetector};

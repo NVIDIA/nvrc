@@ -150,12 +150,6 @@ pub trait GpuArchitecture: Send + Sync + Debug {
     /// The register value is read from BAR0 at the offset
     /// returned by `cc_register_offset()`.
     fn parse_cc_mode(&self, register_value: u32) -> Result<CCMode>;
-
-    /// Check if this device ID belongs to this architecture
-    ///
-    /// Used for device identification when creating architecture
-    /// instances.
-    fn matches_device_id(&self, device_id: u16) -> bool;
 }
 
 /// Trait for GPU confidential computing operations

@@ -31,7 +31,6 @@ impl BlackwellArchitecture {
     /// CC state mask (bits [1:0])
     #[allow(dead_code)]
     const CC_STATE_MASK: u32 = 0x3;
-
 }
 
 impl GpuArchitecture for BlackwellArchitecture {
@@ -51,13 +50,6 @@ impl GpuArchitecture for BlackwellArchitecture {
             0x3 => CCMode::Devtools,
             _ => CCMode::Off,
         })
-    }
-
-    fn matches_device_id(&self, _device_id: u16) -> bool {
-        // Not used - we rely on name-based detection via get_by_device_name()
-        // This method exists for trait compatibility but always returns false
-        // to force the registry to use name-based detection
-        false
     }
 }
 

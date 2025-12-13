@@ -99,26 +99,6 @@ impl GpuArchitectureRegistry {
         self.architectures.push(Box::new(arch));
     }
 
-    /// Get architecture by device ID
-    ///
-    /// Searches for an architecture that matches the given device ID.
-    ///
-    /// # Arguments
-    ///
-    /// * `device_id` - The PCI device ID to look up
-    ///
-    /// # Returns
-    ///
-    /// An architecture if found, or `None` if no match.
-    pub fn get_by_device_id(&self, device_id: u16) -> Option<Box<dyn GpuArchitecture>> {
-        for arch in &self.architectures {
-            if arch.matches_device_id(device_id) {
-                return Some(arch.clone_box());
-            }
-        }
-        None
-    }
-
     /// Get architecture by device name
     ///
     /// Searches for an architecture whose name appears in the device name.
@@ -155,27 +135,19 @@ impl GpuArchitectureRegistry {
         device_id: u16,
         device_name: &str,
     ) -> Result<Box<dyn GpuArchitecture>> {
-        // Try device ID first (fast, exact match)
-        if let Some(arch) = self.get_by_device_id(device_id) {
+        // Use name-based detection (PCI database is source of truth)
+        if let Some(arch) = self.get_by_device_name(device_name) {
             debug!(
-                "Detected GPU architecture '{}' by device ID 0x{:04x}",
+                "Detected GPU architecture '{}' by device name '{}' (device ID 0x{:04x})",
                 arch.name(),
+                device_name,
                 device_id
             );
             return Ok(arch);
         }
 
-        // Fall back to name-based detection
-        if let Some(arch) = self.get_by_device_name(device_name) {
-            debug!(
-                "Detected GPU architecture '{}' by device name '{}'",
-                arch.name(),
-                device_name
-            );
-            return Ok(arch);
-        }
-
-        // No match found
+        // No match found - device ID not in PCI database or architecture unknown
+        // User can add via: nvrc.pci.device.id=arch_name,vendor,device_id
         Err(NvrcError::unknown_gpu_architecture(device_id, device_name))
     }
 
@@ -251,10 +223,6 @@ mod tests {
                 _ => CCMode::Off,
             })
         }
-
-        fn matches_device_id(&self, device_id: u16) -> bool {
-            self.device_ids.contains(&device_id)
-        }
     }
 
     #[test]
@@ -275,19 +243,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_by_device_id() {
-        let mut registry = GpuArchitectureRegistry::new();
-        registry.register(MockArchitecture::new("TestArch", vec![0x1234], 0x100));
-
-        let arch = registry.get_by_device_id(0x1234);
-        assert!(arch.is_some());
-        assert_eq!(arch.unwrap().name(), "TestArch");
-
-        let arch = registry.get_by_device_id(0x5678);
-        assert!(arch.is_none());
-    }
-
-    #[test]
     fn test_get_by_device_name() {
         let mut registry = GpuArchitectureRegistry::new();
         registry.register(MockArchitecture::new("Hopper", vec![0x1234], 0x100));
@@ -298,16 +253,6 @@ mod tests {
 
         let arch = registry.get_by_device_name("Unknown Device");
         assert!(arch.is_none());
-    }
-
-    #[test]
-    fn test_get_architecture_by_id() {
-        let mut registry = GpuArchitectureRegistry::new();
-        registry.register(MockArchitecture::new("TestArch", vec![0x1234], 0x100));
-
-        let result = registry.get_architecture(0x1234, "Unknown Name");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().name(), "TestArch");
     }
 
     #[test]
@@ -349,10 +294,11 @@ mod tests {
 
         assert_eq!(registry.len(), 2);
 
-        let arch1 = registry.get_by_device_id(0x2330).unwrap();
+        // Device ID matching removed - using name-based detection only
+        let arch1 = registry.get_by_device_name("H100").unwrap();
         assert_eq!(arch1.name(), "Hopper");
 
-        let arch2 = registry.get_by_device_id(0x2900).unwrap();
+        let arch2 = registry.get_by_device_name("B100").unwrap();
         assert_eq!(arch2.name(), "Blackwell");
     }
 

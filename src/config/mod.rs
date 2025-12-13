@@ -358,8 +358,10 @@ mod tests {
 
     #[test]
     fn test_parse_with_pci_overrides() {
-        let config = KernelParams::parse("nvrc.pci.device.id=hopper,10de,2334 nvrc.pci.device.id=blackwell,10de,2900")
-            .unwrap();
+        let config = KernelParams::parse(
+            "nvrc.pci.device.id=hopper,10de,2334 nvrc.pci.device.id=blackwell,10de,2900",
+        )
+        .unwrap();
         assert_eq!(config.pci_device_overrides.len(), 2);
         assert_eq!(config.pci_device_overrides[0].arch_name, "hopper");
         assert_eq!(config.pci_device_overrides[1].arch_name, "blackwell");

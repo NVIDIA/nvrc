@@ -88,7 +88,6 @@ impl PlatformCCDetector for StandardPlatformDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::traits::GpuCCProvider;
 
     #[test]
     fn test_standard_provider_creation() {
