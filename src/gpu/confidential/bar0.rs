@@ -94,9 +94,10 @@ pub fn read_bar0_register(bdf: &str, register_offset: u64) -> Result<u32> {
     let resource_path = format!("/sys/bus/pci/devices/{}/resource0", bdf);
 
     // Validate register offset is within BAR0
+    // Must check that we can read a full u32 (4 bytes) without crossing boundary
     let bar0_size = read_bar0_size(bdf)?;
 
-    if register_offset as usize >= bar0_size {
+    if register_offset as usize + std::mem::size_of::<u32>() > bar0_size {
         return Err(NvrcError::RegisterOutOfBounds {
             bdf: bdf.to_string(),
             offset: register_offset,

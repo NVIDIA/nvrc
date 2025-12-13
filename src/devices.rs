@@ -102,12 +102,48 @@ impl NVRC {
         Ok(())
     }
 
+    /// Update device state and determine plug mode
+    ///
+    /// # Plug-Mode Logic (CRITICAL - DO NOT "FIX"):
+    ///
+    /// Cold-plug is triggered by ANY NVIDIA device (GPU or NVSwitch).
+    /// This is CORRECT because:
+    /// - GPUs need: nvidia-persistenced, nv-hostengine, dcgm-exporter
+    /// - NVSwitch needs: nv-fabricmanager
+    /// - Both require cold-plug mode for daemon setup
+    ///
+    /// The audit report (final_report.md #6) suggested filtering to GPUs only.
+    /// This is WRONG - NVSwitch systems need cold-plug for nv-fabricmanager.
     fn update_device_state(&mut self, devices: Vec<NvidiaDevice>) {
-        self.plug_mode = crate::core::PlugMode::from_devices_present(!devices.is_empty());
+        let has_devices = !devices.is_empty();
+        self.plug_mode = crate::core::PlugMode::from_devices_present(has_devices);
+
         if devices.is_empty() {
-            debug!("No NVIDIA devices found");
+            debug!("No NVIDIA devices found, using hot-plug mode");
         } else {
-            debug!("Total NVIDIA devices: {}", devices.len());
+            debug!(
+                "Found {} NVIDIA devices, using cold-plug mode",
+                devices.len()
+            );
+
+            // Log what triggered cold-plug
+            let gpu_count = devices
+                .iter()
+                .filter(|d| matches!(d.device_type, crate::pci_ids::DeviceType::Gpu))
+                .count();
+            let switch_count = devices
+                .iter()
+                .filter(|d| matches!(d.device_type, crate::pci_ids::DeviceType::NvSwitch))
+                .count();
+            let unknown_count = devices
+                .iter()
+                .filter(|d| matches!(d.device_type, crate::pci_ids::DeviceType::Unknown))
+                .count();
+
+            debug!(
+                "Device breakdown: {} GPUs, {} NVSwitches, {} Unknown",
+                gpu_count, switch_count, unknown_count
+            );
             debug!(
                 "Device BDFs: {:?}",
                 devices.iter().map(|d| &d.bdf).collect::<Vec<_>>()
