@@ -26,8 +26,8 @@ impl PlatformCCDetector for X86StandardDetector {
         Ok(CCMode::Off)
     }
 
-    fn platform_description(&self) -> &str {
-        "x86_64 (standard, no CC)"
+    fn cc_technology_name(&self) -> &str {
+        "x86_64 (no CC)"
     }
 }
 
@@ -40,7 +40,8 @@ mod tests {
         let detector = X86StandardDetector::new();
         assert!(!detector.is_cc_available());
         assert_eq!(detector.query_cc_mode().unwrap(), CCMode::Off);
-        assert_eq!(detector.platform_description(), "x86_64 (standard, no CC)");
+        assert_eq!(detector.cc_technology_name(), "x86_64 (no CC)");
+        assert!(detector.platform_description().contains("x86_64 (no CC)"));
         assert_eq!(detector.guest_device_path(), None);
     }
 }

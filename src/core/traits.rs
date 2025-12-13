@@ -87,14 +87,34 @@ pub trait PlatformCCDetector: Send + Sync + Debug {
     /// Query the current confidential computing mode
     fn query_cc_mode(&self) -> Result<CCMode>;
 
-    /// Get a human-readable description of this platform
+    /// Get the CC technology name
     ///
     /// # Examples
     ///
-    /// - "AMD SEV-SNP (Secure Nested Paging)"
-    /// - "Intel TDX (Trust Domain Extensions)"
-    /// - "ARM CCA (Confidential Compute Architecture)"
-    fn platform_description(&self) -> &str;
+    /// - "AMD SEV-SNP"
+    /// - "Intel TDX"
+    /// - "ARM CCA"
+    fn cc_technology_name(&self) -> &str;
+
+    /// Get a full platform description including hardware info
+    ///
+    /// Returns format: "vendor product cc_technology"
+    ///
+    /// # Examples
+    ///
+    /// - "Dell PowerEdge R750 AMD SEV-SNP"
+    /// - "Supermicro SYS-620U-TNR Intel TDX"
+    /// - "ARM Server ARM CCA"
+    fn platform_description(&self) -> String {
+        // Default implementation combines hardware + CC info
+        use crate::platform::dmi::DmiInfo;
+
+        let dmi = DmiInfo::from_sysfs();
+        let hardware = dmi.hardware_description();
+        let cc_tech = self.cc_technology_name();
+
+        format!("{} {}", hardware, cc_tech)
+    }
 
     /// Get the device node path for guest attestation, if any
     ///

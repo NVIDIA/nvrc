@@ -76,8 +76,8 @@ impl PlatformCCDetector for IntelTdxDetector {
         })
     }
 
-    fn platform_description(&self) -> &str {
-        "Intel TDX (Trust Domain Extensions)"
+    fn cc_technology_name(&self) -> &str {
+        "Intel TDX"
     }
 
     fn guest_device_path(&self) -> Option<&str> {
@@ -92,10 +92,8 @@ mod tests {
     #[test]
     fn test_intel_tdx_detector_creation() {
         let detector = IntelTdxDetector::new();
-        assert_eq!(
-            detector.platform_description(),
-            "Intel TDX (Trust Domain Extensions)"
-        );
+        assert_eq!(detector.cc_technology_name(), "Intel TDX");
+        assert!(detector.platform_description().contains("Intel TDX"));
         assert_eq!(detector.guest_device_path(), Some("/dev/tdx-guest"));
     }
 

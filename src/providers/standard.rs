@@ -80,8 +80,8 @@ impl PlatformCCDetector for StandardPlatformDetector {
         Ok(CCMode::Off)
     }
 
-    fn platform_description(&self) -> &str {
-        "Standard build (no CC support)"
+    fn cc_technology_name(&self) -> &str {
+        "Standard (no CC)"
     }
 }
 
@@ -93,10 +93,11 @@ mod tests {
     #[test]
     fn test_standard_provider_creation() {
         let provider = StandardProvider::new();
-        assert_eq!(
-            provider.platform().platform_description(),
-            "Standard build (no CC support)"
-        );
+        assert_eq!(provider.platform().cc_technology_name(), "Standard (no CC)");
+        assert!(provider
+            .platform()
+            .platform_description()
+            .contains("Standard (no CC)"));
     }
 
     #[test]
@@ -133,9 +134,10 @@ mod tests {
     #[test]
     fn test_standard_provider_default() {
         let provider = StandardProvider::default();
-        assert_eq!(
-            provider.platform().platform_description(),
-            "Standard build (no CC support)"
-        );
+        assert_eq!(provider.platform().cc_technology_name(), "Standard (no CC)");
+        assert!(provider
+            .platform()
+            .platform_description()
+            .contains("Standard (no CC)"));
     }
 }

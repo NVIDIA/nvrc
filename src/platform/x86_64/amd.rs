@@ -76,8 +76,8 @@ impl PlatformCCDetector for AmdSnpDetector {
         })
     }
 
-    fn platform_description(&self) -> &str {
-        "AMD SEV-SNP (Secure Encrypted Virtualization - Secure Nested Paging)"
+    fn cc_technology_name(&self) -> &str {
+        "AMD SEV-SNP"
     }
 
     fn guest_device_path(&self) -> Option<&str> {
@@ -92,10 +92,8 @@ mod tests {
     #[test]
     fn test_amd_snp_detector_creation() {
         let detector = AmdSnpDetector::new();
-        assert_eq!(
-            detector.platform_description(),
-            "AMD SEV-SNP (Secure Encrypted Virtualization - Secure Nested Paging)"
-        );
+        assert_eq!(detector.cc_technology_name(), "AMD SEV-SNP");
+        assert!(detector.platform_description().contains("AMD SEV-SNP"));
         assert_eq!(detector.guest_device_path(), Some("/dev/sev-guest"));
     }
 

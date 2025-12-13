@@ -29,6 +29,7 @@
 //! ```
 
 pub mod detector;
+pub mod dmi;
 pub mod traits;
 
 // Platform-specific modules (conditionally compiled)

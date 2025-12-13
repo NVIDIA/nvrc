@@ -76,8 +76,8 @@ impl PlatformCCDetector for ArmCcaDetector {
         })
     }
 
-    fn platform_description(&self) -> &str {
-        "ARM CCA (Confidential Compute Architecture)"
+    fn cc_technology_name(&self) -> &str {
+        "ARM CCA"
     }
 
     fn guest_device_path(&self) -> Option<&str> {
@@ -92,10 +92,8 @@ mod tests {
     #[test]
     fn test_arm_cca_detector_creation() {
         let detector = ArmCcaDetector::new();
-        assert_eq!(
-            detector.platform_description(),
-            "ARM CCA (Confidential Compute Architecture)"
-        );
+        assert_eq!(detector.cc_technology_name(), "ARM CCA");
+        assert!(detector.platform_description().contains("ARM CCA"));
         assert_eq!(detector.guest_device_path(), Some("/dev/cca-guest"));
     }
 

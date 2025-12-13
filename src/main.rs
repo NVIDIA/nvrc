@@ -88,6 +88,7 @@ fn main() {
 
     // Hardware detection
     must!(mount::readonly("/"));
+
     must!(init.query_cpu_vendor());
     must!(init.get_nvidia_devices(None));
 

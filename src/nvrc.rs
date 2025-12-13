@@ -11,9 +11,8 @@ use std::thread;
 use std::thread::sleep;
 use std::time::Duration;
 
-use crate::core::traits::{CCProvider, PlatformInfo};
+use crate::core::traits::{CCProvider, CpuVendor, PlatformInfo};
 use crate::core::PlugMode;
-use crate::cpu::Cpu;
 use crate::daemon::{ManagedChild, Name};
 use crate::devices::NvidiaDevice;
 use crate::user_group::UserGroup;
@@ -35,7 +34,7 @@ pub struct NVRC {
     pub fabricmanager_enabled: bool,
 
     // Hardware detection
-    pub cpu_vendor: Option<Cpu>,
+    pub cpu_vendor: Option<CpuVendor>,
     #[allow(dead_code)]
     pub platform_info: Option<PlatformInfo>,
     pub nvidia_devices: Vec<NvidiaDevice>,
@@ -139,6 +138,18 @@ impl NVRC {
 
     pub fn set_random_identity(&mut self) -> anyhow::Result<()> {
         self.identity = crate::user_group::random_user_group()?;
+        Ok(())
+    }
+
+    /// Query CPU vendor using platform detector
+    ///
+    /// This is a convenience method that uses the platform module's
+    /// vendor detection and stores the result in the NVRC struct.
+    pub fn query_cpu_vendor(&mut self) -> anyhow::Result<()> {
+        let vendor =
+            crate::platform::detector::detect_cpu_vendor().map_err(|e| anyhow::anyhow!(e))?;
+        debug!("CPU vendor: {:?}", vendor);
+        self.cpu_vendor = Some(vendor);
         Ok(())
     }
 }
