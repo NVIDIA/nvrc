@@ -254,10 +254,14 @@ impl NVRC {
         )
     }
 
-    #[cfg(feature = "confidential")]
+    /// Execute nvidia-smi Secure Remote Services (SRS) command
+    ///
+    /// This method delegates to the CC provider, which:
+    /// - In confidential builds: Executes the actual SRS command if CC is enabled
+    /// - In standard builds: No-ops (StandardGpuProvider)
+    ///
+    /// This allows feature-independent code while maintaining correct behavior.
     pub fn nvidia_smi_srs(&self) -> Result<()> {
-        // Use the CC provider to execute SRS command
-        // It will check if CC is enabled internally
         self.cc_provider
             .gpu()
             .execute_srs_command(self.nvidia_smi_srs.as_deref())

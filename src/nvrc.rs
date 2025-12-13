@@ -4,7 +4,6 @@
 use anyhow::{Context, Result};
 use log::debug;
 use std::collections::HashMap;
-use std::fs;
 use std::os::unix::net::UnixDatagram;
 use std::sync::Arc;
 use std::thread;
@@ -21,7 +20,11 @@ use crate::user_group::UserGroup;
 #[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
     // Configuration
+    /// nvidia-smi SRS (Secure Remote Services) value
+    /// Used by daemon::nvidia_smi_srs() which delegates to the CC provider
     pub nvidia_smi_srs: Option<String>,
+    /// nvidia-smi LGC (Low GPU Clock) value - reserved for future use
+    #[allow(dead_code)]
     pub nvidia_smi_lgc: Option<String>,
     pub uvm_persistence_mode: Option<String>,
     pub dcgm_enabled: bool,

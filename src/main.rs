@@ -120,7 +120,7 @@ impl NVRC {
         must!(self.manage_daemons(Action::Restart));
         must!(lockdown::disable_modules_loading());
         must!(nvidia_ctk_cdi());
-        #[cfg(feature = "confidential")]
+        // Provider handles whether SRS is supported (confidential only)
         must!(self.nvidia_smi_srs());
     }
 }
