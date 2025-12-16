@@ -16,5 +16,14 @@ pub fn set_panic_hook() {
 }
 
 pub fn disable_modules_loading() -> Result<()> {
-    fs::write("/proc/sys/kernel/modules_disabled", b"1\n").context("disable module loading")
+    const PATH: &str = "/proc/sys/kernel/modules_disabled";
+
+    // Kernel allows write-once only. Read first to make idempotent for hot-plug.
+    if let Ok(current) = fs::read_to_string(PATH) {
+        if current.trim() == "1" {
+            return Ok(());
+        }
+    }
+
+    fs::write(PATH, b"1\n").context("disable module loading")
 }
