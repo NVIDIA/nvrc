@@ -39,13 +39,13 @@ impl NVRC {
         }
 
         let supported_ids = load_supported_ids(path)?;
-        // Verify all GPU device IDs are supported; short‑circuit on first miss
+        // Verify all GPU device IDs are supported; short-circuit on first miss
         if let Some(bad) = self
             .nvidia_devices
             .iter()
             .filter(|d| matches!(d.device_type, DeviceType::Gpu))
             .map(|d| d.device_id)
-            .find(|id| !supported_ids.contains(&format!("0x{:04x}", id)))
+            .find(|id| !supported_ids.contains(id))
         {
             self.gpu_supported = false;
             return Err(anyhow::anyhow!("GPU 0x{:04x} is not supported", bad));
@@ -60,14 +60,36 @@ impl NVRC {
     }
 }
 
-fn load_supported_ids(path: &Path) -> Result<HashSet<String>> {
+fn load_supported_ids(path: &Path) -> Result<HashSet<u16>> {
     let content =
         fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
-    Ok(content
-        .lines()
-        .map(|l| l.trim().to_lowercase())
-        .filter(|l| !l.is_empty())
-        .collect())
+
+    let mut ids = HashSet::new();
+    for (line_num, raw) in content.lines().enumerate() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Normalize: strip 0x prefix and parse as hex u16
+        let normalized = trimmed.trim_start_matches("0x").trim_start_matches("0X");
+
+        match u16::from_str_radix(normalized, 16) {
+            Ok(id) => {
+                ids.insert(id);
+            }
+            Err(_) => {
+                warn!(
+                    "Ignoring invalid device ID at {}:{}: '{}' (expected hex format)",
+                    path.display(),
+                    line_num + 1,
+                    trimmed
+                );
+            }
+        }
+    }
+
+    Ok(ids)
 }
 
 #[cfg(test)]
@@ -131,6 +153,55 @@ mod tests {
         nvrc.nvidia_devices = vec![dev];
         nvrc.check_gpu_supported(Some(&list))?;
         assert!(nvrc.gpu_supported);
+        Ok(())
+    }
+
+    #[test]
+    fn test_gpu_id_format_normalization() -> Result<()> {
+        // Regression test: file format vs code format mismatch
+        let dir = tempdir()?;
+        let list = dir.path().join("supported.txt");
+
+        // Mix of formats: bare hex, with 0x, uppercase
+        write_lines(
+            &list,
+            &["2330", "0x2331", "0X2332", "# comment", "", "invalid"],
+        );
+
+        let ids = load_supported_ids(&list)?;
+
+        assert_eq!(ids.len(), 3, "Should parse 3 valid IDs");
+        assert!(ids.contains(&0x2330), "Should normalize '2330'");
+        assert!(ids.contains(&0x2331), "Should normalize '0x2331'");
+        assert!(ids.contains(&0x2332), "Should normalize '0X2332'");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_device_id_matching_consistency() -> Result<()> {
+        // Regression test: bare hex in file should match prefixed device_id
+        let dir = tempdir()?;
+        let list = dir.path().join("supported.txt");
+
+        write_lines(&list, &["2330"]); // Bare hex without prefix
+
+        let mut nvrc = NVRC::default();
+        let dev = crate::devices::NvidiaDevice::new(
+            "0000:01:00.0".into(),
+            "0x2330", // Device ID from sysfs (with prefix)
+            "0x10de",
+            "0x030000",
+        )?;
+        nvrc.nvidia_devices = vec![dev];
+
+        // Should match because both normalized to u16
+        nvrc.check_gpu_supported(Some(&list))?;
+        assert!(
+            nvrc.gpu_supported,
+            "Bare hex should match prefixed sysfs ID"
+        );
+
         Ok(())
     }
 }

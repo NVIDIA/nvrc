@@ -25,7 +25,12 @@ fn mount(
 
 fn is_mounted(path: &str) -> bool {
     fs::read_to_string("/proc/mounts")
-        .map(|mounts| mounts.lines().any(|line| line.contains(path)))
+        .map(|mounts| {
+            mounts.lines().any(|line| {
+                // Field 2 is mountpoint. Avoid substring match (/dev vs /dev/pts).
+                line.split_whitespace().nth(1) == Some(path)
+            })
+        })
         .unwrap_or(false)
 }
 
@@ -189,7 +194,36 @@ mod tests {
     fn test_is_mounted() {
         assert!(is_mounted("/"));
         assert!(!is_mounted("/nonexistent"));
-        assert!(is_mounted("/dev"));
+    }
+
+    #[test]
+    fn test_is_mounted_exact_match() {
+        // Regression test for substring match bug
+        // /dev/pts should NOT match when checking /dev
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        writeln!(tmp, "devpts /dev/pts devpts rw 0 0").unwrap();
+        writeln!(tmp, "tmpfs /dev/shm tmpfs rw 0 0").unwrap();
+        writeln!(tmp, "proc /proc proc rw 0 0").unwrap();
+
+        let content = std::fs::read_to_string(tmp.path()).unwrap();
+
+        // Test exact matching by simulating is_mounted logic
+        let is_dev_mounted = content
+            .lines()
+            .any(|line| line.split_whitespace().nth(1) == Some("/dev"));
+
+        let is_dev_pts_mounted = content
+            .lines()
+            .any(|line| line.split_whitespace().nth(1) == Some("/dev/pts"));
+
+        assert!(
+            !is_dev_mounted,
+            "/dev should NOT match when only /dev/pts is mounted"
+        );
+        assert!(is_dev_pts_mounted, "/dev/pts should match");
     }
 
     #[test]

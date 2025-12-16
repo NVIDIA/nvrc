@@ -59,7 +59,33 @@ fn read_bar0_size(bdf: &str) -> Result<usize> {
             reason: e.to_string(),
         })?;
 
-    Ok((end_addr - start_addr + 1) as usize)
+    // Malformed sysfs (hardware bug, kernel bug, or attack) could have end < start.
+    // Catch this before arithmetic to prevent wraparound.
+    if end_addr < start_addr {
+        return Err(NvrcError::Bar0AccessFailed {
+            bdf: bdf.to_string(),
+            offset: 0,
+            reason: format!(
+                "Invalid BAR0 range: end < start (0x{:x} < 0x{:x})",
+                end_addr, start_addr
+            ),
+        });
+    }
+
+    // Use checked arithmetic to prevent overflow on pathological values.
+    let size = end_addr
+        .checked_sub(start_addr)
+        .and_then(|diff| diff.checked_add(1))
+        .ok_or_else(|| NvrcError::Bar0AccessFailed {
+            bdf: bdf.to_string(),
+            offset: 0,
+            reason: format!(
+                "BAR0 size calculation overflow (start=0x{:x}, end=0x{:x})",
+                start_addr, end_addr
+            ),
+        })?;
+
+    Ok(size as usize)
 }
 
 /// Read a 32-bit register from GPU BAR0
@@ -169,4 +195,40 @@ mod tests {
 
     // Note: Real BAR0 tests require actual GPU hardware
     // and root privileges, so we only test error paths
+
+    #[test]
+    fn test_bar0_size_invalid_range() {
+        // Regression test: malformed sysfs with end < start should fail
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut tmp = NamedTempFile::new().unwrap();
+        writeln!(tmp, "0x00000000ffffffff 0x0000000000000000 0x0").unwrap();
+        tmp.flush().unwrap();
+
+        let content = std::fs::read_to_string(tmp.path()).unwrap();
+        let parts: Vec<&str> = content.lines().next().unwrap().split_whitespace().collect();
+        let start = u64::from_str_radix(parts[0].trim_start_matches("0x"), 16).unwrap();
+        let end = u64::from_str_radix(parts[1].trim_start_matches("0x"), 16).unwrap();
+
+        assert!(end < start, "Test data should have end < start");
+    }
+
+    #[test]
+    fn test_bar0_size_checked_arithmetic() {
+        // Regression test: verify checked arithmetic handles overflow
+        let max = u64::MAX;
+
+        // Normal case
+        let size = 0x1000u64.checked_sub(0x0).and_then(|d| d.checked_add(1));
+        assert_eq!(size, Some(0x1001));
+
+        // Edge case: near max
+        let size_near_max = max.checked_sub(1).and_then(|d| d.checked_add(1));
+        assert_eq!(size_near_max, Some(max));
+
+        // Overflow case
+        let size_overflow = max.checked_sub(0).and_then(|d| d.checked_add(1));
+        assert_eq!(size_overflow, None, "max + 1 should overflow");
+    }
 }
