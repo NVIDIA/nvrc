@@ -121,8 +121,10 @@ impl NVRC {
 
     pub fn print_version_banner() {
         let version = env!("CARGO_PKG_VERSION");
-        let git_hash = env!("GIT_HASH");
-        let git_dirty = env!("GIT_DIRTY");
+
+        // Git info from build.rs (fallback if not available)
+        let git_hash = option_env!("GIT_HASH").unwrap_or("unknown");
+        let git_dirty = option_env!("GIT_DIRTY").unwrap_or("");
 
         if git_dirty.is_empty() {
             info!("NVRC v{} ({})", version, git_hash);
