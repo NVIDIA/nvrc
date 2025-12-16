@@ -81,6 +81,9 @@ fn main() {
     // Apply log configuration early (affects global state)
     must!(kernel_params.apply_log_config());
 
+    // Print version banner
+    NVRC::print_version_banner();
+
     // Build NVRC with configuration (no mutation after build!)
     let mut init = must_build!(NVRCBuilder::new()
         .with_auto_cc_provider()

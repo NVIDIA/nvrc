@@ -118,6 +118,20 @@ impl NVRC {
         self.cpu_vendor = Some(vendor);
         Ok(())
     }
+
+    pub fn print_version_banner() {
+        let version = env!("CARGO_PKG_VERSION");
+        let git_hash = env!("GIT_HASH");
+        let git_dirty = env!("GIT_DIRTY");
+
+        if git_dirty.is_empty() {
+            info!("NVRC v{} ({})", version, git_hash);
+        } else {
+            // WARN level because dirty tree means binary doesn't match committed code.
+            // Critical for debugging production issues.
+            warn!("NVRC v{} ({}-{})", version, git_hash, git_dirty);
+        }
+    }
 }
 
 // Old parameter handlers removed - all functionality now in config module
