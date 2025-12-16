@@ -294,11 +294,11 @@ mod tests {
 
         assert_eq!(registry.len(), 2);
 
-        // Device ID matching removed - using name-based detection only
-        let arch1 = registry.get_by_device_name("H100").unwrap();
+        // Name-based detection checks if arch.name() is in device_name
+        let arch1 = registry.get_by_device_name("GH100 Hopper GPU").unwrap();
         assert_eq!(arch1.name(), "Hopper");
 
-        let arch2 = registry.get_by_device_name("B100").unwrap();
+        let arch2 = registry.get_by_device_name("GB100 Blackwell GPU").unwrap();
         assert_eq!(arch2.name(), "Blackwell");
     }
 
