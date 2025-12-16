@@ -71,48 +71,35 @@ use toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
 fn main() {
     lockdown::set_panic_hook();
 
-    // System-level setup (before NVRC initialization)
     must!(mount::setup());
     must!(kmsg::kernlog_setup());
 
-    // Parse kernel configuration (immutable, idiomatic)
     let kernel_params = must_value!(KernelParams::from_cmdline(None));
 
-    // Apply log configuration early (affects global state)
+    // Apply early because it affects global log state
     must!(kernel_params.apply_log_config());
 
-    // Print version banner
     NVRC::print_version_banner();
 
-    // Build NVRC with configuration (no mutation after build!)
     let mut init = must_build!(NVRCBuilder::new()
         .with_auto_cc_provider()
         .map(|b| b.with_kernel_params(kernel_params)));
 
-    // Hardware detection
     must!(mount::readonly("/"));
-
     must!(init.query_cpu_vendor());
     must!(init.get_nvidia_devices(None));
 
-    // Log platform information
     info!(
         "Platform: {}",
         init.cc_provider.platform().platform_description()
     );
 
-    // Validate and execute handler based on plug mode
-    init.plug_mode.validate(); // Enforces cold-plug for confidential builds
+    // Enforces cold-plug for confidential builds (security requirement)
+    init.plug_mode.validate();
 
     match init.plug_mode {
-        PlugMode::Cold => {
-            debug!("Executing cold-plug handler");
-            must!(init.cold_plug())
-        }
-        PlugMode::Hot => {
-            debug!("Executing hot-plug handler");
-            must!(init.hot_plug())
-        }
+        PlugMode::Cold => must!(init.cold_plug()),
+        PlugMode::Hot => must!(init.hot_plug()),
     }
 }
 
@@ -123,7 +110,6 @@ impl NVRC {
         must!(self.manage_daemons(Action::Restart));
         must!(lockdown::disable_modules_loading());
         must!(nvidia_ctk_cdi());
-        // Provider handles whether SRS is supported (confidential only)
         must!(self.nvidia_smi_srs());
     }
 }

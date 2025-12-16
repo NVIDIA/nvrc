@@ -9,7 +9,6 @@ use std::path::Path;
 use super::NVRC;
 use crate::pci_ids::{self, DeviceType};
 
-// Trim 0x prefix if present and parse as given radix size
 fn parse_hex_u16(s: &str, field: &str) -> Result<u16> {
     u16::from_str_radix(s.trim().trim_start_matches("0x"), 16)
         .with_context(|| format!("Failed to parse {}: {}", field, s))

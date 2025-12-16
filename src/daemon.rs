@@ -43,9 +43,8 @@ impl Drop for ManagedChild {
             self.name,
             self.child.id()
         );
-        // Attempt to kill if still running
         let _ = self.child.kill();
-        // Wait to prevent zombie processes
+        // Wait prevents zombie processes (PID 1 responsibility)
         let _ = self.child.wait();
     }
 }
@@ -73,8 +72,7 @@ impl fmt::Display for Name {
             Name::DCGMExporter => "dcgm-exporter",
             Name::NVFabricmanager => "nv-fabricmanager",
         };
-        // Truncate to 15 characters if longer; since /proc/<pid>/comm is
-        // limited to 16 - 15 characters plus \0
+        // /proc/<pid>/comm limited to 16 chars (15 + null terminator)
         let truncated = &full_str[..std::cmp::min(full_str.len(), 15)];
         write!(f, "{truncated}")
     }
@@ -185,7 +183,7 @@ impl NVRC {
     fn stop(&mut self, daemon: &Name) -> Result<()> {
         debug!("stop {}", daemon);
         if let Some(mut managed_child) = self.daemons.remove(daemon) {
-            // Try to kill, but don't fail if already dead
+            // Don't fail if process already exited (race with natural termination)
             if let Err(e) = managed_child.kill() {
                 if e.kind() != std::io::ErrorKind::InvalidInput {
                     return Err(anyhow!(e)).context("Failed to kill daemon process");
