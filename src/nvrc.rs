@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use log::debug;
 use std::fs;
 
-use crate::cpu::Cpu;
 use crate::user_group::UserGroup;
 
 fn parse_boolean(s: &str) -> bool {
@@ -18,7 +17,6 @@ pub struct NVRC {
     pub nvidia_smi_srs: Option<String>,
     pub nvidia_smi_lgc: Option<String>,
     pub uvm_persistence_mode: Option<String>,
-    pub cpu_vendor: Option<Cpu>,
     pub dcgm_enabled: Option<bool>,
     pub fabricmanager_enabled: Option<bool>,
     pub identity: UserGroup,

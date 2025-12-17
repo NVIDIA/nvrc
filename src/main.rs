@@ -2,7 +2,6 @@
 // Copyright (c) NVIDIA CORPORATION
 
 mod coreutils;
-mod cpu;
 mod daemon;
 mod kata_agent;
 mod kmsg;
@@ -32,7 +31,6 @@ macro_rules! must {
     };
 }
 
-use kata_agent::fork_agent;
 use nvrc::NVRC;
 use toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
 
@@ -45,9 +43,8 @@ fn main() {
     must!(init.set_random_identity());
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
-    must!(init.query_cpu_vendor());
     must!(init.setup_gpu());
-    must!(fork_agent());
+    must!(kata_agent::fork_agent());
 }
 
 impl NVRC {
