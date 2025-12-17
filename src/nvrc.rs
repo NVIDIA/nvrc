@@ -32,7 +32,7 @@ impl NVRC {
         for (k, v) in content.split_whitespace().filter_map(|p| p.split_once('=')) {
             match k {
                 "nvrc.log" => nvrc_log(v, self)?,
-                "nvrc.uvm_persistence_mode" => uvm_persistenced_mode(v, self)?,
+                "nvrc.uvm.persistence.mode" => uvm_persistenced_mode(v, self)?,
                 "nvrc.dcgm" => nvrc_dcgm(v, self)?,
                 "nvrc.fabricmanager" => nvrc_fabricmanager(v, self)?,
                 "nvrc.smi.srs" => nvidia_smi_srs(v, self)?,

@@ -16,8 +16,6 @@ mod user_group;
 extern crate log;
 extern crate kernlog;
 
-use anyhow::Result;
-
 macro_rules! must {
     ($expr:expr) => {
         if let Err(e) = $expr {
@@ -43,20 +41,13 @@ fn main() {
     must!(init.set_random_identity());
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
-    must!(init.setup_gpu());
+    must!(nvidia_ctk_system());
+    must!(init.nvidia_persistenced());
+    must!(lockdown::disable_modules_loading());
+    must!(init.nv_hostengine());
+    must!(init.dcgm_exporter());
+    must!(init.nv_fabricmanager());
+    must!(nvidia_ctk_cdi());
+    must!(init.nvidia_smi_srs());
     must!(kata_agent::fork_agent());
-}
-
-impl NVRC {
-    fn setup_gpu(&mut self) -> Result<()> {
-        nvidia_ctk_system()?;
-        self.nvidia_persistenced()?;
-        lockdown::disable_modules_loading()?;
-        self.nv_hostengine()?;
-        self.dcgm_exporter()?;
-        self.nv_fabricmanager()?;
-        nvidia_ctk_cdi()?;
-        self.nvidia_smi_srs()?;
-        Ok(())
-    }
 }
