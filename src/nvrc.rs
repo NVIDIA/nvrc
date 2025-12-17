@@ -3,12 +3,10 @@
 
 use anyhow::{Context, Result};
 use log::debug;
-use std::collections::HashMap;
 use std::fs;
 use std::os::unix::net::UnixDatagram;
 
 use crate::cpu::Cpu;
-use crate::daemon::{ManagedChild, Name};
 #[cfg(feature = "confidential")]
 use crate::gpu::confidential::CC;
 use crate::user_group::UserGroup;
@@ -29,7 +27,6 @@ pub struct NVRC {
     pub dcgm_enabled: Option<bool>,
     pub fabricmanager_enabled: Option<bool>,
     pub identity: UserGroup,
-    pub daemons: HashMap<Name, ManagedChild>,
     pub syslog_socket: Option<UnixDatagram>,
 }
 
@@ -45,7 +42,6 @@ impl Default for NVRC {
             dcgm_enabled: None,
             fabricmanager_enabled: None,
             identity: UserGroup::new(),
-            daemons: HashMap::new(),
             syslog_socket: None,
         }
     }

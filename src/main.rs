@@ -32,7 +32,6 @@ macro_rules! must {
     };
 }
 
-use daemon::Action;
 use kata_agent::kata_agent;
 use nvrc::NVRC;
 use toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
@@ -57,8 +56,11 @@ impl NVRC {
         #[cfg(feature = "confidential")]
         must!(self.query_gpu_cc_mode());
         must!(nvidia_ctk_system());
-        must!(self.manage_daemons(Action::Restart));
+        must!(self.nvidia_persistenced());
         must!(lockdown::disable_modules_loading());
+        must!(self.nv_hostengine());
+        must!(self.dcgm_exporter());
+        must!(self.nv_fabricmanager());
         must!(nvidia_ctk_cdi());
         #[cfg(feature = "confidential")]
         must!(self.nvidia_smi_srs());

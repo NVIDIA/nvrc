@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use crate::daemon::Action;
 use crate::kata_agent;
 use crate::nvrc::NVRC;
 use log::{debug, error};
@@ -29,17 +28,4 @@ impl NVRC {
         }
         Ok(())
     }
-
-    pub fn manage_daemons(&mut self, action: Action) -> Result<()> {
-        for f in [
-            NVRC::nvidia_persistenced,
-            NVRC::nv_hostengine,
-            NVRC::dcgm_exporter,
-            NVRC::nv_fabricmanager,
-        ] {
-            f(self, action.clone())?;
-        }
-        Ok(())
-    }
-
 }
