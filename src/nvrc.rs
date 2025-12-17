@@ -7,8 +7,6 @@ use std::fs;
 use std::os::unix::net::UnixDatagram;
 
 use crate::cpu::Cpu;
-#[cfg(feature = "confidential")]
-use crate::gpu::confidential::CC;
 use crate::user_group::UserGroup;
 
 fn parse_boolean(s: &str) -> bool {
@@ -22,8 +20,6 @@ pub struct NVRC {
     pub nvidia_smi_lgc: Option<String>,
     pub uvm_persistence_mode: Option<String>,
     pub cpu_vendor: Option<Cpu>,
-    #[cfg(feature = "confidential")]
-    pub gpu_cc_mode: Option<CC>,
     pub dcgm_enabled: Option<bool>,
     pub fabricmanager_enabled: Option<bool>,
     pub identity: UserGroup,
@@ -37,8 +33,6 @@ impl Default for NVRC {
             nvidia_smi_lgc: None,
             uvm_persistence_mode: None,
             cpu_vendor: None,
-            #[cfg(feature = "confidential")]
-            gpu_cc_mode: None,
             dcgm_enabled: None,
             fabricmanager_enabled: None,
             identity: UserGroup::new(),

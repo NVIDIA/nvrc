@@ -10,9 +10,6 @@ use std::process::{Command, Stdio};
 use crate::kmsg::kmsg;
 use crate::nvrc::NVRC;
 
-#[cfg(feature = "confidential")]
-use crate::gpu::confidential::CC;
-
 pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
     debug!("{} {}", command, args.join(" "));
 
@@ -31,6 +28,7 @@ pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
 }
 
 fn background(command: &str, args: &[&str]) -> Result<()> {
+    debug!("{} {}", command, args.join(" "));
     let kmsg_file = kmsg().context("Failed to open kmsg device")?;
     let mut child = Command::new(command)
         .args(args)
@@ -76,22 +74,17 @@ impl NVRC {
             args.push(f);
         }
 
-        #[cfg(feature = "confidential")]
-        warn!("GPU CC mode build: not setting user/group for nvidia-persistenced");
+        /*  TODO: nvidia-persistenced will not start with -u or -g flag in both modes
 
-        // TODO: nvidia-persistenced will not start with -u or -g flag in both modes
-        #[cfg(not(feature = "confidential"))]
-        {
             let user = self.identity.user_name.clone();
             let group = self.identity.group_name.clone();
-            let _owned = [user, group];
-            //args.extend_from_slice(&["-u", owned[0].as_str(), "-g", owned[1].as_str()]);
+
+            args.extend_from_slice(&["-u", &user.to_owned(), "-g", &group.to_owned()]);
             background("/bin/nvidia-persistenced", &args)
-        }
-        #[cfg(feature = "confidential")]
-        {
-            background("/bin/nvidia-persistenced", &args)
-        }
+
+        */
+
+        background("/bin/nvidia-persistenced", &args)
     }
 
     pub fn nv_hostengine(&mut self) -> Result<()> {
@@ -114,10 +107,8 @@ impl NVRC {
         )
     }
 
-    #[cfg(feature = "confidential")]
     pub fn nvidia_smi_srs(&self) -> Result<()> {
-        if self.gpu_cc_mode != Some(CC::On) {
-            debug!("CC mode off; skip nvidia-smi conf-compute -srs");
+        if  self.nvidia_smi_srs.is_none() {
             return Ok(());
         }
         foreground(

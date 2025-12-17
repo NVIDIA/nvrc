@@ -5,7 +5,6 @@ mod attach;
 mod coreutils;
 mod cpu;
 mod daemon;
-mod gpu;
 mod kata_agent;
 mod kmsg;
 mod lockdown;
@@ -46,15 +45,11 @@ fn main() {
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
     must!(init.query_cpu_vendor());
-    #[cfg(feature = "confidential")]
-    must!(init.query_cpu_cc_mode());
     must!(init.cold_plug());
 }
 
 impl NVRC {
     fn setup_gpu(&mut self) {
-        #[cfg(feature = "confidential")]
-        must!(self.query_gpu_cc_mode());
         must!(nvidia_ctk_system());
         must!(self.nvidia_persistenced());
         must!(lockdown::disable_modules_loading());
@@ -62,7 +57,6 @@ impl NVRC {
         must!(self.dcgm_exporter());
         must!(self.nv_fabricmanager());
         must!(nvidia_ctk_cdi());
-        #[cfg(feature = "confidential")]
         must!(self.nvidia_smi_srs());
     }
 }
