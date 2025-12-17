@@ -4,7 +4,6 @@
 use anyhow::{Context, Result};
 use log::debug;
 use std::fs;
-use std::os::unix::net::UnixDatagram;
 
 use crate::cpu::Cpu;
 use crate::user_group::UserGroup;
@@ -23,23 +22,9 @@ pub struct NVRC {
     pub dcgm_enabled: Option<bool>,
     pub fabricmanager_enabled: Option<bool>,
     pub identity: UserGroup,
-    pub syslog_socket: Option<UnixDatagram>,
 }
 
 impl NVRC {
-    pub fn setup_syslog(&mut self) -> Result<()> {
-        let socket = crate::syslog::dev_log_setup().context("syslog socket")?;
-        self.syslog_socket = Some(socket);
-        Ok(())
-    }
-
-    pub fn poll_syslog(&self) -> Result<()> {
-        if let Some(socket) = &self.syslog_socket {
-            crate::syslog::poll_dev_log(socket).context("poll syslog")?;
-        }
-        Ok(())
-    }
-
     pub fn process_kernel_params(&mut self, cmdline: Option<&str>) -> Result<()> {
         let content = match cmdline {
             Some(c) => c.to_owned(),
