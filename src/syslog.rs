@@ -6,8 +6,29 @@ use std::fs;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixDatagram;
 use std::path::Path;
+use std::sync::OnceLock;
 
-use nix::poll::{poll, PollFd, PollFlags};
+use nix::poll::{PollFd, PollFlags};
+
+static SYSLOG: OnceLock<UnixDatagram> = OnceLock::new();
+
+/// Initialize the global syslog socket at /dev/log
+pub fn init() -> std::io::Result<()> {
+    // Use get_or_init with immediate setup since dev_log_setup is infallible for init purposes
+    if SYSLOG.get().is_none() {
+        let socket = dev_log_setup()?;
+        let _ = SYSLOG.set(socket); // Ignore if already set (race condition)
+    }
+    Ok(())
+}
+
+/// Poll the global syslog socket for messages
+pub fn poll() -> std::io::Result<()> {
+    if let Some(sock) = SYSLOG.get() {
+        poll_dev_log(sock)?;
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -94,8 +115,8 @@ pub fn poll_dev_log(sock: &UnixDatagram) -> std::io::Result<()> {
     let mut fds = [PollFd::new(sock.as_fd(), PollFlags::POLLIN)];
 
     // Non-blocking poll - return immediately if no data
-    let poll_count =
-        poll(&mut fds, 0u16).map_err(|e| std::io::Error::from_raw_os_error(e as i32))?;
+    let poll_count = nix::poll::poll(&mut fds, nix::poll::PollTimeout::ZERO)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
 
     if poll_count == 0 {
         return Ok(()); // No data available

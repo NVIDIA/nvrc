@@ -25,16 +25,6 @@ fn ctk(args: &[&str]) -> Result<()> {
     foreground("/bin/nvidia-ctk", args)
 }
 
-pub fn nvidia_ctk_system() -> Result<()> {
-    ctk(&[
-        "-d",
-        "system",
-        "create-device-nodes",
-        "--control-devices",
-        "--load-kernel-modules",
-    ])
-}
-
 pub fn nvidia_ctk_cdi() -> Result<()> {
     ctk(&["-d", "cdi", "generate", "--output=/var/run/cdi/nvidia.yaml"])
 }
