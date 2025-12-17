@@ -6,13 +6,9 @@ use log::debug;
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::net::UnixDatagram;
-use std::thread;
-use std::thread::sleep;
-use std::time::Duration;
 
 use crate::cpu::Cpu;
 use crate::daemon::{ManagedChild, Name};
-use crate::devices::NvidiaDevice;
 #[cfg(feature = "confidential")]
 use crate::gpu::confidential::CC;
 use crate::user_group::UserGroup;
@@ -28,12 +24,8 @@ pub struct NVRC {
     pub nvidia_smi_lgc: Option<String>,
     pub uvm_persistence_mode: Option<String>,
     pub cpu_vendor: Option<Cpu>,
-    pub nvidia_devices: Vec<NvidiaDevice>,
-    pub gpu_supported: bool,
     #[cfg(feature = "confidential")]
     pub gpu_cc_mode: Option<CC>,
-    pub cold_plug: bool,
-    pub hot_or_cold_plug: HashMap<bool, fn(&mut NVRC) -> Result<()>>,
     pub dcgm_enabled: Option<bool>,
     pub fabricmanager_enabled: Option<bool>,
     pub identity: UserGroup,
@@ -48,15 +40,8 @@ impl Default for NVRC {
             nvidia_smi_lgc: None,
             uvm_persistence_mode: None,
             cpu_vendor: None,
-            nvidia_devices: Vec::new(),
-            gpu_supported: false,
             #[cfg(feature = "confidential")]
             gpu_cc_mode: None,
-            cold_plug: false,
-            hot_or_cold_plug: HashMap::from([
-                (true, NVRC::cold_plug as fn(&mut NVRC) -> Result<()>),
-                (false, NVRC::hot_plug as fn(&mut NVRC) -> Result<()>),
-            ]),
             dcgm_enabled: None,
             fabricmanager_enabled: None,
             identity: UserGroup::new(),
@@ -76,22 +61,6 @@ impl NVRC {
     pub fn poll_syslog(&self) -> Result<()> {
         if let Some(socket) = &self.syslog_socket {
             crate::syslog::poll_dev_log(socket).context("poll syslog")?;
-        }
-        Ok(())
-    }
-
-    pub fn watch_poll_syslog(&self) -> Result<()> {
-        if let Some(socket) = &self.syslog_socket {
-            thread::spawn({
-                let socket = socket.try_clone().context("clone syslog socket")?;
-                move || loop {
-                    if let Err(e) = crate::syslog::poll_dev_log(&socket) {
-                        error!("poll syslog: {e}");
-                        break;
-                    }
-                    sleep(Duration::from_secs(1));
-                }
-            });
         }
         Ok(())
     }
