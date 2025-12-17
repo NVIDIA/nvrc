@@ -30,7 +30,7 @@ macro_rules! must {
 }
 
 use nvrc::NVRC;
-use toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
+use toolkit::nvidia_ctk_cdi;
 
 fn main() {
     lockdown::set_panic_hook();
@@ -41,7 +41,15 @@ fn main() {
     must!(init.set_random_identity());
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
-    must!(nvidia_ctk_system());
+
+    must!(daemon::modprobe_nvidia());
+    must!(daemon::modprobe_nvidia_uvm());
+    must!(daemon::modprobe_nvidia_modeset());
+
+    must!(init.nvidia_smi_lmcd());
+    must!(init.nvidia_smi_lgc());
+    must!(init.nvidia_smi_pl());
+
     must!(init.nvidia_persistenced());
     must!(lockdown::disable_modules_loading());
     must!(init.nv_hostengine());

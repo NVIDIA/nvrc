@@ -44,6 +44,21 @@ fn background(command: &str, args: &[&str]) -> Result<()> {
     }
 }
 
+pub fn modprobe_nvidia() -> Result<()> {
+    debug!("modprobe nvidia");
+    foreground("/sbin/modprobe", &["nvidia"])
+}
+
+pub fn modprobe_nvidia_uvm() -> Result<()> {
+    debug!("modprobe nvidia-uvm");
+    foreground("/sbin/modprobe", &["nvidia-uvm"])
+}
+
+pub fn modprobe_nvidia_modeset() -> Result<()> {
+    debug!("modprobe nvidia-modeset");
+    foreground("/sbin/modprobe", &["nvidia-modeset"])
+}
+
 impl NVRC {
     pub fn nvidia_persistenced(&mut self) -> Result<()> {
         let uvm_flag = match self.uvm_persistence_mode.as_deref() {
@@ -107,6 +122,49 @@ impl NVRC {
         )
     }
 
+    pub fn nvidia_smi_lmcd(&self) -> Result<()> {
+        let Some(mhz) = self.nvidia_smi_lmcd else {
+            return Ok(());
+        };
+
+        let mhz_str = mhz.to_string();
+        info!("locking memory clocks to {} MHz (all GPUs)", mhz);
+        foreground("/bin/nvidia-smi", &["-lmcd", &mhz_str])?;
+
+        // Memory clock lock requires driver reload
+        info!("reloading nvidia driver after lmcd");
+        foreground(
+            "/sbin/modprobe",
+            &["-r", "nvidia_uvm", "nvidia_modeset", "nvidia"],
+        )?;
+        modprobe_nvidia()?;
+        modprobe_nvidia_uvm()?;
+        modprobe_nvidia_modeset()
+    }
+
+    /// Lock GPU clocks for all GPUs (can be done on the fly)
+    pub fn nvidia_smi_lgc(&self) -> Result<()> {
+        let Some(mhz) = self.nvidia_smi_lgc else {
+            return Ok(());
+        };
+
+        let mhz_str = mhz.to_string();
+        info!("locking GPU clocks to {} MHz (all GPUs)", mhz);
+        foreground("/bin/nvidia-smi", &["-lgc", &mhz_str])
+    }
+
+    /// Set power limit for all GPUs (can be done on the fly)
+    pub fn nvidia_smi_pl(&self) -> Result<()> {
+        let Some(watts) = self.nvidia_smi_pl else {
+            return Ok(());
+        };
+
+        let watts_str = watts.to_string();
+        info!("setting power limit to {} W (all GPUs)", watts);
+        foreground("/bin/nvidia-smi", &["-pl", &watts_str])
+    }
+
+    /// Set SRS for confidential compute (can be done on the fly)
     pub fn nvidia_smi_srs(&self) -> Result<()> {
         if self.nvidia_smi_srs.is_none() {
             return Ok(());
