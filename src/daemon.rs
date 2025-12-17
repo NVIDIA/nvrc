@@ -108,7 +108,7 @@ impl NVRC {
     }
 
     pub fn nvidia_smi_srs(&self) -> Result<()> {
-        if  self.nvidia_smi_srs.is_none() {
+        if self.nvidia_smi_srs.is_none() {
             return Ok(());
         }
         foreground(

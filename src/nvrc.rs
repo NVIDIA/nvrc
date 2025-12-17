@@ -13,7 +13,7 @@ fn parse_boolean(s: &str) -> bool {
     matches!(s.to_ascii_lowercase().as_str(), "on" | "true" | "1" | "yes")
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
     pub nvidia_smi_srs: Option<String>,
@@ -24,21 +24,6 @@ pub struct NVRC {
     pub fabricmanager_enabled: Option<bool>,
     pub identity: UserGroup,
     pub syslog_socket: Option<UnixDatagram>,
-}
-
-impl Default for NVRC {
-    fn default() -> Self {
-        Self {
-            nvidia_smi_srs: None,
-            nvidia_smi_lgc: None,
-            uvm_persistence_mode: None,
-            cpu_vendor: None,
-            dcgm_enabled: None,
-            fabricmanager_enabled: None,
-            identity: UserGroup::new(),
-            syslog_socket: None,
-        }
-    }
 }
 
 impl NVRC {
