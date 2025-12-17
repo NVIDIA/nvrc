@@ -9,6 +9,7 @@ use std::process::{Command, Stdio};
 
 use crate::kmsg::kmsg;
 use crate::nvrc::NVRC;
+use crate::modprobe;
 
 pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
     debug!("{} {}", command, args.join(" "));
@@ -42,21 +43,6 @@ fn background(command: &str, args: &[&str]) -> Result<()> {
         Ok(None) => Ok(()),
         Err(e) => Err(anyhow!("Error attempting to wait: {}", e)),
     }
-}
-
-pub fn modprobe_nvidia() -> Result<()> {
-    debug!("modprobe nvidia");
-    foreground("/sbin/modprobe", &["nvidia"])
-}
-
-pub fn modprobe_nvidia_uvm() -> Result<()> {
-    debug!("modprobe nvidia-uvm");
-    foreground("/sbin/modprobe", &["nvidia-uvm"])
-}
-
-pub fn modprobe_nvidia_modeset() -> Result<()> {
-    debug!("modprobe nvidia-modeset");
-    foreground("/sbin/modprobe", &["nvidia-modeset"])
 }
 
 impl NVRC {
@@ -128,18 +114,10 @@ impl NVRC {
         };
 
         let mhz_str = mhz.to_string();
-        info!("locking memory clocks to {} MHz (all GPUs)", mhz);
         foreground("/bin/nvidia-smi", &["-lmcd", &mhz_str])?;
 
         // Memory clock lock requires driver reload
-        info!("reloading nvidia driver after lmcd");
-        foreground(
-            "/sbin/modprobe",
-            &["-r", "nvidia_uvm", "nvidia_modeset", "nvidia"],
-        )?;
-        modprobe_nvidia()?;
-        modprobe_nvidia_uvm()?;
-        modprobe_nvidia_modeset()
+        modprobe::reload_nvidia_modules()
     }
 
     /// Lock GPU clocks for all GPUs (can be done on the fly)
@@ -149,7 +127,6 @@ impl NVRC {
         };
 
         let mhz_str = mhz.to_string();
-        info!("locking GPU clocks to {} MHz (all GPUs)", mhz);
         foreground("/bin/nvidia-smi", &["-lgc", &mhz_str])
     }
 
@@ -160,7 +137,6 @@ impl NVRC {
         };
 
         let watts_str = watts.to_string();
-        info!("setting power limit to {} W (all GPUs)", watts);
         foreground("/bin/nvidia-smi", &["-pl", &watts_str])
     }
 

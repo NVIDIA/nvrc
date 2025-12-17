@@ -6,6 +6,7 @@ mod daemon;
 mod kata_agent;
 mod kmsg;
 mod lockdown;
+mod modprobe;
 mod mount;
 mod nvrc;
 mod syslog;
@@ -42,9 +43,9 @@ fn main() {
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
 
-    must!(daemon::modprobe_nvidia());
-    must!(daemon::modprobe_nvidia_uvm());
-    must!(daemon::modprobe_nvidia_modeset());
+    must!(modprobe::nvidia());
+    must!(modprobe::nvidia_uvm());
+    must!(modprobe::nvidia_modeset());
 
     must!(init.nvidia_smi_lmcd());
     must!(init.nvidia_smi_lgc());
