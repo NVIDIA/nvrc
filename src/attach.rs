@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use crate::daemon::Action;
 use crate::kata_agent;
-use crate::kmsg;
-use crate::ndev;
 use crate::nvrc::NVRC;
 use log::{debug, error};
 use nix::unistd::{fork, ForkResult};
-use std::sync::mpsc;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -29,64 +25,6 @@ impl NVRC {
                     break;
                 }
             },
-        }
-        Ok(())
-    }
-
-    pub fn manage_daemons(&mut self, action: Action) -> Result<()> {
-        for f in [
-            NVRC::nvidia_persistenced,
-            NVRC::nv_hostengine,
-            NVRC::dcgm_exporter,
-            NVRC::nv_fabricmanager,
-        ] {
-            f(self, action.clone())?;
-        }
-        Ok(())
-    }
-
-    pub fn hot_plug(&mut self) -> Result<()> {
-        debug!("hot-plug mode");
-        match unsafe { fork() }.expect("fork hot-plug") {
-            ForkResult::Parent { .. } => {
-                kata_agent().context("kata-agent hot-plug parent")?;
-            }
-            ForkResult::Child => {
-                self.handle_hot_plug_events().context("hot-plug events")?;
-            }
-        }
-        Ok(())
-    }
-
-    fn handle_hot_plug_events(&mut self) -> Result<()> {
-        // Use bounded channel to prevent unbounded memory growth
-        // Capacity of 100 should be sufficient for bursty hotplug events
-        let (tx, rx) = mpsc::sync_channel::<&str>(100);
-
-        ndev::udev(tx.clone());
-        kmsg::watch_for_pattern("NVRM: Attempting to remove device", tx.clone());
-
-        if let Err(e) = self.watch_poll_syslog() {
-            error!("poll syslog: {e}");
-        }
-
-        for ev in rx {
-            debug!("event: {ev}");
-            match ev {
-                "hot-plug" => {
-                    self.get_nvidia_devices(None)?;
-                    self.setup_gpu();
-                }
-                "hot-unplug" => {
-                    self.manage_daemons(Action::Stop)?;
-                    sleep(Duration::from_millis(3000));
-                    self.get_nvidia_devices(None)?;
-                    if !self.nvidia_devices.is_empty() {
-                        self.manage_daemons(Action::Start)?;
-                    }
-                }
-                _ => {}
-            }
         }
         Ok(())
     }

@@ -5,17 +5,11 @@ mod attach;
 mod coreutils;
 mod cpu;
 mod daemon;
-mod devices;
-mod gpu;
-mod init;
 mod kata_agent;
 mod kmsg;
 mod lockdown;
 mod mount;
-mod ndev;
 mod nvrc;
-mod pci_ids;
-mod supported;
 mod syslog;
 mod toolkit;
 mod user_group;
@@ -37,7 +31,6 @@ macro_rules! must {
     };
 }
 
-use daemon::Action;
 use kata_agent::kata_agent;
 use nvrc::NVRC;
 use toolkit::{nvidia_ctk_cdi, nvidia_ctk_system};
@@ -51,28 +44,19 @@ fn main() {
     must!(init.set_random_identity());
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
-    debug!("init_or_sbin_init: {:?}", init::Invocation::from_argv0());
     must!(init.query_cpu_vendor());
-    #[cfg(feature = "confidential")]
-    must!(init.query_cpu_cc_mode());
-    must!(init.get_nvidia_devices(None));
-    let handler = init
-        .hot_or_cold_plug
-        .get(&init.cold_plug)
-        .expect("hot_or_cold_plug handler not found");
-    must!(handler(&mut init));
+    must!(init.cold_plug());
 }
 
 impl NVRC {
     fn setup_gpu(&mut self) {
-        must!(self.check_gpu_supported(None));
-        #[cfg(feature = "confidential")]
-        must!(self.query_gpu_cc_mode());
         must!(nvidia_ctk_system());
-        must!(self.manage_daemons(Action::Restart));
+        must!(self.nvidia_persistenced());
         must!(lockdown::disable_modules_loading());
+        must!(self.nv_hostengine());
+        must!(self.dcgm_exporter());
+        must!(self.nv_fabricmanager());
         must!(nvidia_ctk_cdi());
-        #[cfg(feature = "confidential")]
         must!(self.nvidia_smi_srs());
     }
 }
