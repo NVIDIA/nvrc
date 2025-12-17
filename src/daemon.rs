@@ -9,7 +9,6 @@ use std::process::{Command, Stdio};
 
 use crate::kmsg::kmsg;
 use crate::nvrc::NVRC;
-use crate::modprobe;
 
 pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
     debug!("{} {}", command, args.join(" "));
@@ -105,53 +104,6 @@ impl NVRC {
         background(
             "/bin/dcgm-exporter",
             &["-k", "-f", "/etc/dcgm-exporter/default-counters.csv"],
-        )
-    }
-
-    pub fn nvidia_smi_lmcd(&self) -> Result<()> {
-        let Some(mhz) = self.nvidia_smi_lmcd else {
-            return Ok(());
-        };
-
-        let mhz_str = mhz.to_string();
-        foreground("/bin/nvidia-smi", &["-lmcd", &mhz_str])?;
-
-        // Memory clock lock requires driver reload
-        modprobe::reload_nvidia_modules()
-    }
-
-    /// Lock GPU clocks for all GPUs (can be done on the fly)
-    pub fn nvidia_smi_lgc(&self) -> Result<()> {
-        let Some(mhz) = self.nvidia_smi_lgc else {
-            return Ok(());
-        };
-
-        let mhz_str = mhz.to_string();
-        foreground("/bin/nvidia-smi", &["-lgc", &mhz_str])
-    }
-
-    /// Set power limit for all GPUs (can be done on the fly)
-    pub fn nvidia_smi_pl(&self) -> Result<()> {
-        let Some(watts) = self.nvidia_smi_pl else {
-            return Ok(());
-        };
-
-        let watts_str = watts.to_string();
-        foreground("/bin/nvidia-smi", &["-pl", &watts_str])
-    }
-
-    /// Set SRS for confidential compute (can be done on the fly)
-    pub fn nvidia_smi_srs(&self) -> Result<()> {
-        if self.nvidia_smi_srs.is_none() {
-            return Ok(());
-        }
-        foreground(
-            "/bin/nvidia-smi",
-            &[
-                "conf-compute",
-                "-srs",
-                self.nvidia_smi_srs.as_deref().unwrap_or("0"),
-            ],
         )
     }
 

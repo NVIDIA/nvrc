@@ -9,6 +9,7 @@ mod lockdown;
 mod modprobe;
 mod mount;
 mod nvrc;
+mod smi;
 mod syslog;
 mod toolkit;
 mod user_group;
