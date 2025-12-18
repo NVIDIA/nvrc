@@ -37,7 +37,7 @@ fn main() {
     lockdown::set_panic_hook();
     let mut init = NVRC::default();
     must!(mount::setup());
-    must!(syslog::init());
+    must!(syslog::poll());
     must!(kmsg::kernlog_setup());
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
