@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use super::daemon::foreground;
+use super::execute::foreground;
 use anyhow::{Context, Result};
 use std::process::Command;
 

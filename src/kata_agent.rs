@@ -29,7 +29,7 @@ pub fn fork_agent() -> Result<()> {
             kata_agent().context("kata-agent parent")?;
         }
         ForkResult::Child => loop {
-            sleep(Duration::from_secs(1));
+            sleep(Duration::from_millis(500));
             if let Err(e) = crate::syslog::poll() {
                 error!("poll syslog: {e}");
                 break;

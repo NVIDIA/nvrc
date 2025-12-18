@@ -1,4 +1,4 @@
-use crate::daemon::foreground;
+use crate::execute::foreground;
 use anyhow::Result;
 
 pub fn nvidia() -> Result<()> {
