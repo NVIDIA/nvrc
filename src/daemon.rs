@@ -2,13 +2,11 @@
 // Copyright (c) NVIDIA CORPORATION
 
 use anyhow::{anyhow, Context, Result};
-use nix::sys::stat::Mode;
-use nix::unistd::{chown, mkdir};
-use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::kmsg::kmsg;
 use crate::nvrc::NVRC;
+use std::fs;
 
 pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
     debug!("{} {}", command, args.join(" "));
@@ -44,62 +42,21 @@ fn background(command: &str, args: &[&str]) -> Result<()> {
     }
 }
 
-pub fn modprobe_nvidia() -> Result<()> {
-    debug!("modprobe nvidia");
-    foreground("/sbin/modprobe", &["nvidia"])
-}
-
-pub fn modprobe_nvidia_uvm() -> Result<()> {
-    debug!("modprobe nvidia-uvm");
-    foreground("/sbin/modprobe", &["nvidia-uvm"])
-}
-
-pub fn modprobe_nvidia_modeset() -> Result<()> {
-    debug!("modprobe nvidia-modeset");
-    foreground("/sbin/modprobe", &["nvidia-modeset"])
-}
-
 impl NVRC {
-    pub fn nvidia_persistenced(&mut self) -> Result<()> {
-        let uvm_flag = match self.uvm_persistence_mode.as_deref() {
-            Some("off") => None,
-            Some("on") | None => Some("--uvm-persistence-mode"),
-            Some(other) => {
-                warn!(
-                    "Unknown UVM persistence mode '{}', defaulting to 'on'",
-                    other
-                );
-                Some("--uvm-persistence-mode")
-            }
+    pub fn nvidia_persistenced(&self) -> Result<()> {
+        const DIR: &str = "/var/run/nvidia-persistenced";
+        fs::create_dir_all(DIR).with_context(|| format!("create_dir_all {}", DIR))?;
+
+        // UVM persistence mode: enabled by default, only "off" disables it
+        let uvm_enabled = self.uvm_persistence_mode.as_deref() != Some("off");
+
+        let args: &[&str] = if uvm_enabled {
+            &["--verbose", "--uvm-persistence-mode"]
+        } else {
+            &["--verbose"]
         };
 
-        const DIR: &str = "/var/run/nvidia-persistenced"; // scoped constant for readability
-        if !Path::new(DIR).exists() {
-            mkdir(DIR, Mode::S_IRWXU).with_context(|| format!("Failed to create dir {}", DIR))?;
-        }
-        chown(
-            DIR,
-            Some(self.identity.user_id),
-            Some(self.identity.group_id),
-        )
-        .with_context(|| format!("Failed to chown {}", DIR))?;
-
-        let mut args: Vec<&str> = vec!["--verbose"];
-        if let Some(f) = uvm_flag {
-            args.push(f);
-        }
-
-        /*  TODO: nvidia-persistenced will not start with -u or -g flag in both modes
-
-            let user = self.identity.user_name.clone();
-            let group = self.identity.group_name.clone();
-
-            args.extend_from_slice(&["-u", &user.to_owned(), "-g", &group.to_owned()]);
-            background("/bin/nvidia-persistenced", &args)
-
-        */
-
-        background("/bin/nvidia-persistenced", &args)
+        background("/bin/nvidia-persistenced", args)
     }
 
     pub fn nv_hostengine(&mut self) -> Result<()> {
@@ -119,63 +76,6 @@ impl NVRC {
         background(
             "/bin/dcgm-exporter",
             &["-k", "-f", "/etc/dcgm-exporter/default-counters.csv"],
-        )
-    }
-
-    pub fn nvidia_smi_lmcd(&self) -> Result<()> {
-        let Some(mhz) = self.nvidia_smi_lmcd else {
-            return Ok(());
-        };
-
-        let mhz_str = mhz.to_string();
-        info!("locking memory clocks to {} MHz (all GPUs)", mhz);
-        foreground("/bin/nvidia-smi", &["-lmcd", &mhz_str])?;
-
-        // Memory clock lock requires driver reload
-        info!("reloading nvidia driver after lmcd");
-        foreground(
-            "/sbin/modprobe",
-            &["-r", "nvidia_uvm", "nvidia_modeset", "nvidia"],
-        )?;
-        modprobe_nvidia()?;
-        modprobe_nvidia_uvm()?;
-        modprobe_nvidia_modeset()
-    }
-
-    /// Lock GPU clocks for all GPUs (can be done on the fly)
-    pub fn nvidia_smi_lgc(&self) -> Result<()> {
-        let Some(mhz) = self.nvidia_smi_lgc else {
-            return Ok(());
-        };
-
-        let mhz_str = mhz.to_string();
-        info!("locking GPU clocks to {} MHz (all GPUs)", mhz);
-        foreground("/bin/nvidia-smi", &["-lgc", &mhz_str])
-    }
-
-    /// Set power limit for all GPUs (can be done on the fly)
-    pub fn nvidia_smi_pl(&self) -> Result<()> {
-        let Some(watts) = self.nvidia_smi_pl else {
-            return Ok(());
-        };
-
-        let watts_str = watts.to_string();
-        info!("setting power limit to {} W (all GPUs)", watts);
-        foreground("/bin/nvidia-smi", &["-pl", &watts_str])
-    }
-
-    /// Set SRS for confidential compute (can be done on the fly)
-    pub fn nvidia_smi_srs(&self) -> Result<()> {
-        if self.nvidia_smi_srs.is_none() {
-            return Ok(());
-        }
-        foreground(
-            "/bin/nvidia-smi",
-            &[
-                "conf-compute",
-                "-srs",
-                self.nvidia_smi_srs.as_deref().unwrap_or("0"),
-            ],
         )
     }
 

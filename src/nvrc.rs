@@ -5,8 +5,6 @@ use anyhow::{Context, Result};
 use log::debug;
 use std::fs;
 
-use crate::user_group::UserGroup;
-
 fn parse_boolean(s: &str) -> bool {
     matches!(s.to_ascii_lowercase().as_str(), "on" | "true" | "1" | "yes")
 }
@@ -21,7 +19,6 @@ pub struct NVRC {
     pub uvm_persistence_mode: Option<String>,
     pub dcgm_enabled: Option<bool>,
     pub fabricmanager_enabled: Option<bool>,
-    pub identity: UserGroup,
 }
 
 impl NVRC {
@@ -44,11 +41,6 @@ impl NVRC {
                 _ => {}
             }
         }
-        Ok(())
-    }
-
-    pub fn set_random_identity(&mut self) -> anyhow::Result<()> {
-        self.identity = crate::user_group::random_user_group()?;
         Ok(())
     }
 }
@@ -80,7 +72,6 @@ pub fn nvrc_log(value: &str, _ctx: &mut NVRC) -> Result<()> {
 
     log::set_max_level(lvl);
     debug!("nvrc.log: {}", log::max_level());
-
     fs::write("/proc/sys/kernel/printk_devkmsg", b"on\n").context("printk_devkmsg")?;
 
     Ok(())
