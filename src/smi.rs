@@ -16,7 +16,7 @@ impl NVRC {
         modprobe::reload_nvidia_modules()
     }
 
-    /// Lock GPU clocks for all GPUs (can be done on the fly)
+    /// Lock GPU clocks for all GPUs
     pub fn nvidia_smi_lgc(&self) -> Result<()> {
         let Some(mhz) = self.nvidia_smi_lgc else {
             return Ok(());
@@ -26,7 +26,7 @@ impl NVRC {
         foreground("/bin/nvidia-smi", &["-lgc", &mhz_str])
     }
 
-    /// Set power limit for all GPUs (can be done on the fly)
+    /// Set power limit for all GPUs
     pub fn nvidia_smi_pl(&self) -> Result<()> {
         let Some(watts) = self.nvidia_smi_pl else {
             return Ok(());
@@ -36,7 +36,7 @@ impl NVRC {
         foreground("/bin/nvidia-smi", &["-pl", &watts_str])
     }
 
-    /// Set SRS for confidential compute (can be done on the fly)
+    /// Set Ready State for confidential compute (SRS)
     pub fn nvidia_smi_srs(&self) -> Result<()> {
         if self.nvidia_smi_srs.is_none() {
             return Ok(());
