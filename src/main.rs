@@ -3,7 +3,9 @@
 
 mod coreutils;
 mod daemon;
+mod execute;
 mod kata_agent;
+mod kernel_params;
 mod kmsg;
 mod lockdown;
 mod modprobe;
@@ -57,5 +59,6 @@ fn main() {
     must!(init.nv_fabricmanager());
     must!(nvidia_ctk_cdi());
     must!(init.nvidia_smi_srs());
+    must!(init.check_daemons());
     must!(kata_agent::fork_agent());
 }

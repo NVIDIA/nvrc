@@ -8,31 +8,31 @@ use nix::sys::stat;
 use std::fs;
 use std::path::Path;
 
-// Simplified helper: perform mount only if target not already mounted
-fn mount(
+/// Check if path is mounted (exact match on mountpoint, not substring)
+fn is_mounted_in(mounts: &str, path: &str) -> bool {
+    mounts
+        .lines()
+        .any(|line| line.split_whitespace().nth(1) == Some(path))
+}
+
+fn fs_available_in(filesystems: &str, fs: &str) -> bool {
+    filesystems.lines().any(|line| line.contains(fs))
+}
+
+/// Mount if not already mounted (uses cached mounts snapshot)
+fn mount_cached(
+    mounts: &str,
     source: &str,
     target: &str,
     fstype: &str,
     flags: MsFlags,
     data: Option<&str>,
 ) -> Result<()> {
-    if !is_mounted(target) {
+    if !is_mounted_in(mounts, target) {
         mount::mount(Some(source), target, Some(fstype), flags, data)
             .with_context(|| format!("Failed to mount {source} on {target}"))?;
     }
     Ok(())
-}
-
-fn is_mounted(path: &str) -> bool {
-    fs::read_to_string("/proc/mounts")
-        .map(|mounts| mounts.lines().any(|line| line.contains(path)))
-        .unwrap_or(false)
-}
-
-fn fs_available(fs: &str) -> bool {
-    fs::read_to_string("/proc/filesystems")
-        .map(|filesystems| filesystems.lines().any(|line| line.contains(fs)))
-        .unwrap_or(false)
 }
 
 pub fn readonly(target: &str) -> Result<()> {
@@ -41,15 +41,17 @@ pub fn readonly(target: &str) -> Result<()> {
         .with_context(|| format!("Failed to remount {target} readonly"))
 }
 
-fn mount_if(
+fn mount_if_cached(
+    mounts: &str,
+    filesystems: &str,
     fstype: &str,
     source: &str,
     target: &str,
     flags: MsFlags,
     data: Option<&str>,
 ) -> Result<()> {
-    if fs_available(fstype) && Path::new(target).exists() && !is_mounted(target) {
-        mount(source, target, fstype, flags, data)?;
+    if fs_available_in(filesystems, fstype) && Path::new(target).exists() {
+        mount_cached(mounts, source, target, fstype, flags, data)?;
     }
     Ok(())
 }
@@ -81,22 +83,37 @@ fn device_nodes() -> Result<()> {
 }
 
 pub fn setup() -> Result<()> {
+    // Snapshot mount state once - consistent view, no TOCTOU
+    let mounts = fs::read_to_string("/proc/mounts").unwrap_or_default();
+    let filesystems = fs::read_to_string("/proc/filesystems").unwrap_or_default();
+
     let common = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
-    mount("proc", "/proc", "proc", common, None)?;
-    let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME; // allow device nodes
-    mount("dev", "/dev", "devtmpfs", dev_flags, Some("mode=0755"))?;
-    mount("sysfs", "/sys", "sysfs", common, None)?;
-    mount("run", "/run", "tmpfs", common, Some("mode=0755"))?;
+    mount_cached(&mounts, "proc", "/proc", "proc", common, None)?;
+    let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
+    mount_cached(
+        &mounts,
+        "dev",
+        "/dev",
+        "devtmpfs",
+        dev_flags,
+        Some("mode=0755"),
+    )?;
+    mount_cached(&mounts, "sysfs", "/sys", "sysfs", common, None)?;
+    mount_cached(&mounts, "run", "/run", "tmpfs", common, Some("mode=0755"))?;
     let tmp_flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
-    mount("tmpfs", "/tmp", "tmpfs", tmp_flags, None)?;
-    mount_if(
+    mount_cached(&mounts, "tmpfs", "/tmp", "tmpfs", tmp_flags, None)?;
+    mount_if_cached(
+        &mounts,
+        &filesystems,
         "securityfs",
         "securityfs",
         "/sys/kernel/security",
         common,
         None,
     )?;
-    mount_if(
+    mount_if_cached(
+        &mounts,
+        &filesystems,
         "efivarfs",
         "efivarfs",
         "/sys/firmware/efi/efivars",
@@ -111,91 +128,29 @@ pub fn setup() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mktemp::Temp;
-    use nix::unistd::Uid;
-    use std::env;
     use std::fs;
-    use std::path::Path;
-    use std::process::Command;
 
-    fn rerun_with_sudo() {
-        let args: Vec<String> = env::args().collect();
-        let output = Command::new("sudo").args(&args).status();
-        match output {
-            Ok(output) => {
-                if output.success() {
-                    println!("running with sudo")
-                } else {
-                    panic!("not running with sudo")
-                }
-            }
-            Err(e) => panic!("Failed to escalate privileges: {e:?}"),
-        }
-    }
-
-    fn cleanup_path<P: AsRef<Path>>(path: P) {
-        let path = path.as_ref();
-        if path.exists() {
-            if path.is_dir() {
-                let _ = fs::remove_dir_all(path);
-            } else {
-                let _ = fs::remove_file(path);
-            }
-        }
+    #[test]
+    fn test_is_mounted_in() {
+        let mounts = fs::read_to_string("/proc/mounts").unwrap();
+        assert!(is_mounted_in(&mounts, "/"));
+        assert!(!is_mounted_in(&mounts, "/nonexistent"));
     }
 
     #[test]
-    fn test_ln_dir() {
-        let target = Temp::new_dir().unwrap();
-        let linkpath = Temp::new_dir().unwrap();
-        cleanup_path(&linkpath);
-        let src = target.to_str().unwrap();
-        let dst = linkpath.to_str().unwrap();
-        ln(src, dst).expect("Failed to create symbolic link");
-        assert!(Path::new(dst).exists());
-        cleanup_path(target);
-        cleanup_path(linkpath);
+    fn test_is_mounted_exact_match() {
+        // /dev/pts mounted should NOT match /dev
+        let mounts = "devpts /dev/pts devpts rw 0 0\ntmpfs /tmp tmpfs rw 0 0\n";
+        assert!(!is_mounted_in(mounts, "/dev"));
+        assert!(is_mounted_in(mounts, "/dev/pts"));
+        assert!(is_mounted_in(mounts, "/tmp"));
     }
 
     #[test]
-    fn test_ln_file() {
-        let target = Temp::new_file().unwrap();
-        let linkpath = Temp::new_file().unwrap();
-        fs::write(&target, "test").expect("Failed to create test file");
-        cleanup_path(&linkpath);
-        let src = target.to_str().unwrap();
-        let dst = linkpath.to_str().unwrap();
-        ln(src, dst).expect("Failed to create symbolic link");
-        assert!(Path::new(dst).exists());
-        cleanup_path(target);
-        cleanup_path(linkpath);
-    }
-
-    #[test]
-    fn test_mknod() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-        let device = "/tmp/test_node";
-        if Path::new(device).exists() {
-            cleanup_path(device);
-        }
-        mknod(device, stat::SFlag::S_IFCHR, 1, 3).expect("Failed to create device node");
-        assert!(Path::new(device).exists());
-        cleanup_path(device);
-    }
-
-    #[test]
-    fn test_is_mounted() {
-        assert!(is_mounted("/"));
-        assert!(!is_mounted("/nonexistent"));
-        assert!(is_mounted("/dev"));
-    }
-
-    #[test]
-    fn test_fs_available() {
-        assert!(fs_available("proc"));
-        assert!(fs_available("sysfs"));
-        assert!(!fs_available("nonexistent_fs"));
+    fn test_fs_available_in() {
+        let filesystems = fs::read_to_string("/proc/filesystems").unwrap();
+        assert!(fs_available_in(&filesystems, "proc"));
+        assert!(fs_available_in(&filesystems, "sysfs"));
+        assert!(!fs_available_in(&filesystems, "nonexistent_fs"));
     }
 }

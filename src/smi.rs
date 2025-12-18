@@ -1,4 +1,4 @@
-use crate::daemon::foreground;
+use crate::execute::foreground;
 use crate::modprobe;
 use crate::nvrc::NVRC;
 use anyhow::Result;

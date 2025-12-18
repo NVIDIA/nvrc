@@ -47,7 +47,8 @@ pub fn poll_socket(sock: &UnixDatagram) -> std::io::Result<Option<String>> {
     Ok(Some(strip_priority(msg.trim_end()).to_string()))
 }
 
-/// Fails on first call if /dev/log exists - sanity check for ephemeral environment
+/// Drain one message per call - intentionally limited to prevent a rogue
+/// process from DoS'ing init by flooding syslog. Caller loops at 2 msg/sec.
 pub fn poll() -> std::io::Result<()> {
     let sock = SYSLOG.get_or_try_init(|| bind(Path::new("/dev/log")))?;
 
