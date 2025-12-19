@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]  // umask is process-global
+    #[serial] // umask is process-global
     fn test_mknod_fifo_permissions() {
         let tmpdir = TempDir::new().unwrap();
         let fifopath = tmpdir.path().join("test_fifo_perm");
@@ -205,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]  // umask is process-global
+    #[serial] // umask is process-global
     fn test_mknod_umask_not_applied() {
         let tmpdir = TempDir::new().unwrap();
         let fifopath = tmpdir.path().join("test_umask_fifo");
@@ -259,5 +259,4 @@ mod tests {
         let err = result.unwrap_err().to_string();
         assert!(err.contains("mknod"), "error should mention mknod: {}", err);
     }
-
 }
