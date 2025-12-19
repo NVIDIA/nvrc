@@ -7,6 +7,34 @@ use crate::execute::background;
 use crate::nvrc::NVRC;
 use std::fs;
 
+/// UVM persistence mode keeps unified memory mappings alive between kernel launches,
+/// avoiding expensive page migrations. Enabled by default for ML workloads.
+fn persistenced_args(uvm_enabled: bool) -> Vec<&'static str> {
+    if uvm_enabled {
+        vec!["--verbose", "--uvm-persistence-mode"]
+    } else {
+        vec!["--verbose"]
+    }
+}
+
+/// Hostengine needs a service account to avoid running as root, and /tmp as home
+/// because the rootfs is read-only after init completes.
+fn hostengine_args() -> &'static [&'static str] {
+    &["--service-account", "nvidia-dcgm", "--home-dir", "/tmp"]
+}
+
+/// Kubernetes mode disables standalone HTTP server (we're behind kata-agent),
+/// and we use the standard counters config shipped with the container image.
+fn dcgm_exporter_args() -> &'static [&'static str] {
+    &["-k", "-f", "/etc/dcgm-exporter/default-counters.csv"]
+}
+
+/// Fabricmanager needs explicit config path because it doesn't search standard
+/// locations when running as a subprocess of init.
+fn fabricmanager_args() -> &'static [&'static str] {
+    &["-c", "/usr/share/nvidia/nvswitch/fabricmanager.cfg"]
+}
+
 /// Configurable path parameters allow testing with /bin/true instead of real
 /// NVIDIA binaries that don't exist in the test environment.
 impl NVRC {
@@ -19,15 +47,9 @@ impl NVRC {
 
     fn spawn_persistenced(&mut self, run_dir: &str, bin: &str) -> Result<()> {
         fs::create_dir_all(run_dir).with_context(|| format!("create_dir_all {}", run_dir))?;
-
         let uvm_enabled = self.uvm_persistence_mode.unwrap_or(true);
-        let args: &[&str] = if uvm_enabled {
-            &["--verbose", "--uvm-persistence-mode"]
-        } else {
-            &["--verbose"]
-        };
-
-        let child = background(bin, args)?;
+        let args = persistenced_args(uvm_enabled);
+        let child = background(bin, &args)?;
         self.track_daemon("nvidia-persistenced", child);
         Ok(())
     }
@@ -42,7 +64,7 @@ impl NVRC {
         if !self.dcgm_enabled.unwrap_or(false) {
             return Ok(());
         }
-        let child = background(bin, &[])?;
+        let child = background(bin, hostengine_args())?;
         self.track_daemon("nv-hostengine", child);
         Ok(())
     }
@@ -57,7 +79,7 @@ impl NVRC {
         if !self.dcgm_enabled.unwrap_or(false) {
             return Ok(());
         }
-        let child = background(bin, &[])?;
+        let child = background(bin, dcgm_exporter_args())?;
         self.track_daemon("dcgm-exporter", child);
         Ok(())
     }
@@ -72,7 +94,7 @@ impl NVRC {
         if !self.fabricmanager_enabled.unwrap_or(false) {
             return Ok(());
         }
-        let child = background(bin, &[])?;
+        let child = background(bin, fabricmanager_args())?;
         self.track_daemon("nv-fabricmanager", child);
         Ok(())
     }
@@ -83,7 +105,48 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    // ==================== skip path tests ====================
+    // === Args builder tests ===
+
+    #[test]
+    fn test_persistenced_args_with_uvm() {
+        let args = persistenced_args(true);
+        assert_eq!(args, vec!["--verbose", "--uvm-persistence-mode"]);
+    }
+
+    #[test]
+    fn test_persistenced_args_without_uvm() {
+        let args = persistenced_args(false);
+        assert_eq!(args, vec!["--verbose"]);
+    }
+
+    #[test]
+    fn test_hostengine_args() {
+        let args = hostengine_args();
+        assert_eq!(
+            args,
+            &["--service-account", "nvidia-dcgm", "--home-dir", "/tmp"]
+        );
+    }
+
+    #[test]
+    fn test_dcgm_exporter_args() {
+        let args = dcgm_exporter_args();
+        assert_eq!(
+            args,
+            &["-k", "-f", "/etc/dcgm-exporter/default-counters.csv"]
+        );
+    }
+
+    #[test]
+    fn test_fabricmanager_args() {
+        let args = fabricmanager_args();
+        assert_eq!(
+            args,
+            &["-c", "/usr/share/nvidia/nvswitch/fabricmanager.cfg"]
+        );
+    }
+
+    // === Skip path tests ===
 
     #[test]
     fn test_nv_hostengine_skipped_by_default() {
@@ -104,8 +167,6 @@ mod tests {
         let mut nvrc = NVRC::default();
         assert!(nvrc.nv_fabricmanager().is_ok());
     }
-
-    // ==================== success path tests with fake binaries ====================
 
     #[test]
     fn test_spawn_persistenced_success() {
@@ -158,8 +219,6 @@ mod tests {
         let result = nvrc.spawn_fabricmanager("/bin/true");
         assert!(result.is_ok());
     }
-
-    // ==================== error path tests ====================
 
     #[test]
     fn test_spawn_persistenced_binary_not_found() {

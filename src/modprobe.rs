@@ -39,8 +39,13 @@ mod tests {
     #[serial]
     fn test_load_nonexistent() {
         require_root();
-        // Should fail for a module that doesn't exist
-        assert!(load("nonexistent_module_xyz123").is_err());
+        let err = load("nonexistent_module_xyz123").unwrap_err();
+        // modprobe exits non-zero for missing modules
+        assert!(
+            err.to_string().contains("modprobe"),
+            "error should mention modprobe: {}",
+            err
+        );
     }
 
     #[test]

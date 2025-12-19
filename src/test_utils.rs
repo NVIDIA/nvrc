@@ -8,18 +8,20 @@ use std::env;
 use std::process::Command;
 
 /// Ensure test runs as root.
-/// - During coverage builds: panics if not root (coverage must run as root)
-/// - During normal tests: re-executes via sudo and exits with child's code
 ///
-/// This allows privileged tests to run in CI while ensuring coverage
-/// reports accurately reflect execution as root.
+/// Coverage builds: Panics immediately if not root. Coverage instrumentation
+/// requires the entire test process to run as root from the start—there's no
+/// way to escalate privileges mid-test. Run with: `sudo cargo llvm-cov`
+///
+/// Normal test builds: Re-executes the test binary via sudo, then exits with
+/// the child's exit code. This allows `cargo test` to work without sudo.
 pub fn require_root() {
     if Uid::effective().is_root() {
         return;
     }
 
     #[cfg(coverage)]
-    panic!("coverage tests must run as root - use: sudo cargo llvm-cov");
+    panic!("coverage builds require root from start - run: sudo cargo llvm-cov");
 
     #[cfg(not(coverage))]
     {

@@ -61,8 +61,8 @@ pub fn poll() -> std::io::Result<()> {
     poll_at(Path::new(DEV_LOG))
 }
 
-/// Testable version: poll a specific socket path.
-/// Uses global static for /dev/log, creates fresh socket for other paths.
+/// Internal: poll a specific socket path (for unit tests).
+/// Production code uses poll() which hardcodes /dev/log.
 fn poll_at(path: &Path) -> std::io::Result<()> {
     let sock: &UnixDatagram = if path == Path::new(DEV_LOG) {
         SYSLOG.get_or_try_init(|| bind(path))?
@@ -138,8 +138,9 @@ mod tests {
     #[test]
     fn test_bind_nonexistent_dir() {
         let path = Path::new("/nonexistent/dir/test.sock");
-        let sock = bind(path);
-        assert!(sock.is_err());
+        let err = bind(path).unwrap_err();
+        // Should fail with "No such file or directory" (ENOENT)
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 
     #[test]
@@ -147,9 +148,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
         let _sock1 = bind(&path).unwrap();
-        // Binding again to same path should fail
-        let sock2 = bind(&path);
-        assert!(sock2.is_err());
+        // Binding again to same path should fail with "Address already in use"
+        let err = bind(&path).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
     }
 
     // === poll_socket tests ===
@@ -231,12 +232,6 @@ mod tests {
     fn test_poll_once_no_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
-
-        // Create socket first so poll_once can bind
-        // Actually poll_once binds itself, so we just call it
-        // But wait - if nothing is bound, bind will succeed but there's no data
-        // We need to pre-create the socket... no, poll_once creates its own.
-        // The issue is poll_once binds, so we can test it directly.
 
         // poll_once will bind and poll - should succeed with no messages
         let result = poll_once(&path);

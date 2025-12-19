@@ -26,8 +26,8 @@ pub fn set_panic_hook() {
     set_panic_hook_with(power_off)
 }
 
-/// Testable version: install panic handler with custom shutdown action.
-/// Production uses `power_off()`, tests can use a no-op or logging closure.
+/// Internal: panic handler with configurable shutdown (for unit tests).
+/// Production uses power_off(); tests inject a no-op to avoid rebooting.
 fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) {
     panic::set_hook(Box::new(move |panic_info| {
         log::error!("panic: {panic_info}");
@@ -45,7 +45,7 @@ pub fn disable_modules_loading() -> Result<()> {
     disable_modules_at("/proc/sys/kernel/modules_disabled")
 }
 
-/// Testable version with configurable path.
+/// Internal: write to configurable path (for unit tests with temp files).
 fn disable_modules_at(path: &str) -> Result<()> {
     fs::write(path, b"1\n").with_context(|| format!("disable module loading: {}", path))
 }
@@ -87,9 +87,17 @@ mod tests {
 
     #[test]
     fn test_disable_modules_at_nonexistent() {
-        let result = disable_modules_at("/nonexistent/path");
-        assert!(result.is_err());
+        let err = disable_modules_at("/nonexistent/path").unwrap_err();
+        // Should contain path in the error context
+        assert!(
+            err.to_string().contains("/nonexistent/path"),
+            "error should mention the path: {}",
+            err
+        );
     }
+
+    // NOTE: A "read-only file" test won't work because root bypasses file permissions.
+    // The nonexistent path test adequately covers the error path.
 
     #[test]
     fn test_power_off_function_exists() {
@@ -104,9 +112,8 @@ mod tests {
         // If we got here, the hook was installed successfully
     }
 
-    #[test]
-    fn test_disable_modules_loading() {
-        // Will fail without root/proper permissions, but exercises the code
-        let _ = disable_modules_loading();
-    }
+    // NOTE: disable_modules_loading() is NOT tested directly because:
+    // - As non-root: fails with permission denied (not useful)
+    // - As root: PERMANENTLY disables module loading on the host (dangerous!)
+    // The core logic is validated via test_disable_modules_at_success using temp files.
 }

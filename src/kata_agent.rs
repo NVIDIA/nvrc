@@ -13,6 +13,10 @@ use std::time::Duration;
 
 const KATA_AGENT_PATH: &str = "/usr/bin/kata-agent";
 
+/// Syslog polling runs indefinitely in production—VM lifetime measured in hours/days,
+/// not the 136 years this represents. Using u32::MAX avoids overflow concerns.
+const SYSLOG_POLL_FOREVER: u32 = u32::MAX;
+
 /// kata-agent needs high file descriptor limits for container workloads and
 /// must survive OOM conditions to maintain VM stability (-997 = nearly unkillable)
 fn agent_setup() -> Result<()> {
@@ -53,7 +57,7 @@ fn syslog_loop(timeout_secs: u32) -> Result<()> {
 /// Parent execs kata-agent (becoming it), child stays as syslog poller.
 /// This way kata-agent inherits our PID and becomes the main guest process.
 pub fn fork_agent() -> Result<()> {
-    fork_agent_with_timeout(u32::MAX) // 136 years - effectively forever
+    fork_agent_with_timeout(SYSLOG_POLL_FOREVER)
 }
 
 /// Timeout parameter allows tests to verify the fork/syslog logic exits cleanly
@@ -192,44 +196,52 @@ mod tests {
 
     #[test]
     fn test_syslog_loop_timeout() {
-        // syslog_loop with 1 second timeout should complete (2 iterations)
-        // Note: syslog::poll() will fail if /dev/log doesn't exist, but that's OK
-        // for this test - we just want to verify the loop terminates
+        // syslog_loop with 1 second timeout runs up to 2 iterations (500ms each).
+        // Two possible outcomes:
+        // 1. poll() works: runs full 2 iterations (~1000ms)
+        // 2. poll() fails: exits early after 1st iteration (~500ms) due to missing /dev/log
+        // Either way, verifies the loop terminates properly.
         let start = std::time::Instant::now();
         let _ = syslog_loop(1); // May error if /dev/log not bound, that's fine
         let elapsed = start.elapsed();
 
-        // Should take ~1 second (2 x 500ms iterations)
+        // Lower bound: at least 1 sleep cycle (500ms) runs before poll
+        // Upper bound: 2 iterations + scheduling overhead = ~1200ms max
         assert!(
-            elapsed.as_millis() >= 500,
-            "loop should run for at least 500ms"
+            elapsed.as_millis() >= 400,
+            "loop should run for at least ~500ms (got {}ms)",
+            elapsed.as_millis()
         );
-        assert!(elapsed.as_millis() < 3000, "loop should complete within 3s");
+        assert!(
+            elapsed.as_millis() < 1500,
+            "loop should complete within 1.5s (got {}ms)",
+            elapsed.as_millis()
+        );
     }
 
     #[test]
     fn test_fork_agent_with_timeout() {
-        // Test fork_agent_with_timeout with a short timeout
-        // Parent will fail (no kata-agent), but child should exit after timeout
-        match unsafe { fork() }.expect("fork") {
+        // Double fork: outer fork isolates the test, inner fork (inside fork_agent_with_timeout)
+        // does the real work. This lets us actually call fork_agent_with_timeout() directly.
+        match unsafe { fork() }.expect("outer fork") {
             ForkResult::Parent { child } => {
-                // Wait for child to complete (timeout after 1 sec)
+                // Wait for wrapper child
                 let status = waitpid(child, None).expect("waitpid");
                 match status {
                     WaitStatus::Exited(_, code) => {
-                        // Child exits 0 after syslog_loop completes/errors
-                        assert!(code == 0 || code == 1, "child should exit cleanly");
+                        // Wrapper exits 1 because kata_agent() fails (no binary)
+                        assert_eq!(code, 1, "wrapper should exit 1 (kata_agent fails)");
                     }
                     other => panic!("unexpected wait status: {:?}", other),
                 }
             }
             ForkResult::Child => {
-                // Run with 1 second timeout - should exit quickly
-                if let Err(e) = syslog_loop(1) {
-                    // Expected: syslog::poll fails if /dev/log not bound
-                    eprintln!("syslog_loop error (expected): {e}");
-                }
-                std::process::exit(0);
+                // This child calls fork_agent_with_timeout, which forks again internally.
+                // - Inner parent (us): kata_agent() fails, returns Err
+                // - Inner child: runs syslog_loop(1), exits after ~1 second
+                let result = fork_agent_with_timeout(1);
+                // We're the inner parent, so we get the error from kata_agent()
+                std::process::exit(if result.is_err() { 1 } else { 0 });
             }
         }
     }

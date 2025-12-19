@@ -85,31 +85,51 @@ mod tests {
     // When fields are Some, nvidia-smi is called (fails without NVIDIA hardware)
 
     #[test]
-    fn test_lmcd_some() {
+    fn test_lmcd_some_fails_without_nvidia_smi() {
         let mut nvrc = NVRC::default();
         nvrc.nvidia_smi_lmcd = Some(1000);
-        // Will fail: no nvidia-smi or no GPU
-        let _ = nvrc.nvidia_smi_lmcd();
+        let err = nvrc.nvidia_smi_lmcd().unwrap_err();
+        // Should fail mentioning nvidia-smi binary
+        assert!(
+            err.to_string().contains("nvidia-smi"),
+            "error should mention nvidia-smi: {}",
+            err
+        );
     }
 
     #[test]
-    fn test_lgc_some() {
+    fn test_lgc_some_fails_without_nvidia_smi() {
         let mut nvrc = NVRC::default();
         nvrc.nvidia_smi_lgc = Some(1500);
-        let _ = nvrc.nvidia_smi_lgc();
+        let err = nvrc.nvidia_smi_lgc().unwrap_err();
+        assert!(
+            err.to_string().contains("nvidia-smi"),
+            "error should mention nvidia-smi: {}",
+            err
+        );
     }
 
     #[test]
-    fn test_pl_some() {
+    fn test_pl_some_fails_without_nvidia_smi() {
         let mut nvrc = NVRC::default();
         nvrc.nvidia_smi_pl = Some(300);
-        let _ = nvrc.nvidia_smi_pl();
+        let err = nvrc.nvidia_smi_pl().unwrap_err();
+        assert!(
+            err.to_string().contains("nvidia-smi"),
+            "error should mention nvidia-smi: {}",
+            err
+        );
     }
 
     #[test]
-    fn test_srs_some() {
+    fn test_srs_some_fails_without_nvidia_smi() {
         let mut nvrc = NVRC::default();
         nvrc.nvidia_smi_srs = Some("1".into());
-        let _ = nvrc.nvidia_smi_srs();
+        let err = nvrc.nvidia_smi_srs().unwrap_err();
+        assert!(
+            err.to_string().contains("nvidia-smi"),
+            "error should mention nvidia-smi: {}",
+            err
+        );
     }
 }

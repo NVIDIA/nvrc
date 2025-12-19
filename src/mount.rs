@@ -262,24 +262,33 @@ mod tests {
 
     #[test]
     fn test_mount_cached_fails_nonexistent_target() {
-        // Trying to mount to nonexistent path should fail
         let mounts = "";
-        let result = mount_cached(
+        let err = mount_cached(
             mounts,
             "tmpfs",
             "/nonexistent/mount/point",
             "tmpfs",
             MsFlags::empty(),
             None,
+        )
+        .unwrap_err();
+        // Should contain the mount target in error context
+        assert!(
+            err.to_string().contains("/nonexistent/mount/point"),
+            "error should mention the path: {}",
+            err
         );
-        assert!(result.is_err());
     }
 
     #[test]
     fn test_readonly_fails_nonexistent() {
-        // Trying to remount nonexistent path should fail
-        let result = readonly("/nonexistent/path");
-        assert!(result.is_err());
+        let err = readonly("/nonexistent/path").unwrap_err();
+        // Should contain the path in error context
+        assert!(
+            err.to_string().contains("/nonexistent/path"),
+            "error should mention the path: {}",
+            err
+        );
     }
 
     // === Functions that need root but are safe ===

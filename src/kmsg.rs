@@ -57,8 +57,13 @@ mod tests {
 
     #[test]
     fn test_kmsg_at_nonexistent() {
-        let file = kmsg_at("/nonexistent/path");
-        assert!(file.is_err());
+        let err = kmsg_at("/nonexistent/path").unwrap_err();
+        // Should contain the path in the error context
+        assert!(
+            err.to_string().contains("/nonexistent/path"),
+            "error should mention the path: {}",
+            err
+        );
     }
 
     #[test]

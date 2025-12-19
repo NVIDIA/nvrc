@@ -30,16 +30,23 @@ mod tests {
 
     #[test]
     fn test_ctk_fails_without_binary() {
-        // nvidia-ctk not installed on test system - exercises error path
-        let result = ctk(&["--version"]);
-        // Will fail: no nvidia-ctk binary
-        assert!(result.is_err());
+        let err = ctk(&["--version"]).unwrap_err();
+        // Should fail because nvidia-ctk binary doesn't exist
+        assert!(
+            err.to_string().contains("nvidia-ctk"),
+            "error should mention the binary: {}",
+            err
+        );
     }
 
     #[test]
     fn test_nvidia_ctk_cdi_fails_without_binary() {
-        // Exercises the public function - fails without nvidia-ctk
-        let result = nvidia_ctk_cdi();
-        assert!(result.is_err());
+        let err = nvidia_ctk_cdi().unwrap_err();
+        // Should fail because nvidia-ctk binary doesn't exist
+        assert!(
+            err.to_string().contains("nvidia-ctk"),
+            "error should mention the binary: {}",
+            err
+        );
     }
 }

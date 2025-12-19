@@ -100,11 +100,16 @@ mod tests {
     #[test]
     fn test_check_daemons_still_running() {
         let mut nvrc = NVRC::default();
-        // sleep 10 will still be running when we check
-        let child = Command::new("/bin/sleep").arg("10").spawn().unwrap();
+        // sleep 1 will still be running when we check immediately
+        let child = Command::new("/bin/sleep").arg("1").spawn().unwrap();
         nvrc.track_daemon("slow-daemon", child);
-        // No sleep - check immediately while still running
+        // Check immediately while still running
         assert!(nvrc.check_daemons().is_ok());
+        // Clean up: kill the child to avoid orphaned process
+        if let Some((_, ref mut child)) = nvrc.children.last_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 
     #[test]
