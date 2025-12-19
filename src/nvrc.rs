@@ -1,30 +1,46 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
+//! NVRC configuration state and daemon lifecycle management.
+
 use anyhow::{anyhow, Result};
 use std::process::Child;
 
+/// Central configuration state for the NVIDIA Runtime Container init.
+/// Fields are populated from kernel command-line parameters and control
+/// GPU configuration (clocks, power limits) and optional daemons.
 #[derive(Default)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
+    /// nvidia-smi -srs: Enable/disable performance states
     pub nvidia_smi_srs: Option<String>,
+    /// nvidia-smi -lgc: Lock GPU clocks to specific frequency
     pub nvidia_smi_lgc: Option<u32>,
+    /// nvidia-smi -lmcd: Lock memory clocks to specific frequency
     pub nvidia_smi_lmcd: Option<u32>,
+    /// nvidia-smi -pl: Set power limit in watts
     pub nvidia_smi_pl: Option<u32>,
+    /// Enable UVM persistence mode for unified memory optimization
     pub uvm_persistence_mode: Option<bool>,
+    /// Enable DCGM exporter for GPU metrics
     pub dcgm_enabled: Option<bool>,
+    /// Enable Fabric Manager for NVLink topologies
     pub fabricmanager_enabled: Option<bool>,
+    /// Tracked background daemons for health monitoring
     children: Vec<(String, Child)>,
 }
 
 impl NVRC {
-    /// Track a background daemon for later health check
+    /// Track a background daemon for later health check.
+    /// Critical daemons (persistenced, hostengine, etc.) are tracked here
+    /// so we can detect early failures before handing off to kata-agent.
     pub fn track_daemon(&mut self, name: &str, child: Child) {
         self.children.push((name.into(), child));
     }
 
-    /// Check all background daemons haven't failed
-    /// Exit status 0 is OK (daemon may fork and parent exits successfully)
+    /// Check all background daemons haven't failed.
+    /// Exit status 0 is OK (daemon may fork and parent exits successfully).
+    /// Non-zero exit means the daemon crashed—fail init before kata-agent starts.
     pub fn check_daemons(&mut self) -> Result<()> {
         for (name, child) in &mut self.children {
             if let Ok(Some(status)) = child.try_wait() {
@@ -34,5 +50,69 @@ impl NVRC {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    #[test]
+    fn test_default() {
+        let nvrc = NVRC::default();
+        assert!(nvrc.nvidia_smi_srs.is_none());
+        assert!(nvrc.nvidia_smi_lgc.is_none());
+        assert!(nvrc.children.is_empty());
+    }
+
+    #[test]
+    fn test_track_daemon() {
+        let mut nvrc = NVRC::default();
+        let child = Command::new("/bin/true").spawn().unwrap();
+        nvrc.track_daemon("test-daemon", child);
+        assert_eq!(nvrc.children.len(), 1);
+        assert_eq!(nvrc.children[0].0, "test-daemon");
+    }
+
+    #[test]
+    fn test_check_daemons_success() {
+        let mut nvrc = NVRC::default();
+        // /bin/true exits with 0
+        let child = Command::new("/bin/true").spawn().unwrap();
+        nvrc.track_daemon("good-daemon", child);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(nvrc.check_daemons().is_ok());
+    }
+
+    #[test]
+    fn test_check_daemons_failure() {
+        let mut nvrc = NVRC::default();
+        // /bin/false exits with 1
+        let child = Command::new("/bin/false").spawn().unwrap();
+        nvrc.track_daemon("bad-daemon", child);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let result = nvrc.check_daemons();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("bad-daemon"));
+    }
+
+    #[test]
+    fn test_check_daemons_still_running() {
+        let mut nvrc = NVRC::default();
+        // sleep 10 will still be running when we check
+        let child = Command::new("/bin/sleep").arg("10").spawn().unwrap();
+        nvrc.track_daemon("slow-daemon", child);
+        // No sleep - check immediately while still running
+        assert!(nvrc.check_daemons().is_ok());
+    }
+
+    #[test]
+    fn test_check_daemons_multiple() {
+        let mut nvrc = NVRC::default();
+        nvrc.track_daemon("d1", Command::new("/bin/true").spawn().unwrap());
+        nvrc.track_daemon("d2", Command::new("/bin/true").spawn().unwrap());
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(nvrc.check_daemons().is_ok());
     }
 }
