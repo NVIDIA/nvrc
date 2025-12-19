@@ -28,17 +28,25 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
+          components: llvm-tools-preview
 
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin --locked
+      # cargo-llvm-cov uses LLVM's native instrumentation for accurate coverage.
+      # Unlike tarpaulin (ptrace-based), it properly handles #[cfg(coverage)]
+      # conditionals we use to skip code paths that can't run in CI (e.g., reboot).
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787 # v2.64.2
+        with:
+          tool: cargo-llvm-cov
 
+      # Run as root: some tests require privileged operations (modprobe, /proc writes).
+      # The #[cfg(coverage)] paths in require_root() panic if not run as root,
+      # ensuring coverage accurately reflects execution with proper permissions.
       - name: Generate coverage
-        run: sudo -E env "PATH=$PATH" cargo tarpaulin --all-features --workspace --timeout 120 --out xml
+        run: sudo -E env "PATH=$PATH" cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Coveralls
         uses: coverallsapp/github-action@cfd0633edbd2411b532b808ba7a8b5e04f76d2c8 # v2.3.4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          file: cobertura.xml
-          format: cobertura
-
+          file: lcov.info
+          format: lcov
