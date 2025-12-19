@@ -7,6 +7,9 @@ use nix::sys::stat::{self, Mode, SFlag};
 use nix::unistd::symlinkat;
 use std::fs;
 use std::path::Path;
+
+#[cfg(test)]
+use serial_test::serial;
 /// Create (or update) a symbolic link from target to linkpath.
 /// Idempotent: if link already points to target, it is left unchanged.
 pub fn ln(target: &str, linkpath: &str) -> Result<()> {
@@ -47,8 +50,31 @@ pub fn mknod(path: &str, kind: SFlag, major: u64, minor: u64) -> Result<()> {
 mod tests {
     use super::*;
     use nix::unistd::Uid;
+    use std::env;
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    use std::process::Command;
     use tempfile::TempDir;
+
+    /// During coverage (must run as root), just asserts we're root.
+    /// During normal tests, re-executes via sudo and exits with child's code.
+    fn require_root() {
+        if Uid::effective().is_root() {
+            return;
+        }
+
+        #[cfg(coverage)]
+        panic!("coverage tests must run as root - use: sudo cargo llvm-cov");
+
+        #[cfg(not(coverage))]
+        {
+            // Re-run this test as root; exit with child's status to propagate pass/fail
+            let args: Vec<String> = env::args().collect();
+            match Command::new("sudo").args(&args).status() {
+                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+                Err(e) => panic!("failed to run sudo: {}", e),
+            }
+        }
+    }
 
     // ==================== ln tests ====================
 
@@ -134,88 +160,104 @@ mod tests {
     }
 
     // ==================== mknod tests ====================
-    // Note: mknod requires root privileges for device nodes
+    // FIFO (named pipe) can be created without root, char devices need root
 
     #[test]
-    fn test_mknod_creates_device_node() {
-        if !Uid::effective().is_root() {
-            eprintln!("Skipping test_mknod_creates_device_node: requires root");
-            return;
-        }
-
+    fn test_mknod_creates_fifo() {
+        // FIFO doesn't require root - tests the mknod logic
         let tmpdir = TempDir::new().unwrap();
-        let devpath = tmpdir.path().join("test_null");
+        let fifopath = tmpdir.path().join("test_fifo");
 
-        // Create a character device (null device: major=1, minor=3)
-        mknod(devpath.to_str().unwrap(), SFlag::S_IFCHR, 1, 3).unwrap();
+        mknod(fifopath.to_str().unwrap(), SFlag::S_IFIFO, 0, 0).unwrap();
 
-        assert!(devpath.exists());
-
-        // Verify it's a character device
-        let meta = fs::metadata(&devpath).unwrap();
-        assert!(meta.file_type().is_char_device());
+        assert!(fifopath.exists());
+        let meta = fs::metadata(&fifopath).unwrap();
+        assert!(meta.file_type().is_fifo());
     }
 
     #[test]
-    fn test_mknod_default_permissions() {
-        if !Uid::effective().is_root() {
-            eprintln!("Skipping test_mknod_default_permissions: requires root");
-            return;
-        }
-
+    #[serial]  // umask is process-global
+    fn test_mknod_fifo_permissions() {
         let tmpdir = TempDir::new().unwrap();
-        let devpath = tmpdir.path().join("test_dev_default");
+        let fifopath = tmpdir.path().join("test_fifo_perm");
 
-        // Create with default permissions (None -> 0o666)
-        mknod(devpath.to_str().unwrap(), SFlag::S_IFCHR, 1, 3).unwrap();
+        mknod(fifopath.to_str().unwrap(), SFlag::S_IFIFO, 0, 0).unwrap();
 
-        let meta = fs::metadata(&devpath).unwrap();
+        let meta = fs::metadata(&fifopath).unwrap();
         let mode = meta.mode() & 0o777;
         assert_eq!(mode, 0o666);
     }
 
     #[test]
-    fn test_mknod_replaces_existing() {
-        if !Uid::effective().is_root() {
-            eprintln!("Skipping test_mknod_replaces_existing: requires root");
-            return;
-        }
-
+    fn test_mknod_replaces_existing_with_fifo() {
         let tmpdir = TempDir::new().unwrap();
-        let devpath = tmpdir.path().join("test_replace");
+        let fifopath = tmpdir.path().join("test_replace_fifo");
 
         // Create a regular file first
-        fs::write(&devpath, "placeholder").unwrap();
-        assert!(devpath.is_file());
+        fs::write(&fifopath, "placeholder").unwrap();
+        assert!(fifopath.is_file());
 
-        // mknod should replace it
+        // mknod should replace it with a FIFO
+        mknod(fifopath.to_str().unwrap(), SFlag::S_IFIFO, 0, 0).unwrap();
+
+        let meta = fs::metadata(&fifopath).unwrap();
+        assert!(meta.file_type().is_fifo());
+    }
+
+    #[test]
+    #[serial]  // umask is process-global
+    fn test_mknod_umask_not_applied() {
+        let tmpdir = TempDir::new().unwrap();
+        let fifopath = tmpdir.path().join("test_umask_fifo");
+
+        // Set a restrictive umask
+        let old_umask = stat::umask(Mode::from_bits_truncate(0o077));
+
+        // Create FIFO - should get exact permissions despite umask
+        mknod(fifopath.to_str().unwrap(), SFlag::S_IFIFO, 0, 0).unwrap();
+
+        // Restore umask
+        stat::umask(old_umask);
+
+        let meta = fs::metadata(&fifopath).unwrap();
+        let mode = meta.mode() & 0o777;
+        assert_eq!(mode, 0o666, "umask should not affect mknod permissions");
+    }
+
+    // Char device tests - require root, will rerun with sudo if needed
+    #[test]
+    #[serial]
+    fn test_mknod_creates_char_device() {
+        require_root();
+
+        let tmpdir = TempDir::new().unwrap();
+        let devpath = tmpdir.path().join("test_null");
+
         mknod(devpath.to_str().unwrap(), SFlag::S_IFCHR, 1, 3).unwrap();
 
         let meta = fs::metadata(&devpath).unwrap();
         assert!(meta.file_type().is_char_device());
     }
 
+    // ==================== error path tests ====================
+    // These tests trigger the .with_context() closures for coverage
+
     #[test]
-    fn test_mknod_umask_not_applied() {
-        if !Uid::effective().is_root() {
-            eprintln!("Skipping test_mknod_umask_not_applied: requires root");
-            return;
-        }
-
-        let tmpdir = TempDir::new().unwrap();
-        let devpath = tmpdir.path().join("test_umask");
-
-        // Set a restrictive umask
-        let old_umask = stat::umask(Mode::from_bits_truncate(0o077));
-
-        // Create device - should get exact permissions despite umask
-        mknod(devpath.to_str().unwrap(), SFlag::S_IFCHR, 1, 3).unwrap();
-
-        // Restore umask
-        stat::umask(old_umask);
-
-        let meta = fs::metadata(&devpath).unwrap();
-        let mode = meta.mode() & 0o777;
-        assert_eq!(mode, 0o666, "umask should not affect mknod permissions");
+    fn test_ln_error_nonexistent_parent() {
+        // symlinkat fails when parent directory doesn't exist
+        let result = ln("/target", "/nonexistent/dir/link");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("ln"), "error should mention ln: {}", err);
     }
+
+    #[test]
+    fn test_mknod_error_nonexistent_parent() {
+        // mknod fails when parent directory doesn't exist
+        let result = mknod("/nonexistent/dir/fifo", SFlag::S_IFIFO, 0, 0);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("mknod"), "error should mention mknod: {}", err);
+    }
+
 }
