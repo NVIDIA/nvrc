@@ -74,27 +74,8 @@ fn fork_agent_with_timeout(timeout_secs: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::require_root;
     use nix::sys::wait::{waitpid, WaitStatus};
-    use nix::unistd::Uid;
-    use std::env;
-    use std::process::Command as StdCommand;
-
-    fn require_root() {
-        if Uid::effective().is_root() {
-            return;
-        }
-        #[cfg(coverage)]
-        panic!("coverage tests must run as root");
-
-        #[cfg(not(coverage))]
-        {
-            let args: Vec<String> = env::args().collect();
-            match StdCommand::new("sudo").args(&args).status() {
-                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
-                Err(e) => panic!("failed to run sudo: {}", e),
-            }
-        }
-    }
 
     #[test]
     fn test_agent_setup() {

@@ -155,6 +155,7 @@ pub fn setup() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::require_root;
     use std::fs;
 
     // === Safe parsing function tests ===
@@ -282,28 +283,6 @@ mod tests {
     }
 
     // === Functions that need root but are safe ===
-
-    fn require_root() {
-        use nix::unistd::Uid;
-        use std::env;
-        use std::process::Command;
-
-        if Uid::effective().is_root() {
-            return;
-        }
-
-        #[cfg(coverage)]
-        panic!("coverage tests must run as root - use: sudo cargo llvm-cov");
-
-        #[cfg(not(coverage))]
-        {
-            let args: Vec<String> = env::args().collect();
-            match Command::new("sudo").args(&args).status() {
-                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
-                Err(e) => panic!("failed to run sudo: {}", e),
-            }
-        }
-    }
 
     #[test]
     fn test_proc_symlinks() {

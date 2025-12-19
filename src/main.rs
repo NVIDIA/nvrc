@@ -15,6 +15,9 @@ mod smi;
 mod syslog;
 mod toolkit;
 
+#[cfg(test)]
+mod test_utils;
+
 #[macro_use]
 extern crate log;
 extern crate kernlog;

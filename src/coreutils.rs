@@ -49,32 +49,9 @@ pub fn mknod(path: &str, kind: SFlag, major: u64, minor: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nix::unistd::Uid;
-    use std::env;
+    use crate::test_utils::require_root;
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
-    use std::process::Command;
     use tempfile::TempDir;
-
-    /// During coverage (must run as root), just asserts we're root.
-    /// During normal tests, re-executes via sudo and exits with child's code.
-    fn require_root() {
-        if Uid::effective().is_root() {
-            return;
-        }
-
-        #[cfg(coverage)]
-        panic!("coverage tests must run as root - use: sudo cargo llvm-cov");
-
-        #[cfg(not(coverage))]
-        {
-            // Re-run this test as root; exit with child's status to propagate pass/fail
-            let args: Vec<String> = env::args().collect();
-            match Command::new("sudo").args(&args).status() {
-                Ok(status) => std::process::exit(status.code().unwrap_or(1)),
-                Err(e) => panic!("failed to run sudo: {}", e),
-            }
-        }
-    }
 
     // ==================== ln tests ====================
 

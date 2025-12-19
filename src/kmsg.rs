@@ -43,21 +43,10 @@ fn kmsg_at(path: &str) -> Result<File> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nix::unistd::Uid;
+    use crate::test_utils::require_root;
     use serial_test::serial;
-    use std::env;
     use std::io::Write;
-    use std::process::Command;
     use tempfile::NamedTempFile;
-
-    fn require_root() {
-        if Uid::effective().is_root() {
-            return;
-        }
-        let args: Vec<String> = env::args().collect();
-        let status = Command::new("sudo").args(&args).status().expect("sudo");
-        std::process::exit(status.code().unwrap_or(1));
-    }
 
     #[test]
     fn test_kmsg_at_dev_null() {
