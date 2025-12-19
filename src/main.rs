@@ -8,6 +8,8 @@ mod kata_agent;
 mod kernel_params;
 mod kmsg;
 mod lockdown;
+#[macro_use]
+mod macros;
 mod modprobe;
 mod mount;
 mod nvrc;
@@ -15,26 +17,18 @@ mod smi;
 mod syslog;
 mod toolkit;
 
+#[cfg(test)]
+mod test_utils;
+
 #[macro_use]
 extern crate log;
 extern crate kernlog;
 
-macro_rules! must {
-    ($expr:expr) => {
-        if let Err(e) = $expr {
-            panic!("init failure: {} => {e}", stringify!($expr));
-        }
-    };
-    ($expr:expr, $msg:literal) => {
-        if let Err(e) = $expr {
-            panic!("init failure: {}: {e}", $msg);
-        }
-    };
-}
-
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
 
+/// Main entry point - orchestrates the init sequence.
+/// Each step is tested individually; this is integration glue.
 fn main() {
     lockdown::set_panic_hook();
     let mut init = NVRC::default();
@@ -44,8 +38,8 @@ fn main() {
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
 
-    must!(modprobe::nvidia());
-    must!(modprobe::nvidia_uvm());
+    must!(modprobe::load("nvidia"));
+    must!(modprobe::load("nvidia-uvm"));
 
     must!(init.nvidia_smi_lmcd());
     must!(init.nvidia_smi_lgc());

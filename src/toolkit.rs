@@ -1,30 +1,52 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use super::execute::foreground;
-use anyhow::{Context, Result};
-use std::process::Command;
+//! NVIDIA Container Toolkit (nvidia-ctk) integration.
+//!
+//! Generates CDI (Container Device Interface) specs so container runtimes
+//! can discover and mount GPU devices without needing the legacy hook.
 
-#[allow(dead_code)]
-pub fn nvidia_smi() -> Result<()> {
-    debug!("nvidia-smi");
+use crate::execute::foreground;
+use anyhow::Result;
 
-    let output = Command::new("/bin/nvidia-smi")
-        .output()
-        .context("Failed to execute nvidia-smi")?;
+const NVIDIA_CTK: &str = "/bin/nvidia-ctk";
 
-    println!(
-        "nvidia-smi output:\n{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    Ok(())
-}
-
+/// Run nvidia-ctk with given arguments.
 fn ctk(args: &[&str]) -> Result<()> {
-    foreground("/bin/nvidia-ctk", args)
+    foreground(NVIDIA_CTK, args)
 }
 
+/// Generate CDI spec for GPU device discovery.
+/// CDI allows container runtimes (containerd, CRI-O) to inject GPU devices
+/// without nvidia-docker. The spec is written to /var/run/cdi/nvidia.yaml
+/// where runtimes expect to find it.
 pub fn nvidia_ctk_cdi() -> Result<()> {
     ctk(&["-d", "cdi", "generate", "--output=/var/run/cdi/nvidia.yaml"])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ctk_fails_without_binary() {
+        let err = ctk(&["--version"]).unwrap_err();
+        // Should fail because nvidia-ctk binary doesn't exist
+        assert!(
+            err.to_string().contains("nvidia-ctk"),
+            "error should mention the binary: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_nvidia_ctk_cdi_fails_without_binary() {
+        let err = nvidia_ctk_cdi().unwrap_err();
+        // Should fail because nvidia-ctk binary doesn't exist
+        assert!(
+            err.to_string().contains("nvidia-ctk"),
+            "error should mention the binary: {}",
+            err
+        );
+    }
 }

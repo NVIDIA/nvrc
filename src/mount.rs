@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
+//! Filesystem setup for the minimal init environment.
+//!
+//! Coverage note: ~80% is the safe maximum. `setup()` mounts filesystems
+//! and can only be tested in ephemeral VMs.
+
 use crate::coreutils::{ln, mknod};
 use anyhow::{Context, Result};
 use nix::mount::{self, MsFlags};
@@ -8,18 +13,23 @@ use nix::sys::stat;
 use std::fs;
 use std::path::Path;
 
-/// Check if path is mounted (exact match on mountpoint, not substring)
+/// Check if path is mounted (exact match on mountpoint, not substring).
+/// Uses exact field matching to avoid false positives like "/dev" matching "/dev/pts".
 fn is_mounted_in(mounts: &str, path: &str) -> bool {
     mounts
         .lines()
         .any(|line| line.split_whitespace().nth(1) == Some(path))
 }
 
+/// Check if a filesystem type is available in the kernel.
+/// Some filesystems (securityfs, efivarfs) may not be present in all kernels.
 fn fs_available_in(filesystems: &str, fs: &str) -> bool {
     filesystems.lines().any(|line| line.contains(fs))
 }
 
-/// Mount if not already mounted (uses cached mounts snapshot)
+/// Mount filesystem only if not already mounted.
+/// Idempotent: safe to call multiple times. Uses pre-read mounts snapshot
+/// to avoid TOCTOU races between check and mount.
 fn mount_cached(
     mounts: &str,
     source: &str,
@@ -35,12 +45,18 @@ fn mount_cached(
     Ok(())
 }
 
+/// Remount a filesystem as read-only.
+/// Security hardening: prevents writes to the root filesystem after init,
+/// reducing attack surface in the confidential VM.
 pub fn readonly(target: &str) -> Result<()> {
     let flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY | MsFlags::MS_REMOUNT;
     mount::mount(None::<&str>, target, None::<&str>, flags, None::<&str>)
         .with_context(|| format!("Failed to remount {target} readonly"))
 }
 
+/// Mount filesystem only if the fstype is available AND the target exists.
+/// Used for optional filesystems like securityfs and efivarfs that may not
+/// be present on all systems or kernel configurations.
 fn mount_if_cached(
     mounts: &str,
     filesystems: &str,
@@ -56,6 +72,10 @@ fn mount_if_cached(
     Ok(())
 }
 
+/// Create /dev symlinks pointing to /proc entries.
+/// Standard Unix convention: /dev/stdin, /dev/stdout, /dev/stderr should
+/// exist for programs that expect them. /dev/fd provides access to open
+/// file descriptors via /proc/self/fd.
 fn proc_symlinks() -> Result<()> {
     for (src, dst) in [
         ("/proc/kcore", "/dev/core"),
@@ -69,19 +89,26 @@ fn proc_symlinks() -> Result<()> {
     Ok(())
 }
 
+/// Create essential /dev device nodes for basic I/O.
+/// These character devices are fundamental Unix primitives:
+/// - /dev/null: discard output, read returns EOF
+/// - /dev/zero: infinite stream of zeros
+/// - /dev/random, /dev/urandom: cryptographic randomness
 fn device_nodes() -> Result<()> {
-    // (path, minor)
     for (path, minor) in [
         ("/dev/null", 3u64),
         ("/dev/zero", 5u64),
         ("/dev/random", 8u64),
         ("/dev/urandom", 9u64),
     ] {
-        mknod(path, stat::SFlag::S_IFCHR, 1, minor)?; // major 1 for memory devices
+        mknod(path, stat::SFlag::S_IFCHR, 1, minor)?; // major 1 = memory devices
     }
     Ok(())
 }
 
+/// Set up the minimal filesystem hierarchy required for GPU initialization.
+/// Creates /proc, /dev, /sys, /run, /tmp mounts and essential device nodes.
+/// Snapshot-based: reads mount state once to avoid TOCTOU races.
 pub fn setup() -> Result<()> {
     // Snapshot mount state once - consistent view, no TOCTOU
     let mounts = fs::read_to_string("/proc/mounts").unwrap_or_default();
@@ -128,7 +155,10 @@ pub fn setup() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::require_root;
     use std::fs;
+
+    // === Safe parsing function tests ===
 
     #[test]
     fn test_is_mounted_in() {
@@ -139,11 +169,17 @@ mod tests {
 
     #[test]
     fn test_is_mounted_exact_match() {
-        // /dev/pts mounted should NOT match /dev
+        // /dev/pts mounted should NOT match /dev (substring matching bug fix)
         let mounts = "devpts /dev/pts devpts rw 0 0\ntmpfs /tmp tmpfs rw 0 0\n";
         assert!(!is_mounted_in(mounts, "/dev"));
         assert!(is_mounted_in(mounts, "/dev/pts"));
         assert!(is_mounted_in(mounts, "/tmp"));
+    }
+
+    #[test]
+    fn test_is_mounted_empty() {
+        assert!(!is_mounted_in("", "/"));
+        assert!(!is_mounted_in("", "/dev"));
     }
 
     #[test]
@@ -153,4 +189,126 @@ mod tests {
         assert!(fs_available_in(&filesystems, "sysfs"));
         assert!(!fs_available_in(&filesystems, "nonexistent_fs"));
     }
+
+    #[test]
+    fn test_fs_available_empty() {
+        assert!(!fs_available_in("", "proc"));
+    }
+
+    // === mount_cached tests (safe: no-op when already mounted) ===
+
+    #[test]
+    fn test_mount_cached_already_mounted() {
+        // When target is already in mounts, mount_cached is a no-op
+        let mounts = "proc /proc proc rw 0 0\n";
+        let result = mount_cached(mounts, "proc", "/proc", "proc", MsFlags::empty(), None);
+        assert!(result.is_ok());
+    }
+
+    // === mount_if_cached tests (safe: no-op when conditions not met) ===
+
+    #[test]
+    fn test_mount_if_cached_fs_not_available() {
+        // When filesystem is not available, should be no-op
+        let mounts = "";
+        let filesystems = "nodev tmpfs\n";
+        let result = mount_if_cached(
+            mounts,
+            filesystems,
+            "nonexistent_fs",
+            "src",
+            "/tmp", // exists but fs not available
+            MsFlags::empty(),
+            None,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_mount_if_cached_target_not_exists() {
+        // When target path doesn't exist, should be no-op
+        let mounts = "";
+        let filesystems = "nodev tmpfs\n";
+        let result = mount_if_cached(
+            mounts,
+            filesystems,
+            "tmpfs",
+            "src",
+            "/nonexistent/path",
+            MsFlags::empty(),
+            None,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_mount_if_cached_already_mounted() {
+        // When already mounted, should be no-op
+        let mounts = "tmpfs /tmp tmpfs rw 0 0\n";
+        let filesystems = "nodev tmpfs\n";
+        let result = mount_if_cached(
+            mounts,
+            filesystems,
+            "tmpfs",
+            "tmpfs",
+            "/tmp",
+            MsFlags::empty(),
+            None,
+        );
+        assert!(result.is_ok());
+    }
+
+    // === Error path tests (safe: mount fails, no changes made) ===
+
+    #[test]
+    fn test_mount_cached_fails_nonexistent_target() {
+        let mounts = "";
+        let err = mount_cached(
+            mounts,
+            "tmpfs",
+            "/nonexistent/mount/point",
+            "tmpfs",
+            MsFlags::empty(),
+            None,
+        )
+        .unwrap_err();
+        // Should contain the mount target in error context
+        assert!(
+            err.to_string().contains("/nonexistent/mount/point"),
+            "error should mention the path: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_readonly_fails_nonexistent() {
+        let err = readonly("/nonexistent/path").unwrap_err();
+        // Should contain the path in error context
+        assert!(
+            err.to_string().contains("/nonexistent/path"),
+            "error should mention the path: {}",
+            err
+        );
+    }
+
+    // === Functions that need root but are safe ===
+
+    #[test]
+    fn test_proc_symlinks() {
+        // These symlinks already exist on any Linux system.
+        // ln() is idempotent - returns Ok if already correct.
+        require_root();
+        assert!(proc_symlinks().is_ok());
+    }
+
+    #[test]
+    fn test_device_nodes() {
+        // mknod() removes existing nodes first, then recreates.
+        // Safe: just recreates /dev/null, /dev/zero, etc. with same params.
+        require_root();
+        assert!(device_nodes().is_ok());
+    }
+
+    // === setup() is dangerous - mounts filesystems ===
+    // Only test in ephemeral VMs, not on development machines.
 }
