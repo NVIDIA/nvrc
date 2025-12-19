@@ -8,6 +8,8 @@ mod kata_agent;
 mod kernel_params;
 mod kmsg;
 mod lockdown;
+#[macro_use]
+mod macros;
 mod modprobe;
 mod mount;
 mod nvrc;
@@ -21,19 +23,6 @@ mod test_utils;
 #[macro_use]
 extern crate log;
 extern crate kernlog;
-
-macro_rules! must {
-    ($expr:expr) => {
-        if let Err(e) = $expr {
-            panic!("init failure: {} => {e}", stringify!($expr));
-        }
-    };
-    ($expr:expr, $msg:literal) => {
-        if let Err(e) = $expr {
-            panic!("init failure: {}: {e}", $msg);
-        }
-    };
-}
 
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
@@ -66,33 +55,4 @@ fn main() {
     must!(init.nvidia_smi_srs());
     must!(init.check_daemons());
     must!(kata_agent::fork_agent());
-}
-
-#[cfg(test)]
-mod tests {
-    /// Test must! macro with Ok result - should not panic
-    #[test]
-    fn test_must_ok() {
-        must!(Ok::<(), &str>(()));
-    }
-
-    /// Test must! macro with custom message - should not panic on Ok
-    #[test]
-    fn test_must_ok_with_message() {
-        must!(Ok::<(), &str>(()), "custom message");
-    }
-
-    /// Test must! macro panics on Err
-    #[test]
-    #[should_panic(expected = "init failure")]
-    fn test_must_err_panics() {
-        must!(Err::<(), _>("something went wrong"));
-    }
-
-    /// Test must! macro with custom message panics on Err
-    #[test]
-    #[should_panic(expected = "custom error")]
-    fn test_must_err_with_message_panics() {
-        must!(Err::<(), _>("boom"), "custom error");
-    }
 }
