@@ -4,6 +4,8 @@ use std::fs;
 
 use crate::nvrc::NVRC;
 
+/// Kernel parameters use various boolean representations (on/off, true/false, 1/0, yes/no).
+/// Normalize them to a single bool to simplify downstream logic.
 fn parse_boolean(s: &str) -> bool {
     match s.to_ascii_lowercase().as_str() {
         "on" | "true" | "1" | "yes" => true,
@@ -16,6 +18,9 @@ fn parse_boolean(s: &str) -> bool {
 }
 
 impl NVRC {
+    /// Parse kernel command line parameters to configure NVRC behavior.
+    /// Using kernel params allows configuration without userspace tools—critical
+    /// for a minimal init where no config files or environment variables exist.
     pub fn process_kernel_params(&mut self, cmdline: Option<&str>) -> Result<()> {
         let content = match cmdline {
             Some(c) => c.to_owned(),
@@ -39,6 +44,8 @@ impl NVRC {
     }
 }
 
+/// DCGM (Data Center GPU Manager) provides telemetry and health monitoring.
+/// Off by default—only enable when observability infrastructure expects it.
 fn nvrc_dcgm(value: &str, ctx: &mut NVRC) -> Result<()> {
     let dcgm = parse_boolean(value);
     ctx.dcgm_enabled = Some(dcgm);
@@ -46,6 +53,8 @@ fn nvrc_dcgm(value: &str, ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
+/// Fabric Manager enables NVLink/NVSwitch multi-GPU communication.
+/// Only needed for multi-GPU systems with NVLink topology.
 fn nvrc_fabricmanager(value: &str, ctx: &mut NVRC) -> Result<()> {
     let fabricmanager = parse_boolean(value);
     ctx.fabricmanager_enabled = Some(fabricmanager);
@@ -53,6 +62,8 @@ fn nvrc_fabricmanager(value: &str, ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
+/// Control log verbosity at runtime. Defaults to off to minimize noise.
+/// Enabling devkmsg allows kernel log output even in minimal init environments.
 fn nvrc_log(value: &str, _ctx: &mut NVRC) -> Result<()> {
     let lvl = match value.to_ascii_lowercase().as_str() {
         "off" | "0" | "" => log::LevelFilter::Off,
@@ -71,12 +82,15 @@ fn nvrc_log(value: &str, _ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
+/// Secure Randomization Seed for GPU memory. Passed directly to nvidia-smi.
 fn nvidia_smi_srs(value: &str, ctx: &mut NVRC) -> Result<()> {
     ctx.nvidia_smi_srs = Some(value.to_owned());
     debug!("nvidia_smi_srs: {value}");
     Ok(())
 }
 
+/// Lock GPU core clocks to a fixed frequency (MHz) for consistent performance.
+/// Eliminates thermal/power throttling variance in benchmarks and latency-sensitive workloads.
 fn nvidia_smi_lgc(value: &str, ctx: &mut NVRC) -> Result<()> {
     let mhz: u32 = value.parse().context("nvrc.smi.lgc: invalid frequency")?;
     debug!("nvrc.smi.lgc: {} MHz (all GPUs)", mhz);
@@ -84,6 +98,8 @@ fn nvidia_smi_lgc(value: &str, ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
+/// Lock memory clocks to a fixed frequency (MHz). Requires driver reload to take effect.
+/// Used alongside lgc for fully deterministic GPU behavior.
 fn nvidia_smi_lmcd(value: &str, ctx: &mut NVRC) -> Result<()> {
     let mhz: u32 = value.parse().context("nvrc.smi.lmcd: invalid frequency")?;
     debug!("nvrc.smi.lmcd: {} MHz (all GPUs)", mhz);
@@ -91,6 +107,8 @@ fn nvidia_smi_lmcd(value: &str, ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
+/// Set GPU power limit (Watts). Lower limits reduce heat/power, higher allows peak perf.
+/// Useful for power-constrained environments or thermal management.
 fn nvidia_smi_pl(value: &str, ctx: &mut NVRC) -> Result<()> {
     let watts: u32 = value.parse().context("nvrc.smi.pl: invalid wattage")?;
     debug!("nvrc.smi.pl: {} W (all GPUs)", watts);
@@ -98,6 +116,8 @@ fn nvidia_smi_pl(value: &str, ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
+/// UVM persistence mode keeps unified memory state across CUDA context teardowns.
+/// Reduces initialization overhead for short-lived CUDA applications.
 fn uvm_persistenced_mode(value: &str, ctx: &mut NVRC) -> Result<()> {
     let enabled = parse_boolean(value);
     ctx.uvm_persistence_mode = Some(enabled);
@@ -223,6 +243,36 @@ mod tests {
     }
 
     #[test]
+    #[serial]
+    fn test_process_kernel_params_nvrc_log_trace() {
+        if !Uid::effective().is_root() {
+            return rerun_with_sudo();
+        }
+
+        log_setup();
+        let mut init = NVRC::default();
+
+        init.process_kernel_params(Some("nvrc.log=trace")).unwrap();
+        assert_eq!(log::max_level(), log::LevelFilter::Trace);
+    }
+
+    #[test]
+    #[serial]
+    fn test_process_kernel_params_nvrc_log_unknown() {
+        if !Uid::effective().is_root() {
+            return rerun_with_sudo();
+        }
+
+        log_setup();
+        let mut init = NVRC::default();
+
+        // Unknown log level should default to Off
+        init.process_kernel_params(Some("nvrc.log=garbage"))
+            .unwrap();
+        assert_eq!(log::max_level(), log::LevelFilter::Off);
+    }
+
+    #[test]
     fn test_nvrc_dcgm_parameter_handling() {
         let mut c = NVRC::default();
 
@@ -248,6 +298,42 @@ mod tests {
 
         nvrc_dcgm("invalid", &mut c).unwrap();
         assert_eq!(c.dcgm_enabled, Some(false));
+    }
+
+    #[test]
+    fn test_nvrc_fabricmanager() {
+        let mut c = NVRC::default();
+
+        nvrc_fabricmanager("on", &mut c).unwrap();
+        assert_eq!(c.fabricmanager_enabled, Some(true));
+
+        nvrc_fabricmanager("off", &mut c).unwrap();
+        assert_eq!(c.fabricmanager_enabled, Some(false));
+    }
+
+    #[test]
+    fn test_nvidia_smi_srs() {
+        let mut c = NVRC::default();
+
+        nvidia_smi_srs("enabled", &mut c).unwrap();
+        assert_eq!(c.nvidia_smi_srs, Some("enabled".to_owned()));
+
+        nvidia_smi_srs("disabled", &mut c).unwrap();
+        assert_eq!(c.nvidia_smi_srs, Some("disabled".to_owned()));
+    }
+
+    #[test]
+    fn test_uvm_persistenced_mode() {
+        let mut c = NVRC::default();
+
+        uvm_persistenced_mode("on", &mut c).unwrap();
+        assert_eq!(c.uvm_persistence_mode, Some(true));
+
+        uvm_persistenced_mode("OFF", &mut c).unwrap();
+        assert_eq!(c.uvm_persistence_mode, Some(false));
+
+        uvm_persistenced_mode("True", &mut c).unwrap();
+        assert_eq!(c.uvm_persistence_mode, Some(true));
     }
 
     #[test]
@@ -334,5 +420,28 @@ mod tests {
         assert_eq!(c.nvidia_smi_lgc, Some(2100));
         assert_eq!(c.nvidia_smi_pl, Some(400));
         assert_eq!(c.dcgm_enabled, Some(true));
+    }
+
+    #[test]
+    fn test_process_kernel_params_from_proc_cmdline() {
+        // Exercise the None path which reads /proc/cmdline.
+        // We can't control the contents but can verify it doesn't error.
+        let mut c = NVRC::default();
+        let result = c.process_kernel_params(None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_kernel_params_with_fabricmanager_and_uvm() {
+        let mut c = NVRC::default();
+
+        c.process_kernel_params(Some(
+            "nvrc.fabricmanager=on nvrc.uvm.persistence.mode=true nvrc.smi.srs=enabled",
+        ))
+        .unwrap();
+
+        assert_eq!(c.fabricmanager_enabled, Some(true));
+        assert_eq!(c.uvm_persistence_mode, Some(true));
+        assert_eq!(c.nvidia_smi_srs, Some("enabled".to_owned()));
     }
 }
