@@ -38,6 +38,8 @@ macro_rules! must {
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
 
+/// Main entry point - orchestrates the init sequence.
+/// Each step is tested individually; this is integration glue.
 fn main() {
     lockdown::set_panic_hook();
     let mut init = NVRC::default();
@@ -64,4 +66,33 @@ fn main() {
     must!(init.nvidia_smi_srs());
     must!(init.check_daemons());
     must!(kata_agent::fork_agent());
+}
+
+#[cfg(test)]
+mod tests {
+    /// Test must! macro with Ok result - should not panic
+    #[test]
+    fn test_must_ok() {
+        must!(Ok::<(), &str>(()));
+    }
+
+    /// Test must! macro with custom message - should not panic on Ok
+    #[test]
+    fn test_must_ok_with_message() {
+        must!(Ok::<(), &str>(()), "custom message");
+    }
+
+    /// Test must! macro panics on Err
+    #[test]
+    #[should_panic(expected = "init failure")]
+    fn test_must_err_panics() {
+        must!(Err::<(), _>("something went wrong"));
+    }
+
+    /// Test must! macro with custom message panics on Err
+    #[test]
+    #[should_panic(expected = "custom error")]
+    fn test_must_err_with_message_panics() {
+        must!(Err::<(), _>("boom"), "custom error");
+    }
 }
