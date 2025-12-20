@@ -38,7 +38,6 @@ fn main() {
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
 
-    must!(modprobe::load("nvidia"));
     must!(modprobe::load("nvidia-uvm"));
 
     must!(init.nvidia_smi_lmcd());

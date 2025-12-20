@@ -63,24 +63,8 @@ jobs:
         include:
           - target: x86_64-unknown-linux-musl
             runner: ubuntu-24.04
-            flavor: standard
-            bin: NVRC
-            cargo_features: ""
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-24.04
-            flavor: confidential
-            bin: NVRC-confidential
-            cargo_features: "--features=confidential"
           - target: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
-            flavor: standard
-            bin: NVRC
-            cargo_features: ""
-          - target: aarch64-unknown-linux-musl
-            runner: ubuntu-24.04-arm
-            flavor: confidential
-            bin: NVRC-confidential
-            cargo_features: "--features=confidential"
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -101,15 +85,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools jq
 
-      - name: Build (${{ matrix.target }} / ${{ matrix.flavor }})
+      - name: Build (${{ matrix.target }})
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p dist
           SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
           export SOURCE_DATE_EPOCH
-          cargo build --release --target "${{ matrix.target }}" ${{ matrix.cargo_features }}
-          cp "target/${{ matrix.target }}/release/NVRC" "dist/${{ matrix.bin }}-${{ matrix.target }}"
+          cargo build --release --target "${{ matrix.target }}"
+          cp "target/${{ matrix.target }}/release/NVRC" "dist/NVRC-${{ matrix.target }}"
 
       - name: Compute digest (sha256sum format)
         id: hash
@@ -117,16 +101,16 @@ jobs:
         run: |
           cd dist
           # "<64-hex><space><space><filename>"
-          sha256sum "${{ matrix.bin }}-${{ matrix.target }}" | tee "${{ matrix.bin }}-${{ matrix.target }}.sha256"
+          sha256sum "NVRC-${{ matrix.target }}" | tee "NVRC-${{ matrix.target }}.sha256"
           # Keep a subjects file in sha256sum format; base64 is computed later
-          cp "${{ matrix.bin }}-${{ matrix.target }}.sha256" subjects.txt
+          cp "NVRC-${{ matrix.target }}.sha256" subjects.txt
 
       - name: Generate SBOM (SPDX JSON)
         uses: anchore/sbom-action@f8bdd1d8ac5e901a77a92f111440fdb1b593736b # v0.20.6
         with:
-          file: dist/${{ matrix.bin }}-${{ matrix.target }}
+          file: dist/NVRC-${{ matrix.target }}
           format: spdx-json
-          output-file: dist/sbom-${{ matrix.bin }}-${{ matrix.target }}.spdx.json
+          output-file: dist/sbom-NVRC-${{ matrix.target }}.spdx.json
           upload-artifact: false   # avoid matrix artifact name collisions (409)
 
       - name: Install cosign
@@ -141,16 +125,16 @@ jobs:
           # We sign two things per build: the binary and the SBOM.
 
           # Sign binary (+ bundle)
-          cosign sign-blob --yes "dist/${{ matrix.bin }}-${{ matrix.target }}" \
-            --output-signature "dist/${{ matrix.bin }}-${{ matrix.target }}.sig" \
-            --output-certificate "dist/${{ matrix.bin }}-${{ matrix.target }}.cert" \
-            --bundle "dist/${{ matrix.bin }}-${{ matrix.target }}.bundle.json"
+          cosign sign-blob --yes "dist/NVRC-${{ matrix.target }}" \
+            --output-signature "dist/NVRC-${{ matrix.target }}.sig" \
+            --output-certificate "dist/NVRC-${{ matrix.target }}.cert" \
+            --bundle "dist/NVRC-${{ matrix.target }}.bundle.json"
 
           # Sign SBOM (SPDX JSON) (+ bundle)
-          cosign sign-blob --yes "dist/sbom-${{ matrix.bin }}-${{ matrix.target }}.spdx.json" \
-            --output-signature "dist/sbom-${{ matrix.bin }}-${{ matrix.target }}.spdx.json.sig" \
-            --output-certificate "dist/sbom-${{ matrix.bin }}-${{ matrix.target }}.spdx.json.cert" \
-            --bundle "dist/sbom-${{ matrix.bin }}-${{ matrix.target }}.spdx.json.bundle.json"
+          cosign sign-blob --yes "dist/sbom-NVRC-${{ matrix.target }}.spdx.json" \
+            --output-signature "dist/sbom-NVRC-${{ matrix.target }}.spdx.json.sig" \
+            --output-certificate "dist/sbom-NVRC-${{ matrix.target }}.spdx.json.cert" \
+            --bundle "dist/sbom-NVRC-${{ matrix.target }}.spdx.json.bundle.json"
 
       - name: Package release tarball
         shell: bash
@@ -159,7 +143,7 @@ jobs:
           # SOURCE_DATE_EPOCH isn't persisted across steps; compute a fallback here
           export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --pretty=%ct)}"
           cd dist
-          BASE="${{ matrix.bin }}-${{ matrix.target }}"
+          BASE="NVRC-${{ matrix.target }}"
           TAR="${BASE}.tar"
           # Create reproducible tarball with stable mtimes/owners
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@${SOURCE_DATE_EPOCH}" \
@@ -175,7 +159,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          BASE="${{ matrix.bin }}-${{ matrix.target }}"
+          BASE="NVRC-${{ matrix.target }}"
           TARXZ="dist/${BASE}.tar.xz"
           cosign sign-blob --yes "$TARXZ" \
             --output-signature "${TARXZ}.sig" \
@@ -183,10 +167,10 @@ jobs:
             --bundle "${TARXZ}.bundle.json"
 
 
-      - name: Upload dist as artifact (per combo)
+      - name: Upload dist as artifact (per target)
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4
         with:
-          name: dist-${{ matrix.target }}-${{ matrix.flavor }}
+          name: dist-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
           overwrite: true
@@ -197,29 +181,14 @@ jobs:
           tag_name: ${{ needs.preflight.outputs.tag }}
           name: Release ${{ needs.preflight.outputs.tag }}
           files: |
-            dist/${{ matrix.bin }}-${{ matrix.target }}.tar.xz
-            dist/${{ matrix.bin }}-${{ matrix.target }}.tar.xz.sig
-            dist/${{ matrix.bin }}-${{ matrix.target }}.tar.xz.cert
-            dist/${{ matrix.bin }}-${{ matrix.target }}.tar.xz.bundle.json
+            dist/NVRC-${{ matrix.target }}.tar.xz
+            dist/NVRC-${{ matrix.target }}.tar.xz.sig
+            dist/NVRC-${{ matrix.target }}.tar.xz.cert
+            dist/NVRC-${{ matrix.target }}.tar.xz.bundle.json
 
   provenance-hash-all:
     needs: build-and-release
     runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            flavor: standard
-            bin: NVRC
-          - target: x86_64-unknown-linux-musl
-            flavor: confidential
-            bin: NVRC-confidential
-          - target: aarch64-unknown-linux-musl
-            flavor: standard
-            bin: NVRC
-          - target: aarch64-unknown-linux-musl
-            flavor: confidential
-            bin: NVRC-confidential
     outputs:
       map: ${{ steps.mkmap.outputs.map }}
     steps:
@@ -246,30 +215,19 @@ jobs:
           echo "map=$(jq -c . map.json)" >> "$GITHUB_OUTPUT"
 
   provenance:
-
     needs: provenance-hash-all
     strategy:
       matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            flavor: standard
-            bin: NVRC
-          - target: x86_64-unknown-linux-musl
-            flavor: confidential
-            bin: NVRC-confidential
-          - target: aarch64-unknown-linux-musl
-            flavor: standard
-            bin: NVRC
-          - target: aarch64-unknown-linux-musl
-            flavor: confidential
-            bin: NVRC-confidential
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
     permissions:
       actions: read
       id-token: write
       contents: write
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0 # v2.1.0
     with:
-      base64-subjects: ${{ fromJSON(needs.provenance-hash-all.outputs.map)[format('{0}-{1}', matrix.bin, matrix.target)] }}
+      base64-subjects: ${{ fromJSON(needs.provenance-hash-all.outputs.map)[format('NVRC-{0}', matrix.target)] }}
       upload-assets: false
 
   provenance-publish:
@@ -277,30 +235,20 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            flavor: standard
-            bin: NVRC
-          - target: x86_64-unknown-linux-musl
-            flavor: confidential
-            bin: NVRC-confidential
-          - target: aarch64-unknown-linux-musl
-            flavor: standard
-            bin: NVRC
-          - target: aarch64-unknown-linux-musl
-            flavor: confidential
-            bin: NVRC-confidential
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
     steps:
-      - name: Download provenance artifact for this combo
+      - name: Download provenance artifact for this target
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
         with:
-          name: ${{ matrix.bin }}-${{ matrix.target }}.intoto.jsonl
+          name: NVRC-${{ matrix.target }}.intoto.jsonl
           path: prov
       - name: Upload provenance to Release
         uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
-          files: prov/${{ matrix.bin }}-${{ matrix.target }}.intoto.jsonl
+          files: prov/NVRC-${{ matrix.target }}.intoto.jsonl
 
   release-notes:
     needs: [preflight, provenance-publish, build-and-release]
@@ -376,56 +324,55 @@ jobs:
           )
 
           for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
-            for bin in NVRC NVRC-confidential; do
-              # 0) If we only have the tarball, verify and extract it first
-              if [ -f "${bin}-${target}.tar.xz" ]; then
-                # tarball signature (online)
-                cosign verify-blob \
-                  --rekor-url https://rekor.sigstore.dev \
-                  "${COSIGN_PINS[@]}" \
-                  --certificate "${bin}-${target}.tar.xz.cert" \
-                  --signature   "${bin}-${target}.tar.xz.sig" \
-                  "${bin}-${target}.tar.xz"
-                # tarball offline (bundle)
-                cosign verify-blob \
-                  --bundle "${bin}-${target}.tar.xz.bundle.json" \
-                  "${COSIGN_PINS[@]}" \
-                  "${bin}-${target}.tar.xz"
-                tar -xf "${bin}-${target}.tar.xz"
-              fi
-
-              # 2) ONLINE verification via Rekor transparency log — binary
+            bin=NVRC
+            # 0) If we only have the tarball, verify and extract it first
+            if [ -f "${bin}-${target}.tar.xz" ]; then
+              # tarball signature (online)
               cosign verify-blob \
                 --rekor-url https://rekor.sigstore.dev \
                 "${COSIGN_PINS[@]}" \
-                --certificate "${bin}-${target}.cert" \
-                --signature   "${bin}-${target}.sig" \
-                "${bin}-${target}"
-
-              # 2c) SBOM signature — online
+                --certificate "${bin}-${target}.tar.xz.cert" \
+                --signature   "${bin}-${target}.tar.xz.sig" \
+                "${bin}-${target}.tar.xz"
+              # tarball offline (bundle)
               cosign verify-blob \
-                --rekor-url https://rekor.sigstore.dev \
+                --bundle "${bin}-${target}.tar.xz.bundle.json" \
                 "${COSIGN_PINS[@]}" \
-                --certificate "sbom-${bin}-${target}.spdx.json.cert" \
-                --signature   "sbom-${bin}-${target}.spdx.json.sig" \
-                "sbom-${bin}-${target}.spdx.json"
+                "${bin}-${target}.tar.xz"
+              tar -xf "${bin}-${target}.tar.xz"
+            fi
 
-              # 3) OFFLINE verification using Sigstore bundles (no network)
-              cosign verify-blob \
-                --bundle "${bin}-${target}.bundle.json" \
-                "${COSIGN_PINS[@]}" \
-                "${bin}-${target}"
+            # 2) ONLINE verification via Rekor transparency log — binary
+            cosign verify-blob \
+              --rekor-url https://rekor.sigstore.dev \
+              "${COSIGN_PINS[@]}" \
+              --certificate "${bin}-${target}.cert" \
+              --signature   "${bin}-${target}.sig" \
+              "${bin}-${target}"
 
-              cosign verify-blob \
-                --bundle "sbom-${bin}-${target}.spdx.json.bundle.json" \
-                "${COSIGN_PINS[@]}" \
-                "sbom-${bin}-${target}.spdx.json"
+            # 2c) SBOM signature — online
+            cosign verify-blob \
+              --rekor-url https://rekor.sigstore.dev \
+              "${COSIGN_PINS[@]}" \
+              --certificate "sbom-${bin}-${target}.spdx.json.cert" \
+              --signature   "sbom-${bin}-${target}.spdx.json.sig" \
+              "sbom-${bin}-${target}.spdx.json"
 
-              # 4) Verify SLSA provenance (built from main)
-              PROV="${bin}-${target}.intoto.jsonl"
-              slsa-verifier verify-artifact "${bin}-${target}" \
-                --provenance-path "$PROV" \
-                --source-uri "github.com/${{ github.repository }}" \
-                --source-branch "main"
-            done
+            # 3) OFFLINE verification using Sigstore bundles (no network)
+            cosign verify-blob \
+              --bundle "${bin}-${target}.bundle.json" \
+              "${COSIGN_PINS[@]}" \
+              "${bin}-${target}"
+
+            cosign verify-blob \
+              --bundle "sbom-${bin}-${target}.spdx.json.bundle.json" \
+              "${COSIGN_PINS[@]}" \
+              "sbom-${bin}-${target}.spdx.json"
+
+            # 4) Verify SLSA provenance (built from main)
+            PROV="${bin}-${target}.intoto.jsonl"
+            slsa-verifier verify-artifact "${bin}-${target}" \
+              --provenance-path "$PROV" \
+              --source-uri "github.com/${{ github.repository }}" \
+              --source-branch "main"
           done
