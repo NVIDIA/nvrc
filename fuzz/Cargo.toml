@@ -1,0 +1,30 @@
+[package]
+name = "NVRC-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.NVRC]
+path = ".."
+
+# Kernel command line parameter parsing fuzz target
+[[bin]]
+name = "kernel_params"
+path = "fuzz_targets/kernel_params.rs"
+test = false
+doc = false
+bench = false
+
+# Mount table parsing fuzz target
+[[bin]]
+name = "mount_parsing"
+path = "fuzz_targets/mount_parsing.rs"
+test = false
+doc = false
+bench = false

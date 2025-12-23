@@ -15,7 +15,8 @@ use std::path::Path;
 
 /// Check if path is mounted (exact match on mountpoint, not substring).
 /// Uses exact field matching to avoid false positives like "/dev" matching "/dev/pts".
-fn is_mounted_in(mounts: &str, path: &str) -> bool {
+/// Public for fuzzing: parses arbitrary /proc/mounts content.
+pub fn is_mounted_in(mounts: &str, path: &str) -> bool {
     mounts
         .lines()
         .any(|line| line.split_whitespace().nth(1) == Some(path))
