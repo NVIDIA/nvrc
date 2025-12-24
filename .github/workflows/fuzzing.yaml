@@ -1,0 +1,65 @@
+# Fuzzing workflow - runs fuzz tests to find crashes and edge cases
+#
+# WHY separate workflow:
+# - Fuzzing is long-running (minutes/hours) - shouldn't block normal CI
+# - Uses nightly Rust (required by libFuzzer)
+# - Non-blocking: failures notify but don't block merges
+
+name: Fuzzing
+
+on:
+  # Nightly runs for continuous fuzzing
+  schedule:
+    - cron: '0 3 * * *'  # 3 AM UTC daily
+  # Manual trigger for on-demand fuzzing
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzzing duration per target (seconds)'
+        required: false
+        default: '300'
+
+env:
+  CARGO_TERM_COLOR: always
+  # Default duration: 5 minutes per target (can be overridden via workflow_dispatch)
+  FUZZ_DURATION: ${{ github.event.inputs.duration || '300' }}
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - kernel_params
+          - mount_parsing
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust nightly
+        # WHY nightly: libFuzzer instrumentation requires nightly compiler features
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run fuzzer - ${{ matrix.target }}
+        # WHY max_total_time: prevent infinite runs, control CI costs
+        # WHY -jobs=2: parallel fuzzing instances for better coverage
+        run: |
+          cargo fuzz run ${{ matrix.target }} -- \
+            -max_total_time=${{ env.FUZZ_DURATION }} \
+            -jobs=2
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 30
+
