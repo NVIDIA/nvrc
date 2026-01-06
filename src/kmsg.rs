@@ -3,12 +3,17 @@
 
 use anyhow::{Context, Result};
 use std::fs::{self, File, OpenOptions};
+use std::sync::Once;
+
+static KERNLOG_INIT: Once = Once::new();
 
 /// Initialize kernel logging and tune socket buffer sizes.
 /// Large buffers (16MB) prevent message loss during high-throughput GPU operations
 /// where drivers may emit bursts of diagnostic data.
 pub fn kernlog_setup() -> Result<()> {
-    kernlog::init().context("kernel log init")?;
+    KERNLOG_INIT.call_once(|| {
+        let _ = kernlog::init();
+    });
     log::set_max_level(log::LevelFilter::Off);
     for path in [
         "/proc/sys/net/core/rmem_default",
@@ -99,18 +104,35 @@ mod tests {
     #[serial]
     fn test_kernlog_setup() {
         require_root();
-        // kernlog_setup requires root for /proc/sys writes.
-        // Note: kernlog::init() can only be called once per process,
-        // so this test may fail if other tests already initialized it.
-        // We just test the /proc/sys writes succeed by calling them directly.
-        for path in [
+
+        const PATHS: [&str; 4] = [
             "/proc/sys/net/core/rmem_default",
             "/proc/sys/net/core/wmem_default",
             "/proc/sys/net/core/rmem_max",
             "/proc/sys/net/core/wmem_max",
-        ] {
-            let result = fs::write(path, b"16777216");
-            assert!(result.is_ok(), "failed to write {}", path);
+        ];
+
+        // RAII guard to restore original values after test
+        struct Restore(Vec<(&'static str, String)>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                for (path, value) in &self.0 {
+                    let _ = fs::write(path, value.as_bytes());
+                }
+            }
+        }
+
+        let saved: Vec<_> = PATHS
+            .iter()
+            .filter_map(|&p| fs::read_to_string(p).ok().map(|v| (p, v)))
+            .collect();
+        let _restore = Restore(saved);
+
+        assert!(kernlog_setup().is_ok());
+
+        for &path in &PATHS {
+            let v = fs::read_to_string(path).expect("should read sysctl");
+            assert_eq!(v.trim(), "16777216", "sysctl {} should be 16777216", path);
         }
     }
 }
