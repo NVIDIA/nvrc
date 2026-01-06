@@ -16,7 +16,12 @@ use std::process::Command;
 /// Normal test builds: Re-executes the test binary via sudo, then exits with
 /// the child's exit code. This allows `cargo test` to work without sudo.
 pub fn require_root() {
-    if Uid::effective().is_root() {
+    require_root_impl(Uid::effective().is_root())
+}
+
+/// Internal: testable implementation with injected root status.
+fn require_root_impl(is_root: bool) {
+    if is_root {
         return;
     }
 
@@ -30,5 +35,30 @@ pub fn require_root() {
             Ok(status) => std::process::exit(status.code().unwrap_or(1)),
             Err(e) => panic!("failed to run sudo: {}", e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_require_root_impl_when_root() {
+        // Should return immediately without panic
+        require_root_impl(true);
+    }
+
+    #[test]
+    #[cfg(coverage)]
+    fn test_require_root_impl_when_not_root_coverage() {
+        // In coverage builds, not being root should panic
+        let result = std::panic::catch_unwind(|| require_root_impl(false));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_require_root_when_actually_root() {
+        // We're running as root for coverage, so this should succeed
+        require_root();
     }
 }

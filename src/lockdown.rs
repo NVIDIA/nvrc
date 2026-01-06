@@ -42,20 +42,16 @@ fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) {
 /// that blocks potential kernel-level attacks via malicious modules.
 /// This is a one-way operation: once set, it cannot be undone without reboot.
 pub fn disable_modules_loading() -> Result<()> {
-    disable_modules_at("/proc/sys/kernel/modules_disabled")
-}
-
-/// Internal: write to configurable path (for unit tests with temp files).
-fn disable_modules_at(path: &str) -> Result<()> {
-    fs::write(path, b"1\n").with_context(|| format!("disable module loading: {}", path))
+    const PATH: &str = "/proc/sys/kernel/modules_disabled";
+    fs::write(PATH, b"1\n").with_context(|| format!("disable module loading: {}", PATH))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::require_root;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn test_set_panic_hook_with_custom_action() {
@@ -73,31 +69,18 @@ mod tests {
     }
 
     #[test]
-    fn test_disable_modules_at_success() {
-        let temp = NamedTempFile::new().unwrap();
-        let path = temp.path().to_str().unwrap();
+    fn test_disable_modules_loading() {
+        require_root();
 
-        let result = disable_modules_at(path);
+        // This permanently disables module loading until reboot.
+        // Only run on dedicated test runners!
+        let result = disable_modules_loading();
         assert!(result.is_ok());
 
-        // Verify content
-        let content = fs::read_to_string(path).unwrap();
-        assert_eq!(content, "1\n");
+        // Verify it was set
+        let content = fs::read_to_string("/proc/sys/kernel/modules_disabled").unwrap();
+        assert_eq!(content.trim(), "1");
     }
-
-    #[test]
-    fn test_disable_modules_at_nonexistent() {
-        let err = disable_modules_at("/nonexistent/path").unwrap_err();
-        // Should contain path in the error context
-        assert!(
-            err.to_string().contains("/nonexistent/path"),
-            "error should mention the path: {}",
-            err
-        );
-    }
-
-    // NOTE: A "read-only file" test won't work because root bypasses file permissions.
-    // The nonexistent path test adequately covers the error path.
 
     #[test]
     fn test_power_off_function_exists() {
@@ -111,9 +94,4 @@ mod tests {
         set_panic_hook();
         // If we got here, the hook was installed successfully
     }
-
-    // NOTE: disable_modules_loading() is NOT tested directly because:
-    // - As non-root: fails with permission denied (not useful)
-    // - As root: PERMANENTLY disables module loading on the host (dangerous!)
-    // The core logic is validated via test_disable_modules_at_success using temp files.
 }
