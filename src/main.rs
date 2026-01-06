@@ -24,6 +24,7 @@ mod test_utils;
 extern crate log;
 extern crate kernlog;
 
+use kata_agent::SYSLOG_POLL_FOREVER as POLL_FOREVER;
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
 
@@ -53,5 +54,5 @@ fn main() {
     must!(nvidia_ctk_cdi());
     must!(init.nvidia_smi_srs());
     must!(init.check_daemons());
-    must!(kata_agent::fork_agent());
+    must!(kata_agent::fork_agent(POLL_FOREVER));
 }

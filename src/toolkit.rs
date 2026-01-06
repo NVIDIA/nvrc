@@ -32,21 +32,13 @@ mod tests {
     fn test_ctk_fails_without_binary() {
         let err = ctk(&["--version"]).unwrap_err();
         // Should fail because nvidia-ctk binary doesn't exist
-        assert!(
-            err.to_string().contains("nvidia-ctk"),
-            "error should mention the binary: {}",
-            err
-        );
+        assert!(err.to_string().contains("nvidia-ctk"));
     }
 
     #[test]
     fn test_nvidia_ctk_cdi_fails_without_binary() {
         let err = nvidia_ctk_cdi().unwrap_err();
         // Should fail because nvidia-ctk binary doesn't exist
-        assert!(
-            err.to_string().contains("nvidia-ctk"),
-            "error should mention the binary: {}",
-            err
-        );
+        assert!(err.to_string().contains("nvidia-ctk"));
     }
 }

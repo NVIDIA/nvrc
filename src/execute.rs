@@ -58,11 +58,7 @@ mod tests {
         let result = foreground("/bin/false", &[]);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("failed"),
-            "error should mention failure: {}",
-            err
-        );
+        assert!(err.contains("failed"));
     }
 
     #[test]
@@ -71,11 +67,7 @@ mod tests {
         let result = foreground("/nonexistent/command", &[]);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("execute"),
-            "error should mention execute: {}",
-            err
-        );
+        assert!(err.contains("execute"));
     }
 
     #[test]

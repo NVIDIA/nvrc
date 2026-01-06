@@ -41,11 +41,7 @@ mod tests {
         require_root();
         let err = load("nonexistent_module_xyz123").unwrap_err();
         // modprobe exits non-zero for missing modules
-        assert!(
-            err.to_string().contains("modprobe"),
-            "error should mention modprobe: {}",
-            err
-        );
+        assert!(err.to_string().contains("modprobe"));
     }
 
     #[test]
