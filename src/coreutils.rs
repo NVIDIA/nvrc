@@ -140,6 +140,7 @@ mod tests {
     // FIFO (named pipe) can be created without root, char devices need root
 
     #[test]
+    #[serial] // umask is process-global
     fn test_mknod_creates_fifo() {
         // FIFO doesn't require root - tests the mknod logic
         let tmpdir = TempDir::new().unwrap();
@@ -166,6 +167,7 @@ mod tests {
     }
 
     #[test]
+    #[serial] // umask is process-global
     fn test_mknod_replaces_existing_with_fifo() {
         let tmpdir = TempDir::new().unwrap();
         let fifopath = tmpdir.path().join("test_replace_fifo");
@@ -229,6 +231,7 @@ mod tests {
     }
 
     #[test]
+    #[serial] // umask is process-global
     fn test_mknod_error_nonexistent_parent() {
         // mknod fails when parent directory doesn't exist
         let result = mknod("/nonexistent/dir/fifo", SFlag::S_IFIFO, 0, 0);
