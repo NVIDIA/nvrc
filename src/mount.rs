@@ -77,15 +77,15 @@ fn mount_if_cached(
 /// Standard Unix convention: /dev/stdin, /dev/stdout, /dev/stderr should
 /// exist for programs that expect them. /dev/fd provides access to open
 /// file descriptors via /proc/self/fd.
-fn proc_symlinks() -> Result<()> {
+fn proc_symlinks(root: &str) -> Result<()> {
     for (src, dst) in [
-        ("/proc/kcore", "/dev/core"),
-        ("/proc/self/fd", "/dev/fd"),
-        ("/proc/self/fd/0", "/dev/stdin"),
-        ("/proc/self/fd/1", "/dev/stdout"),
-        ("/proc/self/fd/2", "/dev/stderr"),
+        ("/proc/kcore", "dev/core"),
+        ("/proc/self/fd", "dev/fd"),
+        ("/proc/self/fd/0", "dev/stdin"),
+        ("/proc/self/fd/1", "dev/stdout"),
+        ("/proc/self/fd/2", "dev/stderr"),
     ] {
-        ln(src, dst)?;
+        ln(src, &format!("{root}/{dst}"))?;
     }
     Ok(())
 }
@@ -95,14 +95,14 @@ fn proc_symlinks() -> Result<()> {
 /// - /dev/null: discard output, read returns EOF
 /// - /dev/zero: infinite stream of zeros
 /// - /dev/random, /dev/urandom: cryptographic randomness
-fn device_nodes() -> Result<()> {
+fn device_nodes(root: &str) -> Result<()> {
     for (path, minor) in [
-        ("/dev/null", 3u64),
-        ("/dev/zero", 5u64),
-        ("/dev/random", 8u64),
-        ("/dev/urandom", 9u64),
+        ("dev/null", 3u64),
+        ("dev/zero", 5u64),
+        ("dev/random", 8u64),
+        ("dev/urandom", 9u64),
     ] {
-        mknod(path, stat::SFlag::S_IFCHR, 1, minor)?; // major 1 = memory devices
+        mknod(&format!("{root}/{path}"), stat::SFlag::S_IFCHR, 1, minor)?; // major 1 = memory devices
     }
     Ok(())
 }
@@ -111,31 +111,64 @@ fn device_nodes() -> Result<()> {
 /// Creates /proc, /dev, /sys, /run, /tmp mounts and essential device nodes.
 /// Snapshot-based: reads mount state once to avoid TOCTOU races.
 pub fn setup() -> Result<()> {
+    setup_at("")
+}
+
+/// Internal: setup with configurable root path (for testing with temp directories).
+fn setup_at(root: &str) -> Result<()> {
     // Snapshot mount state once - consistent view, no TOCTOU
     let mounts = fs::read_to_string("/proc/mounts").unwrap_or_default();
     let filesystems = fs::read_to_string("/proc/filesystems").unwrap_or_default();
 
     let common = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
-    mount_cached(&mounts, "proc", "/proc", "proc", common, None)?;
+    mount_cached(
+        &mounts,
+        "proc",
+        &format!("{root}/proc"),
+        "proc",
+        common,
+        None,
+    )?;
     let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
     mount_cached(
         &mounts,
         "dev",
-        "/dev",
+        &format!("{root}/dev"),
         "devtmpfs",
         dev_flags,
         Some("mode=0755"),
     )?;
-    mount_cached(&mounts, "sysfs", "/sys", "sysfs", common, None)?;
-    mount_cached(&mounts, "run", "/run", "tmpfs", common, Some("mode=0755"))?;
+    mount_cached(
+        &mounts,
+        "sysfs",
+        &format!("{root}/sys"),
+        "sysfs",
+        common,
+        None,
+    )?;
+    mount_cached(
+        &mounts,
+        "run",
+        &format!("{root}/run"),
+        "tmpfs",
+        common,
+        Some("mode=0755"),
+    )?;
     let tmp_flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
-    mount_cached(&mounts, "tmpfs", "/tmp", "tmpfs", tmp_flags, None)?;
+    mount_cached(
+        &mounts,
+        "tmpfs",
+        &format!("{root}/tmp"),
+        "tmpfs",
+        tmp_flags,
+        None,
+    )?;
     mount_if_cached(
         &mounts,
         &filesystems,
         "securityfs",
         "securityfs",
-        "/sys/kernel/security",
+        &format!("{root}/sys/kernel/security"),
         common,
         None,
     )?;
@@ -144,12 +177,12 @@ pub fn setup() -> Result<()> {
         &filesystems,
         "efivarfs",
         "efivarfs",
-        "/sys/firmware/efi/efivars",
+        &format!("{root}/sys/firmware/efi/efivars"),
         common,
         None,
     )?;
-    proc_symlinks()?;
-    device_nodes()?;
+    proc_symlinks(root)?;
+    device_nodes(root)?;
     Ok(())
 }
 
@@ -299,7 +332,7 @@ mod tests {
         // These symlinks already exist on any Linux system.
         // ln() is idempotent - returns Ok if already correct.
         require_root();
-        assert!(proc_symlinks().is_ok());
+        assert!(proc_symlinks("").is_ok());
     }
 
     #[test]
@@ -307,9 +340,46 @@ mod tests {
         // mknod() removes existing nodes first, then recreates.
         // Safe: just recreates /dev/null, /dev/zero, etc. with same params.
         require_root();
-        assert!(device_nodes().is_ok());
+        assert!(device_nodes("").is_ok());
     }
 
-    // === setup() is dangerous - mounts filesystems ===
-    // Only test in ephemeral VMs, not on development machines.
+    // === setup_at() tests with temp directory ===
+
+    #[test]
+    fn test_setup_at_with_temp_root() {
+        use nix::mount::umount;
+        use tempfile::TempDir;
+
+        require_root();
+
+        let tmpdir = TempDir::new().unwrap();
+        let root = tmpdir.path().to_str().unwrap();
+
+        // Create required directories
+        for dir in ["proc", "dev", "sys", "run", "tmp"] {
+            fs::create_dir_all(format!("{root}/{dir}")).unwrap();
+        }
+
+        // Run setup_at with temp root
+        let result = setup_at(root);
+        assert!(result.is_ok(), "setup_at failed: {:?}", result);
+
+        // Verify mounts happened
+        let mounts = fs::read_to_string("/proc/mounts").unwrap();
+        assert!(is_mounted_in(&mounts, &format!("{root}/run")));
+        assert!(is_mounted_in(&mounts, &format!("{root}/tmp")));
+
+        // Verify device nodes were created
+        assert!(Path::new(&format!("{root}/dev/null")).exists());
+        assert!(Path::new(&format!("{root}/dev/zero")).exists());
+
+        // Verify symlinks were created
+        assert!(Path::new(&format!("{root}/dev/stdin")).is_symlink());
+        assert!(Path::new(&format!("{root}/dev/stdout")).is_symlink());
+
+        // Cleanup: unmount in reverse order
+        for dir in ["tmp", "run", "sys", "dev", "proc"] {
+            let _ = umount(format!("{root}/{dir}").as_str());
+        }
+    }
 }
