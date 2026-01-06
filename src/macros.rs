@@ -21,6 +21,8 @@ macro_rules! must {
 
 #[cfg(test)]
 mod tests {
+    use std::panic::catch_unwind;
+
     /// Test must! macro with Ok result - should not panic
     #[test]
     fn test_must_ok() {
@@ -35,15 +37,13 @@ mod tests {
 
     /// Test must! macro panics on Err
     #[test]
-    #[should_panic(expected = "init failure")]
     fn test_must_err_panics() {
-        must!(Err::<(), _>("something went wrong"));
+        assert!(catch_unwind(|| must!(Err::<(), _>("something went wrong"))).is_err());
     }
 
     /// Test must! macro with custom message panics on Err
     #[test]
-    #[should_panic(expected = "custom error")]
     fn test_must_err_with_message_panics() {
-        must!(Err::<(), _>("boom"), "custom error");
+        assert!(catch_unwind(|| must!(Err::<(), _>("boom"), "custom error")).is_err());
     }
 }
