@@ -30,7 +30,8 @@ pub fn set_panic_hook() {
 /// Production uses power_off(); tests inject a no-op to avoid rebooting.
 fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) {
     panic::set_hook(Box::new(move |panic_info| {
-        log::error!("panic: {panic_info}");
+        // fd 1,2 are always available from the kernel
+        eprintln!("panic: {panic_info}");
         sync();
         shutdown();
     }));
