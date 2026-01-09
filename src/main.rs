@@ -57,7 +57,6 @@ fn main() {
     let modes: HashMap<&str, ModeFn> = HashMap::from([
         ("gpu", mode_gpu as ModeFn), // closure |_| {} captures nothing,
         ("cpu", (|_| {}) as ModeFn), // Rust coerces it to a fn pointer.
-
     ]);
 
     must!(lockdown::set_panic_hook());
