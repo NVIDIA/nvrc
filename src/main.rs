@@ -35,6 +35,7 @@ type ModeFn = fn(&mut NVRC);
 /// VMs with GPU passthrough need driver setup, clock tuning,
 /// and monitoring daemons before workloads can use the GPU.
 fn mode_gpu(init: &mut NVRC) {
+    must!(modprobe::load("nvidia"));
     must!(modprobe::load("nvidia-uvm"));
 
     must!(init.nvidia_smi_lmc());
