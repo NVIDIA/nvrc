@@ -24,14 +24,43 @@ mod test_utils;
 extern crate log;
 extern crate kernlog;
 
+use std::collections::HashMap;
+
 use kata_agent::SYSLOG_POLL_FOREVER as POLL_FOREVER;
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
 
-/// Main entry point - orchestrates the init sequence.
-/// Each step is tested individually; this is integration glue.
+type ModeFn = fn(&mut NVRC);
+
+/// VMs with GPU passthrough need driver setup, clock tuning,
+/// and monitoring daemons before workloads can use the GPU.
+fn mode_gpu(init: &mut NVRC) {
+    must!(modprobe::load("nvidia"));
+    must!(modprobe::load("nvidia-uvm"));
+
+    must!(init.nvidia_smi_lmc());
+    must!(init.nvidia_smi_lgc());
+    must!(init.nvidia_smi_pl());
+
+    must!(init.nvidia_persistenced());
+
+    must!(init.nv_hostengine());
+    must!(init.dcgm_exporter());
+    must!(init.nv_fabricmanager());
+    must!(nvidia_ctk_cdi());
+    must!(init.nvidia_smi_srs());
+    must!(init.check_daemons());
+}
+
 fn main() {
-    lockdown::set_panic_hook();
+    // Dispatch table allows adding new modes (nvswitch, debug, etc.) without
+    // touching control flow—just register a function.
+    let modes: HashMap<&str, ModeFn> = HashMap::from([
+        ("gpu", mode_gpu as ModeFn), // closure |_| {} captures nothing,
+        ("cpu", (|_| {}) as ModeFn), // Rust coerces it to a fn pointer.
+    ]);
+
+    must!(lockdown::set_panic_hook());
     let mut init = NVRC::default();
     must!(mount::setup());
     must!(kmsg::kernlog_setup());
@@ -39,20 +68,12 @@ fn main() {
     must!(mount::readonly("/"));
     must!(init.process_kernel_params(None));
 
-    must!(modprobe::load("nvidia-uvm"));
-
-    must!(init.nvidia_smi_lmcd());
-    must!(init.nvidia_smi_lgc());
-    must!(init.nvidia_smi_pl());
-
-    must!(init.nvidia_persistenced());
+    // Kernel param nvrc.mode selects runtime behavior; GPU is the safe default
+    // since most users expect full GPU functionality.
+    let mode = init.mode.as_deref().unwrap_or("gpu");
+    let setup = modes.get(mode).copied().unwrap_or(mode_gpu);
+    setup(&mut init);
 
     must!(lockdown::disable_modules_loading());
-    must!(init.nv_hostengine());
-    must!(init.dcgm_exporter());
-    must!(init.nv_fabricmanager());
-    must!(nvidia_ctk_cdi());
-    must!(init.nvidia_smi_srs());
-    must!(init.check_daemons());
     must!(kata_agent::fork_agent(POLL_FOREVER));
 }

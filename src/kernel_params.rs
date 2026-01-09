@@ -29,19 +29,28 @@ impl NVRC {
 
         for (k, v) in content.split_whitespace().filter_map(|p| p.split_once('=')) {
             match k {
+                "nvrc.mode" => nvrc_mode(v, self)?,
                 "nvrc.log" => nvrc_log(v, self)?,
                 "nvrc.uvm.persistence.mode" => uvm_persistenced_mode(v, self)?,
                 "nvrc.dcgm" => nvrc_dcgm(v, self)?,
                 "nvrc.fabricmanager" => nvrc_fabricmanager(v, self)?,
                 "nvrc.smi.srs" => nvidia_smi_srs(v, self)?,
                 "nvrc.smi.lgc" => nvidia_smi_lgc(v, self)?,
-                "nvrc.smi.lmcd" => nvidia_smi_lmcd(v, self)?,
+                "nvrc.smi.lmc" => nvidia_smi_lmc(v, self)?,
                 "nvrc.smi.pl" => nvidia_smi_pl(v, self)?,
                 _ => {}
             }
         }
         Ok(())
     }
+}
+
+/// Operation mode: "gpu" (default) or "cpu" (skip GPU management).
+/// Use nvrc.mode=cpu for CPU-only workloads that don't need GPU initialization.
+fn nvrc_mode(value: &str, ctx: &mut NVRC) -> Result<()> {
+    ctx.mode = Some(value.to_lowercase());
+    debug!("nvrc.mode: {}", value);
+    Ok(())
 }
 
 /// DCGM (Data Center GPU Manager) provides telemetry and health monitoring.
@@ -100,10 +109,10 @@ fn nvidia_smi_lgc(value: &str, ctx: &mut NVRC) -> Result<()> {
 
 /// Lock memory clocks to a fixed frequency (MHz). Requires driver reload to take effect.
 /// Used alongside lgc for fully deterministic GPU behavior.
-fn nvidia_smi_lmcd(value: &str, ctx: &mut NVRC) -> Result<()> {
-    let mhz: u32 = value.parse().context("nvrc.smi.lmcd: invalid frequency")?;
-    debug!("nvrc.smi.lmcd: {} MHz (all GPUs)", mhz);
-    ctx.nvidia_smi_lmcd = Some(mhz);
+fn nvidia_smi_lmc(value: &str, ctx: &mut NVRC) -> Result<()> {
+    let mhz: u32 = value.parse().context("nvrc.smi.lmc: invalid frequency")?;
+    debug!("nvrc.smi.lmc: {} MHz (all GPUs)", mhz);
+    ctx.nvidia_smi_lmc = Some(mhz);
     Ok(())
 }
 
@@ -128,10 +137,8 @@ fn uvm_persistenced_mode(value: &str, ctx: &mut NVRC) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nix::unistd::Uid;
+    use crate::test_utils::require_root;
     use serial_test::serial;
-    use std::env;
-    use std::process::Command;
     use std::sync::{LazyLock, Once};
 
     static LOG: LazyLock<Once> = LazyLock::new(Once::new);
@@ -142,31 +149,10 @@ mod tests {
         });
     }
 
-    fn rerun_with_sudo() {
-        let args: Vec<String> = env::args().collect();
-        let output = Command::new("sudo").args(&args).status();
-
-        match output {
-            Ok(o) => {
-                if o.success() {
-                    println!("running with sudo")
-                } else {
-                    panic!("not running with sudo")
-                }
-            }
-            Err(e) => {
-                panic!("Failed to escalate privileges: {e:?}")
-            }
-        }
-    }
-
     #[test]
     #[serial]
     fn test_nvrc_log_debug() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut c = NVRC::default();
 
@@ -177,10 +163,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_debug() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -196,10 +179,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_info() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -215,10 +195,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_0() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -230,10 +207,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_none() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -245,10 +219,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_trace() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -259,10 +230,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_unknown() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -369,17 +337,17 @@ mod tests {
     }
 
     #[test]
-    fn test_nvidia_smi_lmcd() {
+    fn test_nvidia_smi_lmc() {
         let mut c = NVRC::default();
 
-        nvidia_smi_lmcd("5001", &mut c).unwrap();
-        assert_eq!(c.nvidia_smi_lmcd, Some(5001));
+        nvidia_smi_lmc("5001", &mut c).unwrap();
+        assert_eq!(c.nvidia_smi_lmc, Some(5001));
 
-        nvidia_smi_lmcd("6000", &mut c).unwrap();
-        assert_eq!(c.nvidia_smi_lmcd, Some(6000));
+        nvidia_smi_lmc("6000", &mut c).unwrap();
+        assert_eq!(c.nvidia_smi_lmc, Some(6000));
 
         // Invalid value should error
-        assert!(nvidia_smi_lmcd("not_a_number", &mut c).is_err());
+        assert!(nvidia_smi_lmc("not_a_number", &mut c).is_err());
     }
 
     #[test]
@@ -400,11 +368,11 @@ mod tests {
     fn test_process_kernel_params_gpu_settings() {
         let mut c = NVRC::default();
 
-        c.process_kernel_params(Some("nvrc.smi.lgc=1500 nvrc.smi.lmcd=5001 nvrc.smi.pl=300"))
+        c.process_kernel_params(Some("nvrc.smi.lgc=1500 nvrc.smi.lmc=5001 nvrc.smi.pl=300"))
             .unwrap();
 
         assert_eq!(c.nvidia_smi_lgc, Some(1500));
-        assert_eq!(c.nvidia_smi_lmcd, Some(5001));
+        assert_eq!(c.nvidia_smi_lmc, Some(5001));
         assert_eq!(c.nvidia_smi_pl, Some(300));
     }
 
@@ -443,5 +411,27 @@ mod tests {
         assert_eq!(c.fabricmanager_enabled, Some(true));
         assert_eq!(c.uvm_persistence_mode, Some(true));
         assert_eq!(c.nvidia_smi_srs, Some("enabled".to_owned()));
+    }
+
+    #[test]
+    fn test_nvrc_mode() {
+        let mut c = NVRC::default();
+
+        nvrc_mode("cpu", &mut c).unwrap();
+        assert_eq!(c.mode, Some("cpu".to_owned()));
+
+        nvrc_mode("GPU", &mut c).unwrap();
+        assert_eq!(c.mode, Some("gpu".to_owned())); // normalized to lowercase
+    }
+
+    #[test]
+    fn test_process_kernel_params_with_mode() {
+        let mut c = NVRC::default();
+
+        c.process_kernel_params(Some("nvrc.mode=cpu nvrc.dcgm=on"))
+            .unwrap();
+
+        assert_eq!(c.mode, Some("cpu".to_owned()));
+        assert_eq!(c.dcgm_enabled, Some(true));
     }
 }
