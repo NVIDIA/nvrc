@@ -137,10 +137,8 @@ fn uvm_persistenced_mode(value: &str, ctx: &mut NVRC) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nix::unistd::Uid;
+    use crate::test_utils::require_root;
     use serial_test::serial;
-    use std::env;
-    use std::process::Command;
     use std::sync::{LazyLock, Once};
 
     static LOG: LazyLock<Once> = LazyLock::new(Once::new);
@@ -151,31 +149,10 @@ mod tests {
         });
     }
 
-    fn rerun_with_sudo() {
-        let args: Vec<String> = env::args().collect();
-        let output = Command::new("sudo").args(&args).status();
-
-        match output {
-            Ok(o) => {
-                if o.success() {
-                    println!("running with sudo")
-                } else {
-                    panic!("not running with sudo")
-                }
-            }
-            Err(e) => {
-                panic!("Failed to escalate privileges: {e:?}")
-            }
-        }
-    }
-
     #[test]
     #[serial]
     fn test_nvrc_log_debug() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut c = NVRC::default();
 
@@ -186,10 +163,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_debug() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -205,10 +179,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_info() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -224,10 +195,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_0() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -239,10 +207,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_none() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -254,10 +219,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_trace() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -268,10 +230,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_process_kernel_params_nvrc_log_unknown() {
-        if !Uid::effective().is_root() {
-            return rerun_with_sudo();
-        }
-
+        require_root();
         log_setup();
         let mut init = NVRC::default();
 
@@ -452,5 +411,27 @@ mod tests {
         assert_eq!(c.fabricmanager_enabled, Some(true));
         assert_eq!(c.uvm_persistence_mode, Some(true));
         assert_eq!(c.nvidia_smi_srs, Some("enabled".to_owned()));
+    }
+
+    #[test]
+    fn test_nvrc_mode() {
+        let mut c = NVRC::default();
+
+        nvrc_mode("cpu", &mut c).unwrap();
+        assert_eq!(c.mode, Some("cpu".to_owned()));
+
+        nvrc_mode("GPU", &mut c).unwrap();
+        assert_eq!(c.mode, Some("gpu".to_owned())); // normalized to lowercase
+    }
+
+    #[test]
+    fn test_process_kernel_params_with_mode() {
+        let mut c = NVRC::default();
+
+        c.process_kernel_params(Some("nvrc.mode=cpu nvrc.dcgm=on"))
+            .unwrap();
+
+        assert_eq!(c.mode, Some("cpu".to_owned()));
+        assert_eq!(c.dcgm_enabled, Some(true));
     }
 }
