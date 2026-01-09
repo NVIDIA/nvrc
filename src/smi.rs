@@ -4,7 +4,6 @@
 //! All are optional—if the kernel param isn't set, they return Ok immediately.
 
 use crate::execute::foreground;
-use crate::modprobe;
 use crate::nvrc::NVRC;
 use anyhow::Result;
 
@@ -13,13 +12,11 @@ const NVIDIA_SMI: &str = "/bin/nvidia-smi";
 impl NVRC {
     /// Lock memory clocks to a specific frequency (MHz).
     /// Reduces memory clock jitter for latency-sensitive workloads.
-    /// Requires driver reload to take effect.
-    pub fn nvidia_smi_lmcd(&self) -> Result<()> {
-        let Some(mhz) = self.nvidia_smi_lmcd else {
+    pub fn nvidia_smi_lmc(&self) -> Result<()> {
+        let Some(mhz) = self.nvidia_smi_lmc else {
             return Ok(());
         };
-        foreground(NVIDIA_SMI, &["-lmcd", &mhz.to_string()])?;
-        modprobe::reload_nvidia_modules()
+        foreground(NVIDIA_SMI, &["-lmc", &mhz.to_string()])
     }
 
     /// Lock GPU core clocks to a specific frequency (MHz).
@@ -59,9 +56,9 @@ mod tests {
     // When fields are None, functions return Ok immediately (no nvidia-smi call)
 
     #[test]
-    fn test_lmcd_none() {
+    fn test_lmc_none() {
         let nvrc = NVRC::default();
-        assert!(nvrc.nvidia_smi_lmcd().is_ok());
+        assert!(nvrc.nvidia_smi_lmc().is_ok());
     }
 
     #[test]
@@ -85,10 +82,10 @@ mod tests {
     // When fields are Some, nvidia-smi is called (fails without NVIDIA hardware)
 
     #[test]
-    fn test_lmcd_some_fails_without_nvidia_smi() {
+    fn test_lmc_some_fails_without_nvidia_smi() {
         let mut nvrc = NVRC::default();
-        nvrc.nvidia_smi_lmcd = Some(1000);
-        let err = nvrc.nvidia_smi_lmcd().unwrap_err();
+        nvrc.nvidia_smi_lmc = Some(1000);
+        let err = nvrc.nvidia_smi_lmc().unwrap_err();
         // Should fail mentioning nvidia-smi binary
         assert!(
             err.to_string().contains("nvidia-smi"),

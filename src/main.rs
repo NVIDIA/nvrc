@@ -37,7 +37,7 @@ type ModeFn = fn(&mut NVRC);
 fn mode_gpu(init: &mut NVRC) {
     must!(modprobe::load("nvidia-uvm"));
 
-    must!(init.nvidia_smi_lmcd());
+    must!(init.nvidia_smi_lmc());
     must!(init.nvidia_smi_lgc());
     must!(init.nvidia_smi_pl());
 

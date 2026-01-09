@@ -14,13 +14,13 @@ use std::process::Child;
 pub struct NVRC {
     /// Operation mode: "gpu" (default) or "cpu" (skip GPU management)
     pub mode: Option<String>,
-    /// nvidia-smi -srs: Enable/disable performance states
+    /// Set/unset ready state
     pub nvidia_smi_srs: Option<String>,
-    /// nvidia-smi -lgc: Lock GPU clocks to specific frequency
+    /// Lock GPU clocks to specific frequency
     pub nvidia_smi_lgc: Option<u32>,
-    /// nvidia-smi -lmcd: Lock memory clocks to specific frequency
-    pub nvidia_smi_lmcd: Option<u32>,
-    /// nvidia-smi -pl: Set power limit in watts
+    /// Lock memory clocks to specific frequency
+    pub nvidia_smi_lmc: Option<u32>,
+    /// Set power limit in watts
     pub nvidia_smi_pl: Option<u32>,
     /// Enable UVM persistence mode for unified memory optimization
     pub uvm_persistence_mode: Option<bool>,

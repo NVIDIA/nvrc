@@ -36,7 +36,7 @@ impl NVRC {
                 "nvrc.fabricmanager" => nvrc_fabricmanager(v, self)?,
                 "nvrc.smi.srs" => nvidia_smi_srs(v, self)?,
                 "nvrc.smi.lgc" => nvidia_smi_lgc(v, self)?,
-                "nvrc.smi.lmcd" => nvidia_smi_lmcd(v, self)?,
+                "nvrc.smi.lmcd" => nvidia_smi_lmc(v, self)?,
                 "nvrc.smi.pl" => nvidia_smi_pl(v, self)?,
                 _ => {}
             }
@@ -109,10 +109,10 @@ fn nvidia_smi_lgc(value: &str, ctx: &mut NVRC) -> Result<()> {
 
 /// Lock memory clocks to a fixed frequency (MHz). Requires driver reload to take effect.
 /// Used alongside lgc for fully deterministic GPU behavior.
-fn nvidia_smi_lmcd(value: &str, ctx: &mut NVRC) -> Result<()> {
-    let mhz: u32 = value.parse().context("nvrc.smi.lmcd: invalid frequency")?;
-    debug!("nvrc.smi.lmcd: {} MHz (all GPUs)", mhz);
-    ctx.nvidia_smi_lmcd = Some(mhz);
+fn nvidia_smi_lmc(value: &str, ctx: &mut NVRC) -> Result<()> {
+    let mhz: u32 = value.parse().context("nvrc.smi.lmc: invalid frequency")?;
+    debug!("nvrc.smi.lmc: {} MHz (all GPUs)", mhz);
+    ctx.nvidia_smi_lmc = Some(mhz);
     Ok(())
 }
 
@@ -381,14 +381,14 @@ mod tests {
     fn test_nvidia_smi_lmcd() {
         let mut c = NVRC::default();
 
-        nvidia_smi_lmcd("5001", &mut c).unwrap();
-        assert_eq!(c.nvidia_smi_lmcd, Some(5001));
+        nvidia_smi_lmc("5001", &mut c).unwrap();
+        assert_eq!(c.nvidia_smi_lmc, Some(5001));
 
-        nvidia_smi_lmcd("6000", &mut c).unwrap();
-        assert_eq!(c.nvidia_smi_lmcd, Some(6000));
+        nvidia_smi_lmc("6000", &mut c).unwrap();
+        assert_eq!(c.nvidia_smi_lmc, Some(6000));
 
         // Invalid value should error
-        assert!(nvidia_smi_lmcd("not_a_number", &mut c).is_err());
+        assert!(nvidia_smi_lmc("not_a_number", &mut c).is_err());
     }
 
     #[test]
@@ -413,7 +413,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(c.nvidia_smi_lgc, Some(1500));
-        assert_eq!(c.nvidia_smi_lmcd, Some(5001));
+        assert_eq!(c.nvidia_smi_lmc, Some(5001));
         assert_eq!(c.nvidia_smi_pl, Some(300));
     }
 
