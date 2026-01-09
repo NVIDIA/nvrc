@@ -12,6 +12,8 @@ use std::process::Child;
 #[derive(Default)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
+    /// Operation mode: "gpu" (default) or "cpu" (skip GPU management)
+    pub mode: Option<String>,
     /// nvidia-smi -srs: Enable/disable performance states
     pub nvidia_smi_srs: Option<String>,
     /// nvidia-smi -lgc: Lock GPU clocks to specific frequency
@@ -61,6 +63,7 @@ mod tests {
     #[test]
     fn test_default() {
         let nvrc = NVRC::default();
+        assert!(nvrc.mode.is_none());
         assert!(nvrc.nvidia_smi_srs.is_none());
         assert!(nvrc.nvidia_smi_lgc.is_none());
         assert!(nvrc.children.is_empty());

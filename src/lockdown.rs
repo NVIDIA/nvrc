@@ -22,19 +22,20 @@ fn power_off() {
 /// with potential data exposure. Power-off ensures clean termination—the host
 /// hypervisor will see the VM exit and can handle cleanup appropriately.
 /// sync() flushes pending writes before power-off to preserve any logs.
-pub fn set_panic_hook() {
+pub fn set_panic_hook() -> Result<()> {
     set_panic_hook_with(power_off)
 }
 
 /// Internal: panic handler with configurable shutdown (for unit tests).
 /// Production uses power_off(); tests inject a no-op to avoid rebooting.
-fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) {
+fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) -> Result<()> {
     panic::set_hook(Box::new(move |panic_info| {
         // fd 1,2 are always available from the kernel
         eprintln!("panic: {panic_info}");
         sync();
         shutdown();
     }));
+    Ok(())
 }
 
 /// Permanently disable kernel module loading for this boot.
@@ -60,7 +61,7 @@ mod tests {
         let called_clone = called.clone();
 
         // Install hook with test closure
-        set_panic_hook_with(move || {
+        let _ = set_panic_hook_with(move || {
             called_clone.store(true, Ordering::SeqCst);
         });
 
@@ -92,7 +93,7 @@ mod tests {
     #[test]
     fn test_set_panic_hook() {
         // Installs the real hook (with power_off) - just don't trigger it!
-        set_panic_hook();
+        let _ = set_panic_hook();
         // If we got here, the hook was installed successfully
     }
 }

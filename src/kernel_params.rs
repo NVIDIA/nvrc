@@ -29,6 +29,7 @@ impl NVRC {
 
         for (k, v) in content.split_whitespace().filter_map(|p| p.split_once('=')) {
             match k {
+                "nvrc.mode" => nvrc_mode(v, self)?,
                 "nvrc.log" => nvrc_log(v, self)?,
                 "nvrc.uvm.persistence.mode" => uvm_persistenced_mode(v, self)?,
                 "nvrc.dcgm" => nvrc_dcgm(v, self)?,
@@ -42,6 +43,14 @@ impl NVRC {
         }
         Ok(())
     }
+}
+
+/// Operation mode: "gpu" (default) or "cpu" (skip GPU management).
+/// Use nvrc.mode=cpu for CPU-only workloads that don't need GPU initialization.
+fn nvrc_mode(value: &str, ctx: &mut NVRC) -> Result<()> {
+    ctx.mode = Some(value.to_lowercase());
+    debug!("nvrc.mode: {}", value);
+    Ok(())
 }
 
 /// DCGM (Data Center GPU Manager) provides telemetry and health monitoring.
