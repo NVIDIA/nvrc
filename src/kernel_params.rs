@@ -36,7 +36,7 @@ impl NVRC {
                 "nvrc.fabricmanager" => nvrc_fabricmanager(v, self)?,
                 "nvrc.smi.srs" => nvidia_smi_srs(v, self)?,
                 "nvrc.smi.lgc" => nvidia_smi_lgc(v, self)?,
-                "nvrc.smi.lmcd" => nvidia_smi_lmc(v, self)?,
+                "nvrc.smi.lmc" => nvidia_smi_lmc(v, self)?,
                 "nvrc.smi.pl" => nvidia_smi_pl(v, self)?,
                 _ => {}
             }
@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn test_nvidia_smi_lmcd() {
+    fn test_nvidia_smi_lmc() {
         let mut c = NVRC::default();
 
         nvidia_smi_lmc("5001", &mut c).unwrap();
@@ -368,7 +368,7 @@ mod tests {
     fn test_process_kernel_params_gpu_settings() {
         let mut c = NVRC::default();
 
-        c.process_kernel_params(Some("nvrc.smi.lgc=1500 nvrc.smi.lmcd=5001 nvrc.smi.pl=300"))
+        c.process_kernel_params(Some("nvrc.smi.lgc=1500 nvrc.smi.lmc=5001 nvrc.smi.pl=300"))
             .unwrap();
 
         assert_eq!(c.nvidia_smi_lgc, Some(1500));
