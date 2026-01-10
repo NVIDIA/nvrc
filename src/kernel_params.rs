@@ -422,6 +422,12 @@ mod tests {
 
         nvrc_mode("GPU", &mut c).unwrap();
         assert_eq!(c.mode, Some("gpu".to_owned())); // normalized to lowercase
+
+        nvrc_mode("nvswitch-nvl4", &mut c).unwrap();
+        assert_eq!(c.mode, Some("nvswitch-nvl4".to_owned()));
+
+        nvrc_mode("NVSWITCH-NVL4", &mut c).unwrap();
+        assert_eq!(c.mode, Some("nvswitch-nvl4".to_owned())); // normalized to lowercase
     }
 
     #[test]
@@ -433,5 +439,15 @@ mod tests {
 
         assert_eq!(c.mode, Some("cpu".to_owned()));
         assert_eq!(c.dcgm_enabled, Some(true));
+    }
+
+    #[test]
+    fn test_process_kernel_params_nvswitch_nvl4_mode() {
+        let mut c = NVRC::default();
+
+        c.process_kernel_params(Some("nvrc.mode=nvswitch-nvl4"))
+            .unwrap();
+
+        assert_eq!(c.mode, Some("nvswitch-nvl4".to_owned()));
     }
 }

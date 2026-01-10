@@ -52,12 +52,25 @@ fn mode_gpu(init: &mut NVRC) {
     must!(init.check_daemons());
 }
 
+/// NVSwitch NVL4 mode for HGX H100/H200/H800 systems.
+/// Loads NVIDIA driver and starts fabric manager for NVLink 4.0 topologies.
+/// Used for NVSwitch configurations without GPU compute workloads.
+/// Automatically enables fabricmanager regardless of kernel parameters.
+fn mode_nvswitch_nvl4(init: &mut NVRC) {
+    // Override kernel parameter: always enable fabricmanager for nvswitch mode
+    init.fabricmanager_enabled = Some(true);
+
+    must!(modprobe::load("nvidia"));
+    must!(init.nv_fabricmanager());
+    must!(init.check_daemons());
+}
+
 fn main() {
-    // Dispatch table allows adding new modes (nvswitch, debug, etc.) without
-    // touching control flow—just register a function.
+    // Dispatch table allows adding new modes without touching control flow.
     let modes: HashMap<&str, ModeFn> = HashMap::from([
-        ("gpu", mode_gpu as ModeFn), // closure |_| {} captures nothing,
-        ("cpu", (|_| {}) as ModeFn), // Rust coerces it to a fn pointer.
+        ("gpu", mode_gpu as ModeFn),
+        ("cpu", (|_| {}) as ModeFn),
+        ("nvswitch-nvl4", mode_nvswitch_nvl4 as ModeFn),
     ]);
 
     must!(lockdown::set_panic_hook());

@@ -25,23 +25,20 @@ A minimal init system (PID 1) for ephemeral NVIDIA GPU-enabled VMs running under
 │  5. Remount / as read-only (security hardening)                 │
 │  6. Parse kernel parameters (/proc/cmdline)                     │
 │                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              Mode Selection (nvrc.mode)                   │  │
-│  │  ┌────────────────────┐     ┌────────────────────────┐   │  │
-│  │  │   GPU Mode (default)│     │     CPU Mode          │   │  │
-│  │  │  • Load nvidia.ko   │     │  • Skip GPU setup     │   │  │
-│  │  │  • Load nvidia-uvm  │     │  • Jump to kata-agent │   │  │
-│  │  │  • Lock clocks (lgc)│     │                       │   │  │
-│  │  │  • Lock memory (lmc)│     │                       │   │  │
-│  │  │  • Set power limit  │     │                       │   │  │
-│  │  │  • Start persistenced│    │                       │   │  │
-│  │  │  • Start hostengine │     │                       │   │  │
-│  │  │  • Start dcgm-exporter│   │                       │   │  │
-│  │  │  • Start fabricmanager│   │                       │   │  │
-│  │  │  • Generate CDI spec│     │                       │   │  │
-│  │  │  • Configure SRS    │     │                       │   │  │
-│  │  └────────────────────┘     └────────────────────────┘   │  │
-│  └──────────────────────────────────────────────────────────┘  │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │                    Mode Selection (nvrc.mode)                          │  │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐ │  │
+│  │  │ GPU Mode (default)│  │   CPU Mode       │  │ NVSwitch-NVL4 Mode   │ │  │
+│  │  │ • Load nvidia.ko  │  │ • Skip GPU setup │  │ (HGX H100/H200/H800) │ │  │
+│  │  │ • Load nvidia-uvm │  │ • Jump to        │  │ • Load nvidia.ko     │ │  │
+│  │  │ • Lock clocks     │  │   kata-agent     │  │ • Start fabricmanager│ │  │
+│  │  │ • Lock memory     │  │                  │  │ • Check daemons      │ │  │
+│  │  │ • Set power limit │  │                  │  │ • Jump to kata-agent │ │  │
+│  │  │ • Start daemons   │  │                  │  │                      │ │  │
+│  │  │ • Generate CDI    │  │                  │  │                      │ │  │
+│  │  │ • Configure SRS   │  │                  │  │                      │ │  │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────────┘ │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │  7. Check daemon health (fail if any crashed)                   │
 │  8. Disable kernel module loading (lockdown)                    │
@@ -58,7 +55,7 @@ NVRC is configured entirely via kernel command-line parameters (no config files)
 
 | Parameter | Values | Default | Description |
 |-----------|--------|---------|-------------|
-| `nvrc.mode` | `gpu`, `cpu` | `gpu` | Operation mode. Use `cpu` for CPU-only workloads. |
+| `nvrc.mode` | `gpu`, `cpu`, `nvswitch-nvl4` | `gpu` | Operation mode. Use `cpu` for CPU-only, `nvswitch-nvl4` for HGX H100/H200/H800 NVLink 4.0 topologies. |
 | `nvrc.log` | `off`, `error`, `warn`, `info`, `debug`, `trace` | `off` | Log verbosity level. Also enables `/proc/sys/kernel/printk_devkmsg`. |
 
 ### GPU Configuration
@@ -88,6 +85,11 @@ nvrc.mode=gpu
 **CPU-only mode:**
 ```
 nvrc.mode=cpu
+```
+
+**NVSwitch NVL4 mode (HGX H100/H200/H800 NVLink 4.0 topologies):**
+```
+nvrc.mode=nvswitch-nvl4
 ```
 
 **GPU with locked clocks for benchmarking:**
