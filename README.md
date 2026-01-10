@@ -25,23 +25,20 @@ A minimal init system (PID 1) for ephemeral NVIDIA GPU-enabled VMs running under
 │  5. Remount / as read-only (security hardening)                 │
 │  6. Parse kernel parameters (/proc/cmdline)                     │
 │                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              Mode Selection (nvrc.mode)                   │  │
-│  │  ┌────────────────────┐     ┌────────────────────────┐   │  │
-│  │  │   GPU Mode (default)│     │     CPU Mode          │   │  │
-│  │  │  • Load nvidia.ko   │     │  • Skip GPU setup     │   │  │
-│  │  │  • Load nvidia-uvm  │     │  • Jump to kata-agent │   │  │
-│  │  │  • Lock clocks (lgc)│     │                       │   │  │
-│  │  │  • Lock memory (lmc)│     │                       │   │  │
-│  │  │  • Set power limit  │     │                       │   │  │
-│  │  │  • Start persistenced│    │                       │   │  │
-│  │  │  • Start hostengine │     │                       │   │  │
-│  │  │  • Start dcgm-exporter│   │                       │   │  │
-│  │  │  • Start fabricmanager│   │                       │   │  │
-│  │  │  • Generate CDI spec│     │                       │   │  │
-│  │  │  • Configure SRS    │     │                       │   │  │
-│  │  └────────────────────┘     └────────────────────────┘   │  │
-│  └──────────────────────────────────────────────────────────┘  │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐  │
+│  │                       Mode Selection (nvrc.mode)                            │  │
+│  │  ┌────────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │  │
+│  │  │ GPU (default)  │  │  CPU Mode    │  │ NVSwitch-NVL4│  │ NVSwitch-NVL5│ │  │
+│  │  │ • nvidia.ko    │  │ • Skip GPU   │  │ (H100/H200)  │  │ (B200/B300)  │ │  │
+│  │  │ • nvidia-uvm   │  │ • Jump to    │  │ • nvidia.ko  │  │ • ib_umad    │ │  │
+│  │  │ • Lock clocks  │  │   kata-agent │  │ • fabric-mgr │  │ • fabric-mgr │ │  │
+│  │  │ • Lock memory  │  │              │  │ • Check daemons│ │ • NVLSM auto │ │  │
+│  │  │ • Power limit  │  │              │  │ • Jump agent │  │ • Jump agent │ │  │
+│  │  │ • Daemons      │  │              │  │              │  │              │ │  │
+│  │  │ • CDI spec     │  │              │  │              │  │              │ │  │
+│  │  │ • SRS config   │  │              │  │              │  │              │ │  │
+│  │  └────────────────┘  └──────────────┘  └──────────────┘  └──────────────┘ │  │
+│  └─────────────────────────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │  7. Check daemon health (fail if any crashed)                   │
 │  8. Disable kernel module loading (lockdown)                    │
@@ -58,7 +55,7 @@ NVRC is configured entirely via kernel command-line parameters (no config files)
 
 | Parameter | Values | Default | Description |
 |-----------|--------|---------|-------------|
-| `nvrc.mode` | `gpu`, `cpu` | `gpu` | Operation mode. Use `cpu` for CPU-only workloads. |
+| `nvrc.mode` | `gpu`, `cpu`, `nvswitch-nvl4`, `nvswitch-nvl5` | `gpu` | Operation mode. `cpu` for CPU-only, `nvswitch-nvl4` for H100/H200/H800 service VMs, `nvswitch-nvl5` for B200/B300/B100 service VMs. |
 | `nvrc.log` | `off`, `error`, `warn`, `info`, `debug`, `trace` | `off` | Log verbosity level. Also enables `/proc/sys/kernel/printk_devkmsg`. |
 
 ### GPU Configuration
@@ -88,6 +85,16 @@ nvrc.mode=gpu
 **CPU-only mode:**
 ```
 nvrc.mode=cpu
+```
+
+**NVSwitch NVL4 mode (Service VM for HGX H100/H200/H800 - NVLink 4.0):**
+```
+nvrc.mode=nvswitch-nvl4
+```
+
+**NVSwitch NVL5 mode (Service VM for HGX B200/B300/B100 - NVLink 5.0):**
+```
+nvrc.mode=nvswitch-nvl5
 ```
 
 **GPU with locked clocks for benchmarking:**
