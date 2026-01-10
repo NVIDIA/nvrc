@@ -7,6 +7,11 @@ use std::sync::Once;
 
 static KERNLOG_INIT: Once = Once::new();
 
+/// Socket buffer size (16MB = 16 * 1024 * 1024 = 16777216 bytes).
+/// Large buffers prevent message loss during high-throughput GPU operations
+/// where NVIDIA drivers may emit bursts of diagnostic data.
+const SOCKET_BUFFER_SIZE: &str = "16777216";
+
 /// Initialize kernel logging and tune socket buffer sizes.
 /// Large buffers (16MB) prevent message loss during high-throughput GPU operations
 /// where drivers may emit bursts of diagnostic data.
@@ -21,7 +26,8 @@ pub fn kernlog_setup() -> Result<()> {
         "/proc/sys/net/core/rmem_max",
         "/proc/sys/net/core/wmem_max",
     ] {
-        fs::write(path, b"16777216").with_context(|| format!("write {}", path))?;
+        fs::write(path, SOCKET_BUFFER_SIZE.as_bytes())
+            .with_context(|| format!("write {}", path))?;
     }
     Ok(())
 }
@@ -132,7 +138,13 @@ mod tests {
 
         for &path in &PATHS {
             let v = fs::read_to_string(path).expect("should read sysctl");
-            assert_eq!(v.trim(), "16777216", "sysctl {} should be 16777216", path);
+            assert_eq!(
+                v.trim(),
+                SOCKET_BUFFER_SIZE,
+                "sysctl {} should be {}",
+                path,
+                SOCKET_BUFFER_SIZE
+            );
         }
     }
 }
