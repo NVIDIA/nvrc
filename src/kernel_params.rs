@@ -107,7 +107,7 @@ fn nvidia_smi_lgc(value: &str, ctx: &mut NVRC) -> Result<()> {
     Ok(())
 }
 
-/// Lock memory clocks to a fixed frequency (MHz). Requires driver reload to take effect.
+/// Lock memory clocks to a fixed frequency (MHz).
 /// Used alongside lgc for fully deterministic GPU behavior.
 fn nvidia_smi_lmc(value: &str, ctx: &mut NVRC) -> Result<()> {
     let mhz: u32 = value.parse().context("nvrc.smi.lmc: invalid frequency")?;
