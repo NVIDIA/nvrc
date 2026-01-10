@@ -17,12 +17,20 @@ const KATA_AGENT_PATH: &str = "/usr/bin/kata-agent";
 /// not the 136 years this represents. Using u32::MAX avoids overflow concerns.
 pub const SYSLOG_POLL_FOREVER: u32 = u32::MAX;
 
+/// OOM score adjustment for kata-agent. Value of -997 makes it nearly unkillable,
+/// ensuring VM stability even under memory pressure. Range is -1000 (never kill) to 1000 (always kill first).
+const KATA_AGENT_OOM_SCORE_ADJ: &str = "-997";
+
 /// kata-agent needs high file descriptor limits for container workloads and
-/// must survive OOM conditions to maintain VM stability (-997 = nearly unkillable)
+/// must survive OOM conditions to maintain VM stability
 fn agent_setup() -> Result<()> {
     let nofile = 1024 * 1024;
     setrlimit(Resource::NOFILE, nofile, nofile).context("setrlimit RLIMIT_NOFILE")?;
-    fs::write("/proc/self/oom_score_adj", b"-997").context("write /proc/self/oom_score_adj")?;
+    fs::write(
+        "/proc/self/oom_score_adj",
+        KATA_AGENT_OOM_SCORE_ADJ.as_bytes(),
+    )
+    .context("write /proc/self/oom_score_adj")?;
     let lim = rlimit::getrlimit(Resource::NOFILE)?;
     debug!("kata-agent RLIMIT_NOFILE: {:?}", lim);
     Ok(())
@@ -58,6 +66,11 @@ fn syslog_loop(timeout_secs: u32) -> Result<()> {
 /// This way kata-agent inherits our PID and becomes the main guest process.
 /// Timeout parameter allows tests to verify the fork/syslog logic exits cleanly
 pub fn fork_agent(timeout_secs: u32) -> Result<()> {
+    // SAFETY: fork() is safe here because:
+    // 1. We are PID 1 with no other threads (single-threaded process)
+    // 2. Parent immediately execs kata-agent (no shared state issues)
+    // 3. Child only calls async-signal-safe functions (syslog::poll, sleep)
+    // 4. No locks or mutexes exist that could deadlock in child
     match unsafe { fork() }.expect("fork agent") {
         ForkResult::Parent { .. } => {
             kata_agent(KATA_AGENT_PATH).context("kata-agent parent")?;
@@ -92,7 +105,7 @@ mod tests {
 
         // Verify oom_score_adj was written
         let oom = fs::read_to_string("/proc/self/oom_score_adj").unwrap();
-        assert_eq!(oom.trim(), "-997");
+        assert_eq!(oom.trim(), KATA_AGENT_OOM_SCORE_ADJ);
     }
 
     #[test]
@@ -109,6 +122,8 @@ mod tests {
         require_root();
 
         // kata_agent with nonexistent path - setup succeeds, exec fails
+        // SAFETY: Test forks to isolate agent_setup() and exec failure.
+        // Single-threaded test process with no shared state.
         match unsafe { fork() }.expect("fork") {
             ForkResult::Parent { child } => {
                 assert!(matches!(
@@ -145,6 +160,8 @@ mod tests {
     fn test_fork_agent_with_timeout() {
         // Double fork: outer fork isolates the test, inner fork (inside fork_agent_with_timeout)
         // does the real work. This lets us actually call fork_agent_with_timeout() directly.
+        // SAFETY: Outer fork isolates the test in a child process.
+        // Single-threaded test with no shared state.
         match unsafe { fork() }.expect("outer fork") {
             ForkResult::Parent { child } => {
                 // Wrapper exits 1 because kata_agent() fails (no binary)
