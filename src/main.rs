@@ -52,9 +52,9 @@ fn mode_gpu(init: &mut NVRC) {
     must!(init.check_daemons());
 }
 
-/// NVSwitch NVL4 mode for HGX H100/H200/H800 systems.
-/// Loads NVIDIA driver and starts fabric manager for NVLink 4.0 topologies.
-/// Used for NVSwitch configurations without GPU compute workloads.
+/// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
+/// Service VM mode for NVLink 4.0 topologies in shared virtualization.
+/// Loads NVIDIA driver and starts fabric manager. GPUs are assigned to service VM.
 /// Automatically enables fabricmanager regardless of kernel parameters.
 fn mode_nvswitch_nvl4(init: &mut NVRC) {
     // Override kernel parameter: always enable fabricmanager for nvswitch mode
@@ -65,12 +65,29 @@ fn mode_nvswitch_nvl4(init: &mut NVRC) {
     must!(init.check_daemons());
 }
 
+/// NVSwitch NVL5 mode for HGX B200/B300/B100 systems (fourth-gen NVSwitch).
+/// Service VM mode for NVLink 5.0 topologies with CX7 bridge devices.
+/// Does NOT load nvidia driver (GPUs not attached to service VM).
+/// Loads ib_umad for InfiniBand MAD access to CX7 bridges.
+/// FM automatically starts NVLSM (NVLink Subnet Manager) internally.
+/// Requires kernel 5.17+ and /dev/infiniband/umadX devices.
+fn mode_nvswitch_nvl5(init: &mut NVRC) {
+    // Override kernel parameter: always enable fabricmanager for nvswitch mode
+    init.fabricmanager_enabled = Some(true);
+
+    // Load InfiniBand user MAD module for CX7 bridge device access
+    must!(modprobe::load("ib_umad"));
+    must!(init.nv_fabricmanager());
+    must!(init.check_daemons());
+}
+
 fn main() {
     // Dispatch table allows adding new modes without touching control flow.
     let modes: HashMap<&str, ModeFn> = HashMap::from([
         ("gpu", mode_gpu as ModeFn),
         ("cpu", (|_| {}) as ModeFn),
         ("nvswitch-nvl4", mode_nvswitch_nvl4 as ModeFn),
+        ("nvswitch-nvl5", mode_nvswitch_nvl5 as ModeFn),
     ]);
 
     must!(lockdown::set_panic_hook());
