@@ -31,10 +31,12 @@ jobs:
           fetch-depth: 0 # This is needed in order to keep the commit ids history
           persist-credentials: false
       - name: Install Rust toolchain
-        run: ./tests/install_rust.sh
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable minus 2 releases
+          targets: aarch64-unknown-linux-musl
       - name: Build NVRC
         run: |
-          . "${HOME}/.cargo/env"
           cargo build --release --target=aarch64-unknown-linux-musl
           sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC "$ROOTFS_DIR/bin/NVRC"
       - name: Create initrd
