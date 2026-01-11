@@ -542,7 +542,6 @@ impl File {
     /// 1. MUST close the fd manually via libc::close() or from_raw_fd()
     /// 2. Failure to close causes resource leaks in PID 1 init process
     /// 3. Double-close causes undefined behavior
-    #[cfg(test)]
     pub(crate) fn into_raw_fd(self) -> i32 {
         let fd = self.fd;
         core::mem::forget(self);
