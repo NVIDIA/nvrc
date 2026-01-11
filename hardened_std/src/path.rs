@@ -18,18 +18,16 @@ pub struct PathBuf {
 }
 
 impl Path {
-    pub fn new<S: AsRef<str> + ?Sized>(s: &S) -> &Path {
+    /// Create a Path reference from a string reference.
+    ///
+    /// # Lifetime
+    /// The returned Path reference has the same lifetime as the input string.
+    /// This is safe because Path is repr(transparent) over str.
+    pub fn new<'a, S: AsRef<str> + ?Sized>(s: &'a S) -> &'a Path {
+        // SAFETY: Path is repr(transparent) over str, so they have identical memory layout.
+        // The pointer cast is safe, and the lifetime 'a ensures the Path reference
+        // cannot outlive the source string.
         unsafe { &*(s.as_ref() as *const str as *const Path) }
-    }
-
-    #[allow(dead_code)]
-    pub fn exists(&self) -> bool {
-        todo!("Path::exists")
-    }
-
-    #[allow(dead_code)]
-    pub fn is_symlink(&self) -> bool {
-        todo!("Path::is_symlink")
     }
 
     pub fn as_str(&self) -> &str {
