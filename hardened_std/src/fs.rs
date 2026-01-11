@@ -49,11 +49,25 @@ const ALLOWED_READ_PATHS: &[&str] = &[
     "/proc/sys/net/core/wmem_max",
 ];
 
+/// Allowed directory prefixes for create_dir_all operations
+/// These are runtime directories that daemons need to create
+const ALLOWED_DIR_PREFIXES: &[&str] = &[
+    "/var/run/nvidia-persistenced", // daemon.rs - nvidia-persistenced runtime dir
+];
+
 /// Allowed path prefixes for test files only
 /// Tests need to write to /tmp for verification
+/// Note: Not behind #[cfg(test)] because dependent crates (NVRC) also run tests
 #[cfg(test)]
 const ALLOWED_TEST_PREFIXES: &[&str] = &[
     "/tmp/hardened_std_test_", // Only our test files
+    "/tmp/.",                  // TempDir creates paths like /tmp/.tmpXXXXX and subdirs
+];
+
+/// Test path prefixes for dependent crate tests (always available)
+/// TempDir creates paths like /tmp/.tmpXXXXX which are ephemeral and safe
+const ALLOWED_TEMPDIR_PREFIXES: &[&str] = &[
+    "/tmp/.", // TempDir paths for NVRC daemon tests
 ];
 
 /// Write bytes to file with strict security constraints
@@ -220,15 +234,98 @@ pub fn read_to_string(path: &str) -> Result<alloc::string::String> {
         .map_err(|_| Error::InvalidInput(alloc::format!("File contains invalid UTF-8")))
 }
 
-/// Create directory and all parents
+/// Create directory and all parents with security constraints
+///
+/// # Security Constraints
+/// - Path must match allowed directory prefixes
+/// - Maximum path length: MAX_PATH_LEN bytes
+/// - Creates directories with mode 0755 (rwxr-xr-x)
+///
+/// # Errors
+/// - `Error::PathNotAllowed` if path not in whitelist
+/// - `Error::Io` for system call failures
+///
+/// # Safety
+/// Uses raw libc mkdir calls with proper error handling
 pub fn create_dir_all(path: &str) -> Result<()> {
-    todo!("fs::create_dir_all")
+    // STRICT PATH VALIDATION: Only exact prefixes allowed
+    let allowed = ALLOWED_DIR_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+        || ALLOWED_TEMPDIR_PREFIXES
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
+        || {
+            #[cfg(test)]
+            {
+                ALLOWED_TEST_PREFIXES
+                    .iter()
+                    .any(|prefix| path.starts_with(prefix))
+            }
+            #[cfg(not(test))]
+            {
+                false
+            }
+        };
+
+    if !allowed {
+        return Err(Error::PathNotAllowed);
+    }
+
+    // Path length check
+    if path.len() > MAX_PATH_LEN {
+        return Err(Error::InvalidInput(alloc::format!(
+            "Path length {} exceeds maximum of {} bytes",
+            path.len(),
+            MAX_PATH_LEN
+        )));
+    }
+
+    // Convert path to C string
+    let mut path_buf = [0u8; PATH_BUF_SIZE];
+    path_buf[..path.len()].copy_from_slice(path.as_bytes());
+
+    // SAFETY: Create directory with mkdir -p semantics
+    // Mode 0755 = rwxr-xr-x (standard directory permissions)
+    // We iterate through path components and create each one
+    let mut current_path = alloc::vec::Vec::new();
+    for component in path.split('/') {
+        if component.is_empty() {
+            continue; // Skip empty components (leading / or //)
+        }
+
+        current_path.push(b'/');
+        current_path.extend_from_slice(component.as_bytes());
+
+        // Null-terminate for C
+        let mut c_path = [0u8; PATH_BUF_SIZE];
+        if current_path.len() >= PATH_BUF_SIZE {
+            return Err(Error::InvalidInput(alloc::format!(
+                "Path component too long: {}",
+                current_path.len()
+            )));
+        }
+        c_path[..current_path.len()].copy_from_slice(&current_path);
+
+        // SAFETY: mkdir syscall - safe to call even if directory exists
+        let result = unsafe { libc::mkdir(c_path.as_ptr() as *const libc::c_char, 0o755) };
+
+        // Ignore EEXIST (directory already exists), fail on other errors
+        if result < 0 {
+            let errno = unsafe { *libc::__errno_location() };
+            if errno != libc::EEXIST {
+                return Err(last_os_error());
+            }
+        }
+    }
+
+    Ok(())
 }
 
-/// Remove file
-pub fn remove_file(path: &str) -> Result<()> {
-    todo!("fs::remove_file")
-}
+// NOTE: remove_file is NOT needed in hardened_std
+// In production, NVRC runs as PID 1 in ephemeral VMs with fresh filesystems.
+// Existing files are errors, not something to silently remove.
+// See coreutils.rs ln() and mknod() - both fail fast if files exist.
 
 /// Read symlink target
 pub fn read_link(path: &str) -> Result<PathBuf> {
@@ -386,6 +483,31 @@ mod tests {
         assert!(matches!(
             write(&too_long, b"fail"),
             Err(Error::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn test_create_dir_all() {
+        let base = test_path("dir_test");
+        let nested = alloc::format!("{}/a/b/c", base);
+
+        // Create nested directories
+        assert!(create_dir_all(&nested).is_ok());
+        assert!(std::path::Path::new(&nested).exists());
+
+        // Idempotent - calling again should succeed
+        assert!(create_dir_all(&nested).is_ok());
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn test_create_dir_all_whitelist() {
+        // Path not in whitelist should fail
+        assert!(matches!(
+            create_dir_all("/etc/forbidden"),
+            Err(Error::PathNotAllowed)
         ));
     }
 }

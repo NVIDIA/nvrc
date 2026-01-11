@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use nix::fcntl::AT_FDCWD;
 use nix::sys::stat::{self, Mode, SFlag};
 use nix::unistd::symlinkat;
@@ -10,8 +10,9 @@ use std::path::Path;
 
 #[cfg(test)]
 use serial_test::serial;
-/// Create (or update) a symbolic link from target to linkpath.
-/// Idempotent: if link already points to target, it is left unchanged.
+/// Create symbolic link from target to linkpath.
+/// In production (PID 1 init), filesystem is fresh - existing files are errors.
+/// Idempotent: if link already points to correct target, succeeds.
 pub fn ln(target: &str, linkpath: &str) -> Result<()> {
     let path = Path::new(linkpath);
 
@@ -20,21 +21,35 @@ pub fn ln(target: &str, linkpath: &str) -> Result<()> {
         if existing == Path::new(target) {
             return Ok(()); // already correct
         }
+        // Wrong target - fail fast (shouldn't happen in clean ephemeral VM)
+        return Err(anyhow!(
+            "Symlink {} exists but points to wrong target (expected {}, found {})",
+            linkpath,
+            target,
+            existing.display()
+        ));
     }
 
-    // Remove whatever exists at linkpath (file, symlink, etc.)
-    if path.exists() || path.is_symlink() {
-        let _ = fs::remove_file(path);
+    // If path exists but is not a symlink, fail fast
+    if path.exists() {
+        return Err(anyhow!(
+            "Cannot create symlink at {} - path already exists",
+            linkpath
+        ));
     }
 
     symlinkat(target, AT_FDCWD, linkpath).with_context(|| format!("ln {} -> {}", linkpath, target))
 }
 
-/// Create (or replace) a character device node with desired major/minor.
-/// Always recreates to avoid stale metadata/permissions.
+/// Create a character device node with desired major/minor.
+/// In production (PID 1 init), filesystem is fresh - existing files are errors.
 pub fn mknod(path: &str, kind: SFlag, major: u64, minor: u64) -> Result<()> {
+    // Fail fast if file already exists (shouldn't happen in clean ephemeral VM)
     if Path::new(path).exists() {
-        fs::remove_file(path).with_context(|| format!("remove {} failed", path))?;
+        return Err(anyhow!(
+            "Cannot create device node at {} - path already exists",
+            path
+        ));
     }
 
     let perm = Mode::from_bits_truncate(0o666);
