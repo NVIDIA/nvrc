@@ -49,8 +49,6 @@ fn mount_optional(
     Ok(())
 }
 
-// === Device Nodes and Symlinks - No longer needed ===
-//
 // Previously, we manually created:
 // 1. Device nodes with mknod():
 //    - /dev/null (major 1, minor 3) - mode 0666
@@ -71,8 +69,8 @@ fn mount_optional(
 // 1. The kernel's mem driver (drivers/char/mem.c) calls device_create()
 //    during kernel initialization for each standard character device
 // 2. device_create() registers the device with devtmpfs
-// 3. When we mount devtmpfs (setup_at() line ~104), the kernel populates
-//    it with ALL registered devices, including /dev/null, /dev/zero, etc.
+// 3. When we mount devtmpfs the kernel populates it with ALL registered
+//    devices, including /dev/null, /dev/zero, etc.
 // 4. Nodes are created with default permissions (e.g., /dev/null is 0666)
 //
 // Note: CONFIG_DEVTMPFS_MOUNT=y auto-mounts devtmpfs at boot for regular
