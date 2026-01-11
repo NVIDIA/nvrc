@@ -10,8 +10,8 @@
 
 extern crate alloc;
 
-// For tests, we need std
-#[cfg(test)]
+// For tests and std-support feature, we need std
+#[cfg(any(test, feature = "std-support"))]
 extern crate std;
 
 pub mod collections;
@@ -55,17 +55,36 @@ impl fmt::Display for Error {
 }
 
 impl Error {
-    pub fn with_context(self, _msg: &'static str) -> Self {
-        // For now, just return self
-        // Could extend to store context in the future
+    /// Returns self without adding context.
+    /// This method exists for API compatibility with anyhow but does NOT store context.
+    /// The context parameter is intentionally ignored to keep Error simple and Copy-compatible.
+    ///
+    /// # Note
+    /// If you need context preservation, use Error::Other(String) instead.
+    #[allow(unused_variables)]
+    pub fn with_context(self, msg: &'static str) -> Self {
         self
     }
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
 
-/// Get last OS error from errno
+/// Get last OS error from errno.
+///
+/// # Platform Support
+/// This implementation uses libc::__errno_location() which is glibc-specific.
+/// NVRC runs exclusively on Linux with glibc, so this is safe for our use case.
+/// If portability to musl or other C libraries is needed in the future,
+/// use libc::__errno() or platform-specific errno access methods.
+///
+/// # Safety
+/// Safe because errno location is thread-local and guaranteed valid by libc.
 pub(crate) fn last_os_error() -> Error {
+    // SAFETY: __errno_location() returns a valid thread-local pointer to errno.
+    // This is safe because:
+    // 1. We're only running on glibc-based Linux (NVRC's target platform)
+    // 2. The pointer is thread-local and always valid
+    // 3. We're just reading, not modifying
     let errno = unsafe { *libc::__errno_location() };
     match errno {
         libc::ENOENT => Error::NotFound,

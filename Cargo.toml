@@ -16,7 +16,7 @@ kernlog = "0.3"
 rlimit = "0.10.2"
 libc = "0.2.178"
 once_cell = "1.21.3"
-hardened_std = { path = "./hardened_std" }
+hardened_std = { path = "./hardened_std", features = ["std-support"] }
 
 [profile.release]
 opt-level = "s"

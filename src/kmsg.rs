@@ -78,11 +78,43 @@ mod tests {
 
     #[test]
     fn test_kmsg_at_temp_file() {
-        // Create a temp file to verify we can write to it
+        use std::os::unix::io::AsRawFd;
+
+        // Create a temp file to verify we can actually write to it
         let temp = NamedTempFile::new().unwrap();
         let path = temp.path().to_str().unwrap();
-        let file = kmsg_at(path);
-        assert!(file.is_ok());
+
+        // Open via kmsg_at
+        let file = kmsg_at(path).expect("kmsg_at should succeed for temp file");
+
+        // Verify we can write to the returned File
+        // This catches issues where the file handle is invalid or closed
+        //
+        // Note: We use unsafe libc::write() instead of std::io::Write because:
+        // 1. hardened_std::fs::File doesn't implement Write trait (minimalist design)
+        // 2. This test specifically validates the raw fd is usable, not high-level APIs
+        // 3. Direct syscall testing ensures fd validity at lowest level
+        // 4. Catching fd issues that might be hidden by higher-level wrappers
+        let test_data = b"test write\n";
+        let fd = file.as_raw_fd();
+        assert!(fd >= 0, "File descriptor should be valid");
+
+        // SAFETY: Direct fd write is safe here because:
+        // 1. fd is valid (came from successful kmsg_at)
+        // 2. test_data pointer and length are valid
+        // 3. We don't use fd after this (file owns it)
+        let write_result = unsafe {
+            libc::write(
+                fd,
+                test_data.as_ptr() as *const libc::c_void,
+                test_data.len(),
+            )
+        };
+        assert_eq!(
+            write_result,
+            test_data.len() as isize,
+            "Should write full test data"
+        );
     }
 
     #[test]

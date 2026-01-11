@@ -227,6 +227,10 @@ mod tests {
         let root = tmpdir.path().to_str().unwrap();
 
         // Create required directories
+        // Note: Tests intentionally use std::fs rather than hardened_std::fs because:
+        // 1. Tests run on host system with arbitrary temp paths (not in hardened_std whitelist)
+        // 2. Tests need to access /proc/filesystems which requires broader std::fs::read_to_string
+        // 3. Production code uses hardened_std::fs with strict path whitelisting
         for dir in ["proc", "dev", "sys", "run", "tmp"] {
             std::fs::create_dir_all(format!("{root}/{dir}")).unwrap();
         }
@@ -237,9 +241,18 @@ mod tests {
         }
         impl Drop for Cleanup<'_> {
             fn drop(&mut self) {
-                // Unmount in reverse order
+                // Unmount in reverse order (opposite of mount order)
+                // Log failures but don't panic - cleanup is best-effort
                 for dir in ["tmp", "run", "sys", "dev", "proc"] {
-                    let _ = umount(format!("{}/{}", self.root, dir).as_str());
+                    let path = format!("{}/{}", self.root, dir);
+                    if let Err(e) = umount(path.as_str()) {
+                        // In tests, unmount failures are expected if mount never succeeded
+                        // or if the test itself failed. Only log when debugging is enabled.
+                        // Set MOUNT_TEST_DEBUG=1 to see cleanup warnings during test runs.
+                        if std::env::var("MOUNT_TEST_DEBUG").is_ok() {
+                            eprintln!("Warning: Failed to unmount {}: {:?}", path, e);
+                        }
+                    }
                 }
             }
         }
