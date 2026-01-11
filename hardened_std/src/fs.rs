@@ -71,6 +71,51 @@ const ALLOWED_TEMPDIR_PREFIXES: &[&str] = &[
     "/tmp/.", // TempDir paths for NVRC daemon tests
 ];
 
+/// Validate that a path is safe and doesn't contain path traversal attempts.
+///
+/// # Security
+/// Prevents path traversal attacks by rejecting paths with:
+/// - ".." components (directory traversal)
+/// - "/./" sequences (obfuscation)
+/// - Non-canonical paths
+///
+/// # Examples
+/// ```
+/// assert!(is_safe_path("/tmp/.tmpABCDE"));      // OK
+/// assert!(!is_safe_path("/tmp/./../etc/passwd")); // BLOCKED - contains ..
+/// assert!(!is_safe_path("/tmp/./foo"));          // BLOCKED - contains /./
+/// ```
+fn is_safe_path(path: &str) -> bool {
+    // Reject empty paths
+    if path.is_empty() {
+        return false;
+    }
+
+    // Must be absolute path
+    if !path.starts_with('/') {
+        return false;
+    }
+
+    // Reject any path containing ".." (parent directory traversal)
+    if path.contains("..") {
+        return false;
+    }
+
+    // Reject paths containing "/./" (current directory, used for obfuscation)
+    // Exception: Allow "/tmp/." prefix for TempDir (single occurrence at start)
+    if path.starts_with("/tmp/.") {
+        // Allow "/tmp/.tmpXXX" but reject "/tmp/./anything"
+        if path.len() > 6 && &path[6..7] == "/" {
+            // This is "/tmp/./" which is not allowed
+            return false;
+        }
+    } else if path.contains("/./") {
+        return false;
+    }
+
+    true
+}
+
 /// Write bytes to file with strict security constraints
 ///
 /// # Security Constraints
@@ -91,7 +136,12 @@ pub fn write(path: &str, contents: &[u8]) -> Result<()> {
         return Err(Error::WriteTooLarge(contents.len()));
     }
 
-    // CONSTRAINT 2: Exact path whitelist enforcement
+    // CONSTRAINT 2: Path safety check (prevent path traversal)
+    if !is_safe_path(path) {
+        return Err(Error::PathNotAllowed);
+    }
+
+    // CONSTRAINT 3: Exact path whitelist enforcement
     let allowed = ALLOWED_WRITE_PATHS.contains(&path) || {
         #[cfg(test)]
         {
@@ -175,6 +225,11 @@ pub fn write(path: &str, contents: &[u8]) -> Result<()> {
 pub fn read_to_string(path: &str) -> Result<alloc::string::String> {
     const MAX_READ_SIZE: usize = 4096;
 
+    // Path safety check (prevent path traversal)
+    if !is_safe_path(path) {
+        return Err(Error::PathNotAllowed);
+    }
+
     // Path whitelist enforcement
     let allowed = ALLOWED_READ_PATHS.contains(&path) || {
         #[cfg(test)]
@@ -249,6 +304,11 @@ pub fn read_to_string(path: &str) -> Result<alloc::string::String> {
 /// # Safety
 /// Uses raw libc mkdir calls with proper error handling
 pub fn create_dir_all(path: &str) -> Result<()> {
+    // Path safety check (prevent path traversal)
+    if !is_safe_path(path) {
+        return Err(Error::PathNotAllowed);
+    }
+
     // STRICT PATH VALIDATION: Only exact prefixes allowed
     let allowed = ALLOWED_DIR_PREFIXES
         .iter()
@@ -411,6 +471,11 @@ impl OpenOptions {
     /// - `Error::PathNotAllowed` if path not in whitelist
     /// - `Error::Io` for system call failures
     pub fn open(&self, path: &str) -> Result<File> {
+        // Path safety check (prevent path traversal)
+        if !is_safe_path(path) {
+            return Err(Error::PathNotAllowed);
+        }
+
         // STRICT PATH VALIDATION: Only exact paths allowed
         let allowed = ALLOWED_OPEN_PATHS.contains(&path)
             || ALLOWED_TEMPDIR_PREFIXES
@@ -627,4 +692,64 @@ mod tests {
 #[cfg(test)]
 mod bench {
     // Future: Add criterion benchmarks comparing std::fs vs hardened_std
+}
+
+#[cfg(test)]
+mod path_safety_tests {
+    use super::*;
+
+    #[test]
+    fn test_is_safe_path_valid_paths() {
+        // Valid absolute paths
+        assert!(is_safe_path("/proc/cmdline"));
+        assert!(is_safe_path("/dev/null"));
+        assert!(is_safe_path("/tmp/.tmpABCDE"));
+        assert!(is_safe_path("/tmp/.tmpXXX/subdir"));
+        assert!(is_safe_path("/var/run/nvidia"));
+    }
+
+    #[test]
+    fn test_is_safe_path_rejects_parent_traversal() {
+        // Reject paths with .. (parent directory)
+        assert!(!is_safe_path("/tmp/../etc/passwd"));
+        assert!(!is_safe_path("/tmp/./../etc/passwd"));
+        assert!(!is_safe_path("/proc/../etc/passwd"));
+        assert!(!is_safe_path("/../etc/passwd"));
+        assert!(!is_safe_path("/etc/.."));
+    }
+
+    #[test]
+    fn test_is_safe_path_rejects_current_dir_obfuscation() {
+        // Reject /./  sequences (except /tmp/. prefix)
+        assert!(!is_safe_path("/tmp/./foo"));
+        assert!(!is_safe_path("/etc/./passwd"));
+        assert!(!is_safe_path("/./etc/passwd"));
+        assert!(!is_safe_path("/proc/./cmdline"));
+    }
+
+    #[test]
+    fn test_is_safe_path_rejects_relative_paths() {
+        // Reject relative paths (must be absolute)
+        assert!(!is_safe_path("etc/passwd"));
+        assert!(!is_safe_path("tmp/file"));
+        assert!(!is_safe_path("./file"));
+        assert!(!is_safe_path("../file"));
+    }
+
+    #[test]
+    fn test_is_safe_path_rejects_empty() {
+        assert!(!is_safe_path(""));
+    }
+
+    #[test]
+    fn test_is_safe_path_tmpdir_prefix() {
+        // TempDir creates paths like /tmp/.tmpXXXXX
+        assert!(is_safe_path("/tmp/.tmpABCDE"));
+        assert!(is_safe_path("/tmp/.tmpXYZ123"));
+        assert!(is_safe_path("/tmp/.tmp"));
+
+        // But reject /tmp/./ (current dir marker)
+        assert!(!is_safe_path("/tmp/./"));
+        assert!(!is_safe_path("/tmp/./foo"));
+    }
 }
