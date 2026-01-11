@@ -8,6 +8,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "cfg-if",
+ "hardened_std",
  "kernlog",
  "libc",
  "log",
@@ -163,6 +164,13 @@ dependencies = [
  "libc",
  "wasi 0.13.3+wasi-0.2.2",
  "windows-targets",
+]
+
+[[package]]
+name = "hardened_std"
+version = "0.1.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

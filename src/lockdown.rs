@@ -6,10 +6,10 @@
 //! In production, panic triggers VM power-off. For tests, the shutdown
 //! action is configurable via `set_panic_hook_with()`.
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Result};
+use hardened_std::fs;
 use nix::sys::reboot::{reboot, RebootMode};
 use nix::unistd::sync;
-use std::fs;
 use std::panic;
 
 /// Default shutdown action: power off the VM.
@@ -45,7 +45,7 @@ fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) -> Result<(
 /// This is a one-way operation: once set, it cannot be undone without reboot.
 pub fn disable_modules_loading() -> Result<()> {
     const PATH: &str = "/proc/sys/kernel/modules_disabled";
-    fs::write(PATH, b"1\n").with_context(|| format!("disable module loading: {}", PATH))
+    fs::write(PATH, b"1\n").map_err(|e| anyhow!("disable module loading {}: {}", PATH, e))
 }
 
 #[cfg(test)]
@@ -79,8 +79,8 @@ mod tests {
         let result = disable_modules_loading();
         assert!(result.is_ok());
 
-        // Verify it was set
-        let content = fs::read_to_string("/proc/sys/kernel/modules_disabled").unwrap();
+        // Verify it was set (use std::fs in tests to verify hardened_std wrote correctly)
+        let content = std::fs::read_to_string("/proc/sys/kernel/modules_disabled").unwrap();
         assert_eq!(content.trim(), "1");
     }
 

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Result};
+use hardened_std::fs;
 
 use crate::execute::background;
 use crate::nvrc::NVRC;
-use std::fs;
 
 /// UVM persistence mode keeps unified memory mappings alive between kernel launches,
 /// avoiding expensive page migrations. Enabled by default for ML workloads.
@@ -46,7 +46,7 @@ impl NVRC {
     }
 
     fn spawn_persistenced(&mut self, run_dir: &str, bin: &str) -> Result<()> {
-        fs::create_dir_all(run_dir).with_context(|| format!("create_dir_all {}", run_dir))?;
+        fs::create_dir_all(run_dir).map_err(|e| anyhow!("create_dir_all {}: {}", run_dir, e))?;
         let uvm_enabled = self.uvm_persistence_mode.unwrap_or(true);
         let args = persistenced_args(uvm_enabled);
         let child = background(bin, &args)?;
@@ -174,14 +174,15 @@ mod tests {
         let run_dir = tmpdir.path().join("nvidia-persistenced");
 
         let mut nvrc = NVRC::default();
-        let result = nvrc.spawn_persistenced(run_dir.to_str().unwrap(), "/bin/true");
-        assert!(result.is_ok());
+        nvrc.spawn_persistenced(run_dir.to_str().unwrap(), "/bin/true")
+            .expect("spawn_persistenced failed - check: 1) temp dir creation, 2) process spawn, 3) daemon tracking");
 
         // Directory should be created
         assert!(run_dir.exists());
 
         // Daemon should be tracked and exit cleanly
-        assert!(nvrc.check_daemons().is_ok());
+        nvrc.check_daemons()
+            .expect("persistenced daemon should exit cleanly");
     }
 
     #[test]
@@ -191,33 +192,34 @@ mod tests {
 
         let mut nvrc = NVRC::default();
         nvrc.uvm_persistence_mode = Some(false); // Tests the else branch for args
-        let result = nvrc.spawn_persistenced(run_dir.to_str().unwrap(), "/bin/true");
-        assert!(result.is_ok());
+        nvrc.spawn_persistenced(run_dir.to_str().unwrap(), "/bin/true")
+            .expect("spawn_persistenced with UVM disabled should succeed");
     }
 
     #[test]
     fn test_spawn_hostengine_success() {
         let mut nvrc = NVRC::default();
         nvrc.dcgm_enabled = Some(true);
-        let result = nvrc.spawn_hostengine("/bin/true");
-        assert!(result.is_ok());
-        assert!(nvrc.check_daemons().is_ok());
+        nvrc.spawn_hostengine("/bin/true")
+            .expect("spawn_hostengine should succeed when DCGM enabled");
+        nvrc.check_daemons()
+            .expect("hostengine daemon should exit cleanly");
     }
 
     #[test]
     fn test_spawn_dcgm_exporter_success() {
         let mut nvrc = NVRC::default();
         nvrc.dcgm_enabled = Some(true);
-        let result = nvrc.spawn_dcgm_exporter("/bin/true");
-        assert!(result.is_ok());
+        nvrc.spawn_dcgm_exporter("/bin/true")
+            .expect("spawn_dcgm_exporter should succeed when DCGM enabled");
     }
 
     #[test]
     fn test_spawn_fabricmanager_success() {
         let mut nvrc = NVRC::default();
         nvrc.fabricmanager_enabled = Some(true);
-        let result = nvrc.spawn_fabricmanager("/bin/true");
-        assert!(result.is_ok());
+        nvrc.spawn_fabricmanager("/bin/true")
+            .expect("spawn_fabricmanager should succeed when enabled");
     }
 
     #[test]

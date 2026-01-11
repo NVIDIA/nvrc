@@ -2,9 +2,45 @@
 // Copyright (c) NVIDIA CORPORATION
 
 use anyhow::{anyhow, Context, Result};
+use std::os::fd::FromRawFd;
 use std::process::{Child, Command, Stdio};
 
 use crate::kmsg::kmsg;
+
+/// Convert hardened_std::fs::File to std::process::Stdio
+///
+/// # Safety Guarantees
+/// This function safely transfers fd ownership between type systems:
+/// 1. hardened_std::fs::File -> raw fd (via into_raw_fd)
+/// 2. raw fd -> std::fs::File (via from_raw_fd)
+/// 3. std::fs::File -> Stdio (via From trait)
+///
+/// The fd lifecycle is:
+/// - Created by hardened_std::fs::File::open() (validated, whitelisted path)
+/// - Transferred here (ownership moved, Drop prevented by into_raw_fd)
+/// - Adopted by std::fs::File (takes ownership, will close on drop)
+/// - Moved into Stdio (takes ownership from std::fs::File)
+/// - Eventually closed when Stdio/Command is dropped
+///
+/// **Why this is safe:**
+/// - No double-free: Each fd has exactly one owner at any time
+/// - No leaks: std::fs::File/Stdio will close the fd when dropped
+/// - No invalid fds: Only opened fds from hardened_std reach here
+/// - No use-after-free: Ownership transfer prevents dangling references
+fn file_to_stdio(file: hardened_std::fs::File) -> Stdio {
+    // Transfer ownership from hardened_std to raw fd
+    let fd = file.into_raw_fd();
+
+    // SAFETY: Safe because:
+    // 1. `fd` is valid - it came from a successful File::open()
+    // 2. We have unique ownership - into_raw_fd() consumed the original File
+    // 3. from_raw_fd takes ownership - std::fs::File will close it on drop
+    // 4. No double-close possible - original File's Drop was prevented
+    let std_file = unsafe { std::fs::File::from_raw_fd(fd) };
+
+    // Transfer to Stdio (which will take ownership and close on drop)
+    Stdio::from(std_file)
+}
 
 /// Run a command and block until completion. Output goes to kmsg so it appears
 /// in dmesg/kernel log - the only reliable log destination in minimal VMs.
@@ -15,8 +51,12 @@ pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
     let kmsg_file = kmsg().context("Failed to open kmsg device")?;
     let status = Command::new(command)
         .args(args)
-        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg_file))
+        .stdout(file_to_stdio(
+            kmsg_file
+                .try_clone()
+                .map_err(|e| anyhow!("Failed to clone kmsg file: {}", e))?,
+        ))
+        .stderr(file_to_stdio(kmsg_file))
         .status()
         .context(format!("failed to execute {command}"))?;
 
@@ -34,8 +74,12 @@ pub fn background(command: &str, args: &[&str]) -> Result<Child> {
     let kmsg_file = kmsg().context("Failed to open kmsg device")?;
     Command::new(command)
         .args(args)
-        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg_file))
+        .stdout(file_to_stdio(
+            kmsg_file
+                .try_clone()
+                .map_err(|e| anyhow!("Failed to clone kmsg file: {}", e))?,
+        ))
+        .stderr(file_to_stdio(kmsg_file))
         .spawn()
         .with_context(|| format!("Failed to start {}", command))
 }
