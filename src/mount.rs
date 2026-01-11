@@ -4,10 +4,10 @@
 //! Filesystem setup for the minimal init environment.
 
 use crate::coreutils::{ln, mknod};
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use hardened_std::fs;
 use nix::mount::MsFlags;
 use nix::sys::stat;
-use std::fs;
 use std::path::Path;
 
 /// Mount a filesystem. Errors if mount fails.
@@ -119,7 +119,8 @@ fn setup_at(root: &str) -> Result<()> {
     mount("tmpfs", &format!("{root}/tmp"), "tmpfs", tmp_flags, None)?;
 
     // Read once for all optional mounts
-    let filesystems = fs::read_to_string("/proc/filesystems").unwrap_or_default();
+    let filesystems = fs::read_to_string("/proc/filesystems")
+        .map_err(|e| anyhow!("read /proc/filesystems: {}", e))?;
 
     mount_optional(
         &filesystems,
@@ -150,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_fs_available() {
-        let filesystems = fs::read_to_string("/proc/filesystems").unwrap();
+        let filesystems = std::fs::read_to_string("/proc/filesystems").unwrap();
         assert!(fs_available(&filesystems, "proc"));
         assert!(fs_available(&filesystems, "sysfs"));
         assert!(fs_available(&filesystems, "tmpfs"));
@@ -240,7 +241,7 @@ mod tests {
 
         // Create required directories
         for dir in ["proc", "dev", "sys", "run", "tmp"] {
-            fs::create_dir_all(format!("{root}/{dir}")).unwrap();
+            std::fs::create_dir_all(format!("{root}/{dir}")).unwrap();
         }
 
         // Run setup_at with temp root

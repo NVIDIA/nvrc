@@ -5,6 +5,7 @@ members = [".", "hardened_std"]
 name = "NVRC"
 version = "0.0.1"
 edition = "2021"
+license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0.100"
@@ -27,7 +28,6 @@ panic = 'abort'
 mktemp = "0.5.1"
 tempfile = "3.23.0"
 serial_test = "3.2.0"
-hardened_std = { path = "./hardened_std" }
 
 [features]
 confidential = []

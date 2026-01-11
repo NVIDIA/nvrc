@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 //! Minimal collections with fixed size
 
 /// Stack-allocated HashMap with max 4 entries

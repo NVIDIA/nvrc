@@ -13,24 +13,23 @@ use std::time::Duration;
 
 const KATA_AGENT_PATH: &str = "/usr/bin/kata-agent";
 
-/// Syslog polling runs indefinitely in production—VM lifetime measured in hours/days,
-/// not the 136 years this represents. Using u32::MAX avoids overflow concerns.
+/// Syslog polling runs indefinitely in production—VM lifetime measured in
+/// hours/days, not the 136 years this represents. Using u32::MAX avoids
+/// overflow concerns.
 pub const SYSLOG_POLL_FOREVER: u32 = u32::MAX;
 
-/// OOM score adjustment for kata-agent. Value of -997 makes it nearly unkillable,
-/// ensuring VM stability even under memory pressure. Range is -1000 (never kill) to 1000 (always kill first).
-const KATA_AGENT_OOM_SCORE_ADJ: &str = "-997";
+/// OOM score adjustment for kata-agent. Value of -997 makes it nearly
+/// unkillable, ensuring VM stability even under memory pressure. Range is -1000
+/// (never kill) to 1000 (always kill first).
+const OOM_SCORE_ADJ: &str = "-997";
 
 /// kata-agent needs high file descriptor limits for container workloads and
 /// must survive OOM conditions to maintain VM stability
 fn agent_setup() -> Result<()> {
     let nofile = 1024 * 1024;
     setrlimit(Resource::NOFILE, nofile, nofile).context("setrlimit RLIMIT_NOFILE")?;
-    fs::write(
-        "/proc/self/oom_score_adj",
-        KATA_AGENT_OOM_SCORE_ADJ.as_bytes(),
-    )
-    .map_err(|e| anyhow!("write /proc/self/oom_score_adj: {}", e))?;
+    fs::write("/proc/self/oom_score_adj", OOM_SCORE_ADJ.as_bytes())
+        .map_err(|e| anyhow!("write /proc/self/oom_score_adj: {}", e))?;
     let lim = rlimit::getrlimit(Resource::NOFILE)?;
     debug!("kata-agent RLIMIT_NOFILE: {:?}", lim);
     Ok(())
@@ -105,7 +104,7 @@ mod tests {
 
         // Verify oom_score_adj was written
         let oom = std::fs::read_to_string("/proc/self/oom_score_adj").unwrap();
-        assert_eq!(oom.trim(), KATA_AGENT_OOM_SCORE_ADJ);
+        assert_eq!(oom.trim(), OOM_SCORE_ADJ);
     }
 
     #[test]

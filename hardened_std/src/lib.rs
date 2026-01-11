@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 //! hardened_std - Security-hardened drop-in replacement for std library
 //!
 //! This crate provides minimal, security-constrained implementations of std

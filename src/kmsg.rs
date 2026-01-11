@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use anyhow::{Context, Result};
-use std::fs::{self, File, OpenOptions};
+use anyhow::{anyhow, Context, Result};
+use hardened_std::fs;
+use std::fs::{File, OpenOptions};
 use std::sync::Once;
 
 static KERNLOG_INIT: Once = Once::new();
@@ -27,7 +28,7 @@ pub fn kernlog_setup() -> Result<()> {
         "/proc/sys/net/core/wmem_max",
     ] {
         fs::write(path, SOCKET_BUFFER_SIZE.as_bytes())
-            .with_context(|| format!("write {}", path))?;
+            .map_err(|e| anyhow!("write {}: {}", path, e))?;
     }
     Ok(())
 }
@@ -123,21 +124,21 @@ mod tests {
         impl Drop for Restore {
             fn drop(&mut self) {
                 for (path, value) in &self.0 {
-                    let _ = fs::write(path, value.as_bytes());
+                    let _ = std::fs::write(path, value.as_bytes());
                 }
             }
         }
 
         let saved: Vec<_> = PATHS
             .iter()
-            .filter_map(|&p| fs::read_to_string(p).ok().map(|v| (p, v)))
+            .filter_map(|&p| std::fs::read_to_string(p).ok().map(|v| (p, v)))
             .collect();
         let _restore = Restore(saved);
 
         assert!(kernlog_setup().is_ok());
 
         for &path in &PATHS {
-            let v = fs::read_to_string(path).expect("should read sysctl");
+            let v = std::fs::read_to_string(path).expect("should read sysctl");
             assert_eq!(
                 v.trim(),
                 SOCKET_BUFFER_SIZE,
