@@ -322,15 +322,10 @@ pub fn create_dir_all(path: &str) -> Result<()> {
     Ok(())
 }
 
-// NOTE: remove_file is NOT needed in hardened_std
+// NOTE: remove_file and read_link are NOT needed in hardened_std
 // In production, NVRC runs as PID 1 in ephemeral VMs with fresh filesystems.
-// Existing files are errors, not something to silently remove.
-// See coreutils.rs ln() and mknod() - both fail fast if files exist.
-
-/// Read symlink target
-pub fn read_link(path: &str) -> Result<PathBuf> {
-    todo!("fs::read_link")
-}
+// Existing files are errors, not something to check/remove.
+// See coreutils.rs ln() and mknod() - both fail fast if any file exists.
 
 /// Get file metadata
 pub fn metadata(path: &str) -> Result<Metadata> {

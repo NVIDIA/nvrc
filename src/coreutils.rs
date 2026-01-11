@@ -5,35 +5,19 @@ use anyhow::{anyhow, Context, Result};
 use nix::fcntl::AT_FDCWD;
 use nix::sys::stat::{self, Mode, SFlag};
 use nix::unistd::symlinkat;
-use std::fs;
 use std::path::Path;
 
 #[cfg(test)]
 use serial_test::serial;
 /// Create symbolic link from target to linkpath.
-/// In production (PID 1 init), filesystem is fresh - existing files are errors.
-/// Idempotent: if link already points to correct target, succeeds.
+/// In production (PID 1 init), filesystem is fresh - any existing path is an error.
 pub fn ln(target: &str, linkpath: &str) -> Result<()> {
+    // In ephemeral VM as PID 1, nothing should exist at linkpath yet
+    // If it does, something is wrong - fail fast
     let path = Path::new(linkpath);
-
-    // Check if it's already a correct symlink
-    if let Ok(existing) = fs::read_link(path) {
-        if existing == Path::new(target) {
-            return Ok(()); // already correct
-        }
-        // Wrong target - fail fast (shouldn't happen in clean ephemeral VM)
+    if path.exists() || path.is_symlink() {
         return Err(anyhow!(
-            "Symlink {} exists but points to wrong target (expected {}, found {})",
-            linkpath,
-            target,
-            existing.display()
-        ));
-    }
-
-    // If path exists but is not a symlink, fail fast
-    if path.exists() {
-        return Err(anyhow!(
-            "Cannot create symlink at {} - path already exists",
+            "Cannot create symlink at {} - path already exists (fresh filesystem expected)",
             linkpath
         ));
     }
@@ -77,49 +61,31 @@ mod tests {
         let link = tmpdir.path().join("link.txt");
 
         // Create target file
-        fs::write(&target, "hello").unwrap();
+        std::fs::write(&target, "hello").unwrap();
 
         // Create symlink
         ln(target.to_str().unwrap(), link.to_str().unwrap()).unwrap();
 
         // Verify symlink exists and points to target
         assert!(link.is_symlink());
-        assert_eq!(fs::read_link(&link).unwrap(), target);
+        assert_eq!(std::fs::read_link(&link).unwrap(), target);
     }
 
     #[test]
-    fn test_ln_idempotent() {
+    fn test_ln_fails_if_exists() {
         let tmpdir = TempDir::new().unwrap();
         let target = tmpdir.path().join("target.txt");
         let link = tmpdir.path().join("link.txt");
 
-        fs::write(&target, "hello").unwrap();
+        std::fs::write(&target, "hello").unwrap();
 
-        // Create symlink twice - should succeed both times
+        // Create symlink once - succeeds
         ln(target.to_str().unwrap(), link.to_str().unwrap()).unwrap();
-        ln(target.to_str().unwrap(), link.to_str().unwrap()).unwrap();
 
-        assert!(link.is_symlink());
-        assert_eq!(fs::read_link(&link).unwrap(), target);
-    }
-
-    #[test]
-    fn test_ln_updates_existing_link() {
-        let tmpdir = TempDir::new().unwrap();
-        let target1 = tmpdir.path().join("target1.txt");
-        let target2 = tmpdir.path().join("target2.txt");
-        let link = tmpdir.path().join("link.txt");
-
-        fs::write(&target1, "first").unwrap();
-        fs::write(&target2, "second").unwrap();
-
-        // Create link to target1
-        ln(target1.to_str().unwrap(), link.to_str().unwrap()).unwrap();
-        assert_eq!(fs::read_link(&link).unwrap(), target1);
-
-        // Update link to target2
-        ln(target2.to_str().unwrap(), link.to_str().unwrap()).unwrap();
-        assert_eq!(fs::read_link(&link).unwrap(), target2);
+        // Try to create again - should fail (not idempotent in production)
+        let result = ln(target.to_str().unwrap(), link.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already exists"));
     }
 
     #[test]
@@ -136,19 +102,18 @@ mod tests {
     }
 
     #[test]
-    fn test_ln_replaces_regular_file() {
+    fn test_ln_fails_if_regular_file_exists() {
         let tmpdir = TempDir::new().unwrap();
         let target = tmpdir.path().join("target.txt");
         let link = tmpdir.path().join("link.txt");
 
-        fs::write(&target, "target").unwrap();
-        fs::write(&link, "was a file").unwrap(); // Regular file at link path
+        std::fs::write(&target, "target").unwrap();
+        std::fs::write(&link, "was a file").unwrap(); // Regular file at link path
 
-        // ln should replace the regular file with a symlink
-        ln(target.to_str().unwrap(), link.to_str().unwrap()).unwrap();
-
-        assert!(link.is_symlink());
-        assert_eq!(fs::read_link(&link).unwrap(), target);
+        // ln should fail if file exists (production behavior)
+        let result = ln(target.to_str().unwrap(), link.to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already exists"));
     }
 
     // ==================== mknod tests ====================
@@ -164,7 +129,7 @@ mod tests {
         mknod(fifopath.to_str().unwrap(), SFlag::S_IFIFO, 0, 0).unwrap();
 
         assert!(fifopath.exists());
-        let meta = fs::metadata(&fifopath).unwrap();
+        let meta = std::fs::metadata(&fifopath).unwrap();
         assert!(meta.file_type().is_fifo());
     }
 
@@ -176,26 +141,25 @@ mod tests {
 
         mknod(fifopath.to_str().unwrap(), SFlag::S_IFIFO, 0, 0).unwrap();
 
-        let meta = fs::metadata(&fifopath).unwrap();
+        let meta = std::fs::metadata(&fifopath).unwrap();
         let mode = meta.mode() & 0o777;
         assert_eq!(mode, 0o666);
     }
 
     #[test]
     #[serial] // umask is process-global
-    fn test_mknod_replaces_existing_with_fifo() {
+    fn test_mknod_fails_if_exists() {
         let tmpdir = TempDir::new().unwrap();
         let fifopath = tmpdir.path().join("test_replace_fifo");
 
         // Create a regular file first
-        fs::write(&fifopath, "placeholder").unwrap();
+        std::fs::write(&fifopath, "placeholder").unwrap();
         assert!(fifopath.is_file());
 
-        // mknod should replace it with a FIFO
-        mknod(fifopath.to_str().unwrap(), SFlag::S_IFIFO, 0, 0).unwrap();
-
-        let meta = fs::metadata(&fifopath).unwrap();
-        assert!(meta.file_type().is_fifo());
+        // mknod should fail if file exists (production behavior)
+        let result = mknod(fifopath.to_str().unwrap(), SFlag::S_IFIFO, 0, 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already exists"));
     }
 
     #[test]
@@ -213,7 +177,7 @@ mod tests {
         // Restore umask
         stat::umask(old_umask);
 
-        let meta = fs::metadata(&fifopath).unwrap();
+        let meta = std::fs::metadata(&fifopath).unwrap();
         let mode = meta.mode() & 0o777;
         assert_eq!(mode, 0o666, "umask should not affect mknod permissions");
     }
