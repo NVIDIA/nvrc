@@ -78,11 +78,34 @@ mod tests {
 
     #[test]
     fn test_kmsg_at_temp_file() {
-        // Create a temp file to verify we can write to it
+        use std::os::unix::io::AsRawFd;
+
+        // Create a temp file to verify we can actually write to it
         let temp = NamedTempFile::new().unwrap();
         let path = temp.path().to_str().unwrap();
-        let file = kmsg_at(path);
-        assert!(file.is_ok());
+
+        // Open via kmsg_at
+        let file = kmsg_at(path).expect("kmsg_at should succeed for temp file");
+
+        // Verify we can write to the returned File
+        // This catches issues where the file handle is invalid or closed
+        let test_data = b"test write\n";
+        let fd = file.as_raw_fd();
+        assert!(fd >= 0, "File descriptor should be valid");
+
+        // Actually write to ensure the fd works
+        let write_result = unsafe {
+            libc::write(
+                fd,
+                test_data.as_ptr() as *const libc::c_void,
+                test_data.len(),
+            )
+        };
+        assert_eq!(
+            write_result,
+            test_data.len() as isize,
+            "Should write full test data"
+        );
     }
 
     #[test]

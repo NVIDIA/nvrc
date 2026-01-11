@@ -8,11 +8,37 @@ use std::process::{Child, Command, Stdio};
 use crate::kmsg::kmsg;
 
 /// Convert hardened_std::fs::File to std::process::Stdio
+///
+/// # Safety Guarantees
+/// This function safely transfers fd ownership between type systems:
+/// 1. hardened_std::fs::File -> raw fd (via into_raw_fd)
+/// 2. raw fd -> std::fs::File (via from_raw_fd)
+/// 3. std::fs::File -> Stdio (via From trait)
+///
+/// The fd lifecycle is:
+/// - Created by hardened_std::fs::File::open() (validated, whitelisted path)
+/// - Transferred here (ownership moved, Drop prevented by into_raw_fd)
+/// - Adopted by std::fs::File (takes ownership, will close on drop)
+/// - Moved into Stdio (takes ownership from std::fs::File)
+/// - Eventually closed when Stdio/Command is dropped
+///
+/// **Why this is safe:**
+/// - No double-free: Each fd has exactly one owner at any time
+/// - No leaks: std::fs::File/Stdio will close the fd when dropped
+/// - No invalid fds: Only opened fds from hardened_std reach here
+/// - No use-after-free: Ownership transfer prevents dangling references
 fn file_to_stdio(file: hardened_std::fs::File) -> Stdio {
-    // SAFETY: We're transferring ownership of the fd from hardened_std::fs::File
-    // to std::fs::File, which will then be converted to Stdio
+    // Transfer ownership from hardened_std to raw fd
     let fd = file.into_raw_fd();
+
+    // SAFETY: Safe because:
+    // 1. `fd` is valid - it came from a successful File::open()
+    // 2. We have unique ownership - into_raw_fd() consumed the original File
+    // 3. from_raw_fd takes ownership - std::fs::File will close it on drop
+    // 4. No double-close possible - original File's Drop was prevented
     let std_file = unsafe { std::fs::File::from_raw_fd(fd) };
+
+    // Transfer to Stdio (which will take ownership and close on drop)
     Stdio::from(std_file)
 }
 

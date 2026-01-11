@@ -237,9 +237,15 @@ mod tests {
         }
         impl Drop for Cleanup<'_> {
             fn drop(&mut self) {
-                // Unmount in reverse order
+                // Unmount in reverse order (opposite of mount order)
+                // Log failures but don't panic - cleanup is best-effort
                 for dir in ["tmp", "run", "sys", "dev", "proc"] {
-                    let _ = umount(format!("{}/{}", self.root, dir).as_str());
+                    let path = format!("{}/{}", self.root, dir);
+                    if let Err(e) = umount(path.as_str()) {
+                        // In tests, unmount failures are expected if mount never succeeded
+                        // or if the test itself failed. Only log for debugging.
+                        eprintln!("Warning: Failed to unmount {}: {:?}", path, e);
+                    }
                 }
             }
         }

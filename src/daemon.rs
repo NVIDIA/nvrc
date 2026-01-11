@@ -175,7 +175,7 @@ mod tests {
 
         let mut nvrc = NVRC::default();
         nvrc.spawn_persistenced(run_dir.to_str().unwrap(), "/bin/true")
-            .expect("spawn_persistenced should succeed");
+            .expect("spawn_persistenced failed - check: 1) temp dir creation, 2) process spawn, 3) daemon tracking");
 
         // Directory should be created
         assert!(run_dir.exists());

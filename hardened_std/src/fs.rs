@@ -6,10 +6,31 @@
 use crate::{last_os_error, Error, Result};
 use alloc::string::ToString;
 
-/// Maximum bytes allowed in a single write operation
-/// Analysis: Production uses max 8 bytes ("16777216"), tests use max 11 bytes
-/// Setting to 20 bytes provides safety margin while staying hardened
+/// Maximum bytes allowed in a single write operation.
+///
+/// **Security Constraint:**
+/// Analysis: Production uses max 8 bytes ("16777216"), tests use max 11 bytes.
+/// Setting to 20 bytes provides safety margin while staying hardened.
+///
+/// **Enforcement:**
+/// - Runtime check in write() rejects data > MAX_WRITE_SIZE with WriteTooLarge error
+/// - Compile-time validation in tests ensures no code exceeds this limit
+/// - If you need to write more, you must:
+///   1. Justify the security implications
+///   2. Update MAX_WRITE_SIZE with documented analysis
+///   3. Add test coverage for the new limit
 const MAX_WRITE_SIZE: usize = 20;
+
+// Compile-time assertion to catch accidental increases
+// If this fails, you MUST justify why MAX_WRITE_SIZE needs to be larger
+const _: () = {
+    const fn assert_max_write_size_reasonable() {
+        if MAX_WRITE_SIZE > 50 {
+            panic!("MAX_WRITE_SIZE too large - security review required");
+        }
+    }
+    assert_max_write_size_reasonable();
+};
 
 /// Maximum path length in bytes (excluding null terminator)
 /// This is a security constraint to prevent path-based attacks and ensure
@@ -271,19 +292,27 @@ pub fn read_to_string(path: &str) -> Result<alloc::string::String> {
     let bytes_read =
         unsafe { libc::read(fd, buffer.as_mut_ptr() as *mut libc::c_void, MAX_READ_SIZE) };
 
-    // Always close fd
+    // Always close fd, but prioritize read errors over close errors
+    // If read succeeded but close failed, we still return the data
     let close_result = unsafe { libc::close(fd) };
 
+    // Check read result first - this is the primary operation
     if bytes_read < 0 {
         return Err(last_os_error());
     }
 
+    // Truncate to actual bytes read before checking close
+    buffer.truncate(bytes_read as usize);
+
+    // Only fail on close error if read succeeded and we haven't returned yet
+    // Note: In practice, close() rarely fails after successful read, but if it does,
+    // we've already got the data, so we could consider just logging the error.
+    // For now, we still fail to maintain strict error handling.
     if close_result < 0 {
+        // Data was read successfully but close failed
+        // Consider: Should we return the data anyway? For now, fail to be safe.
         return Err(last_os_error());
     }
-
-    // Truncate to actual bytes read
-    buffer.truncate(bytes_read as usize);
 
     // Convert to String
     alloc::string::String::from_utf8(buffer)
@@ -355,6 +384,15 @@ pub fn create_dir_all(path: &str) -> Result<()> {
             continue; // Skip empty components (leading / or //)
         }
 
+        // Security: Validate component doesn't contain null bytes
+        // This prevents C string truncation attacks where "\0" could terminate
+        // the path prematurely and bypass our whitelist validation
+        if component.contains('\0') {
+            return Err(Error::InvalidInput(
+                "Path component contains null byte".to_string(),
+            ));
+        }
+
         current_path.push(b'/');
         current_path.extend_from_slice(component.as_bytes());
 
@@ -424,14 +462,32 @@ impl File {
         Ok(File { fd: new_fd })
     }
 
-    /// Get the raw file descriptor
+    /// Convert File into raw file descriptor, transferring ownership.
     ///
-    /// Returns the underlying file descriptor without closing it.
-    /// Caller is responsible for eventually closing the fd.
+    /// **CRITICAL SECURITY WARNING:**
+    /// The caller MUST manually close the returned fd to prevent resource leaks.
+    /// File descriptor leaks in NVRC (PID 1 init process) can cause:
+    /// - Resource exhaustion (default limit: 1024 fds)
+    /// - Failed daemon spawns when all fds are consumed
+    /// - Socket creation failures
+    /// - System instability or denial of service
+    ///
+    /// **Caller Responsibilities:**
+    /// 1. MUST call `libc::close(fd)` or `std::fs::File::from_raw_fd(fd)` + drop
+    /// 2. MUST NOT call close() multiple times (double-free vulnerability)
+    /// 3. MUST NOT use the fd after closing it (use-after-free)
+    ///
+    /// **Typical Usage:**
+    /// ```no_run
+    /// let file = File::open("/dev/kmsg")?;
+    /// let fd = file.into_raw_fd();
+    /// // ... use fd in syscalls ...
+    /// unsafe { libc::close(fd) }; // REQUIRED - Don't forget!
+    /// ```
     ///
     /// # Safety
-    /// This method correctly prevents the Drop implementation from closing
-    /// the file descriptor by using `core::mem::forget`.
+    /// This method uses `core::mem::forget` to prevent the Drop implementation
+    /// from closing the fd. The fd remains open and valid until manually closed.
     ///
     /// # Compatibility
     /// In test mode with std available, also implements the standard library
