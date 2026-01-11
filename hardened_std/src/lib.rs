@@ -7,11 +7,15 @@
 
 extern crate alloc;
 
+// For tests, we need std
+#[cfg(test)]
+extern crate std;
+
+pub mod collections;
 pub mod fs;
+pub mod os;
 pub mod path;
 pub mod process;
-pub mod collections;
-pub mod os;
 
 use core::fmt;
 

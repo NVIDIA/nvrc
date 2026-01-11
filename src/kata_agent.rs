@@ -2,10 +2,10 @@
 // Copyright (c) NVIDIA CORPORATION
 
 use anyhow::{anyhow, Context, Result};
+use hardened_std::fs;
 use log::{debug, error};
 use nix::unistd::{fork, ForkResult};
 use rlimit::{setrlimit, Resource};
-use std::fs;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::thread::sleep;
@@ -30,7 +30,7 @@ fn agent_setup() -> Result<()> {
         "/proc/self/oom_score_adj",
         KATA_AGENT_OOM_SCORE_ADJ.as_bytes(),
     )
-    .context("write /proc/self/oom_score_adj")?;
+    .map_err(|e| anyhow!("write /proc/self/oom_score_adj: {}", e))?;
     let lim = rlimit::getrlimit(Resource::NOFILE)?;
     debug!("kata-agent RLIMIT_NOFILE: {:?}", lim);
     Ok(())
@@ -104,7 +104,7 @@ mod tests {
         assert_eq!(hard, 1024 * 1024);
 
         // Verify oom_score_adj was written
-        let oom = fs::read_to_string("/proc/self/oom_score_adj").unwrap();
+        let oom = std::fs::read_to_string("/proc/self/oom_score_adj").unwrap();
         assert_eq!(oom.trim(), KATA_AGENT_OOM_SCORE_ADJ);
     }
 
