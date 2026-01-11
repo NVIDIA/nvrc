@@ -3,11 +3,10 @@
 
 //! Filesystem setup for the minimal init environment.
 
-use crate::coreutils::{ln, mknod};
+use crate::coreutils::ln;
 use anyhow::{anyhow, Context, Result};
 use hardened_std::fs;
 use nix::mount::MsFlags;
-use nix::sys::stat;
 use std::path::Path;
 
 /// Mount a filesystem. Errors if mount fails.
@@ -68,22 +67,33 @@ fn proc_symlinks(root: &str) -> Result<()> {
     Ok(())
 }
 
-/// Create essential /dev device nodes for basic I/O.
-/// These character devices are fundamental Unix primitives:
-/// - /dev/null: discard output, read returns EOF
-/// - /dev/zero: infinite stream of zeros
-/// - /dev/random, /dev/urandom: cryptographic randomness
-fn device_nodes(root: &str) -> Result<()> {
-    for (path, minor) in [
-        ("dev/null", 3u64),
-        ("dev/zero", 5u64),
-        ("dev/random", 8u64),
-        ("dev/urandom", 9u64),
-    ] {
-        mknod(&format!("{root}/{path}"), stat::SFlag::S_IFCHR, 1, minor)?; // major 1 = memory devices
-    }
-    Ok(())
-}
+// Previously, we manually created device nodes with mknod():
+//   - /dev/null (major 1, minor 3)
+//   - /dev/zero (major 1, minor 5)
+//   - /dev/random (major 1, minor 8)
+//   - /dev/urandom (major 1, minor 9)
+//
+// However, devtmpfs automatically creates these nodes when we mount it!
+//
+// How it works:
+// 1. The kernel's mem driver (drivers/char/mem.c) calls device_create()
+//    during kernel initialization for each standard character device
+// 2. device_create() registers the device with devtmpfs
+// 3. When we mount devtmpfs (setup_at() line ~104), the kernel populates
+//    it with ALL registered devices, including /dev/null, /dev/zero, etc.
+// 4. Nodes are created with default permissions (e.g., /dev/null is 0666)
+//
+// Note: CONFIG_DEVTMPFS_MOUNT=y auto-mounts devtmpfs at boot for regular
+// init systems, but in our case (kata with initrd), NVRC explicitly mounts
+// devtmpfs below. Either way, the mount operation triggers node creation.
+//
+// References:
+// - Kernel source: drivers/char/mem.c (mem driver registration)
+// - Kernel source: drivers/base/devtmpfs.c (automatic node creation)
+// - LWN article: https://lwn.net/Articles/330985/
+//
+// This is why we removed the device_nodes() function - it was redundant
+// and caused "path already exists" errors with our fail-fast mknod().
 
 /// Set up the minimal filesystem hierarchy required for GPU initialization.
 /// Creates /proc, /dev, /sys, /run, /tmp mounts and essential device nodes.
@@ -138,7 +148,8 @@ fn setup_at(root: &str) -> Result<()> {
     )?;
 
     proc_symlinks(root)?;
-    device_nodes(root)?;
+    // devtmpfs automatically creates standard device nodes (/dev/null, /dev/zero, etc.)
+    // No need to manually create them with mknod()
     Ok(())
 }
 
@@ -219,14 +230,6 @@ mod tests {
         assert!(proc_symlinks("").is_ok());
     }
 
-    #[test]
-    fn test_device_nodes() {
-        // mknod() removes existing nodes first, then recreates.
-        // Safe: just recreates /dev/null, /dev/zero, etc. with same params.
-        require_root();
-        assert!(device_nodes("").is_ok());
-    }
-
     // === setup_at() tests with temp directory ===
 
     #[test]
@@ -248,7 +251,7 @@ mod tests {
         let result = setup_at(root);
         assert!(result.is_ok(), "setup_at failed: {:?}", result);
 
-        // Verify device nodes were created
+        // Verify device nodes exist (created automatically by devtmpfs)
         assert!(Path::new(&format!("{root}/dev/null")).exists());
         assert!(Path::new(&format!("{root}/dev/zero")).exists());
 
