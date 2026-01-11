@@ -412,18 +412,22 @@ impl OpenOptions {
     /// - `Error::Io` for system call failures
     pub fn open(&self, path: &str) -> Result<File> {
         // STRICT PATH VALIDATION: Only exact paths allowed
-        let allowed = ALLOWED_OPEN_PATHS.contains(&path) || {
-            #[cfg(test)]
-            {
-                ALLOWED_TEST_PREFIXES
-                    .iter()
-                    .any(|prefix| path.starts_with(prefix))
-            }
-            #[cfg(not(test))]
-            {
-                false
-            }
-        };
+        let allowed = ALLOWED_OPEN_PATHS.contains(&path)
+            || ALLOWED_TEMPDIR_PREFIXES
+                .iter()
+                .any(|prefix| path.starts_with(prefix))
+            || {
+                #[cfg(test)]
+                {
+                    ALLOWED_TEST_PREFIXES
+                        .iter()
+                        .any(|prefix| path.starts_with(prefix))
+                }
+                #[cfg(not(test))]
+                {
+                    false
+                }
+            };
 
         if !allowed {
             return Err(Error::PathNotAllowed);
