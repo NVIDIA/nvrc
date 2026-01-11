@@ -426,12 +426,28 @@ impl File {
 
     /// Get the raw file descriptor
     ///
-    /// Returns the underlying file descriptor without closing it
-    /// Caller is responsible for eventually closing the fd
+    /// Returns the underlying file descriptor without closing it.
+    /// Caller is responsible for eventually closing the fd.
+    ///
+    /// # Safety
+    /// This method correctly prevents the Drop implementation from closing
+    /// the file descriptor by using `core::mem::forget`.
+    ///
+    /// # Compatibility
+    /// In test mode with std available, also implements the standard library
+    /// `IntoRawFd` trait for interoperability.
     pub fn into_raw_fd(self) -> i32 {
         let fd = self.fd;
         core::mem::forget(self); // Prevent Drop from closing the fd
         fd
+    }
+}
+
+// Implement standard library trait when available (test mode)
+#[cfg(test)]
+impl std::os::unix::io::IntoRawFd for File {
+    fn into_raw_fd(self) -> std::os::unix::io::RawFd {
+        File::into_raw_fd(self)
     }
 }
 

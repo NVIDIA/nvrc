@@ -11,12 +11,6 @@ pub struct Path {
     inner: str,
 }
 
-/// Owned path buffer
-#[allow(dead_code)]
-pub struct PathBuf {
-    inner: String,
-}
-
 impl Path {
     /// Create a Path reference from a string reference.
     ///
@@ -41,10 +35,17 @@ impl AsRef<str> for Path {
     }
 }
 
+/// Owned path buffer
+pub struct PathBuf {
+    inner: String,
+}
+
 impl PathBuf {
-    #[allow(dead_code)]
+    /// Create an empty PathBuf
     pub fn new() -> Self {
-        todo!("PathBuf::new")
+        Self {
+            inner: String::new(),
+        }
     }
 }
 
