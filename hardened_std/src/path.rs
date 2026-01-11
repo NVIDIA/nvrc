@@ -17,9 +17,9 @@ impl Path {
     /// # Lifetime
     /// The returned Path reference has the same lifetime as the input string.
     /// This is safe because Path is repr(transparent) over str.
-    pub fn new<'a, S: AsRef<str> + ?Sized>(s: &'a S) -> &'a Path {
+    pub fn new<S: AsRef<str> + ?Sized>(s: &S) -> &Path {
         // SAFETY: Path is repr(transparent) over str, so they have identical memory layout.
-        // The pointer cast is safe, and the lifetime 'a ensures the Path reference
+        // The pointer cast is safe, and the lifetime relationship ensures the Path reference
         // cannot outlive the source string.
         unsafe { &*(s.as_ref() as *const str as *const Path) }
     }
@@ -37,6 +37,7 @@ impl AsRef<str> for Path {
 
 /// Owned path buffer
 pub struct PathBuf {
+    #[allow(dead_code)]
     inner: String,
 }
 
