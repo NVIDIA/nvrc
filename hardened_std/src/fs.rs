@@ -3,7 +3,8 @@
 
 //! Filesystem operations with security constraints
 
-use crate::{last_os_error, path::PathBuf, Error, Result};
+use crate::{last_os_error, Error, Result};
+use alloc::string::ToString;
 
 /// Maximum bytes allowed in a single write operation
 /// Analysis: Production uses max 8 bytes ("16777216"), tests use max 11 bytes
@@ -231,7 +232,7 @@ pub fn read_to_string(path: &str) -> Result<alloc::string::String> {
 
     // Convert to String
     alloc::string::String::from_utf8(buffer)
-        .map_err(|_| Error::InvalidInput(alloc::format!("File contains invalid UTF-8")))
+        .map_err(|_| Error::InvalidInput("File contains invalid UTF-8".to_string()))
 }
 
 /// Create directory and all parents with security constraints
@@ -322,73 +323,148 @@ pub fn create_dir_all(path: &str) -> Result<()> {
     Ok(())
 }
 
-// NOTE: remove_file and read_link are NOT needed in hardened_std
-// In production, NVRC runs as PID 1 in ephemeral VMs with fresh filesystems.
-// Existing files are errors, not something to check/remove.
-// See coreutils.rs ln() and mknod() - both fail fast if any file exists.
+/// Allowed file paths for File::open operations
+/// Only /dev/kmsg and /dev/null are needed for kernel message logging
+const ALLOWED_OPEN_PATHS: &[&str] = &[
+    "/dev/kmsg", // kmsg.rs - kernel message logging (debug mode)
+    "/dev/null", // kmsg.rs - discard output (production mode)
+];
 
-/// Get file metadata
-pub fn metadata(path: &str) -> Result<Metadata> {
-    todo!("fs::metadata")
-}
-
-/// File handle
+/// File handle wrapping a raw file descriptor
+#[derive(Debug)]
 pub struct File {
     fd: i32,
 }
 
 impl File {
+    /// Open file for writing with strict path whitelist
+    ///
+    /// # Security Constraints
+    /// - Only allows /dev/kmsg and /dev/null
+    /// - Opens write-only
+    ///
+    /// # Errors
+    /// - `Error::PathNotAllowed` if path not in whitelist
+    /// - `Error::Io` for system call failures
     pub fn open(path: &str) -> Result<Self> {
-        todo!("File::open")
+        OpenOptions::new().write(true).open(path)
+    }
+
+    /// Duplicate this file handle
+    ///
+    /// Creates a new File with an independent file descriptor pointing to the same file
+    pub fn try_clone(&self) -> Result<Self> {
+        // SAFETY: Duplicate the file descriptor
+        let new_fd = unsafe { libc::dup(self.fd) };
+
+        if new_fd < 0 {
+            return Err(last_os_error());
+        }
+
+        Ok(File { fd: new_fd })
+    }
+
+    /// Get the raw file descriptor
+    ///
+    /// Returns the underlying file descriptor without closing it
+    /// Caller is responsible for eventually closing the fd
+    pub fn into_raw_fd(self) -> i32 {
+        let fd = self.fd;
+        core::mem::forget(self); // Prevent Drop from closing the fd
+        fd
     }
 }
 
-/// File open options
+impl Drop for File {
+    fn drop(&mut self) {
+        // SAFETY: Close file descriptor on drop
+        unsafe {
+            libc::close(self.fd);
+        }
+    }
+}
+
+/// File open options builder
 pub struct OpenOptions {
     write: bool,
 }
 
 impl OpenOptions {
+    /// Create new OpenOptions with default settings
     pub fn new() -> Self {
-        todo!("OpenOptions::new")
+        Self { write: false }
     }
 
+    /// Set write mode
     pub fn write(&mut self, write: bool) -> &mut Self {
-        todo!("OpenOptions::write")
+        self.write = write;
+        self
     }
 
+    /// Open file with configured options and strict path whitelist
+    ///
+    /// # Security Constraints
+    /// - Path must be exactly /dev/kmsg or /dev/null
+    /// - Only write mode is supported
+    ///
+    /// # Errors
+    /// - `Error::PathNotAllowed` if path not in whitelist
+    /// - `Error::Io` for system call failures
     pub fn open(&self, path: &str) -> Result<File> {
-        todo!("OpenOptions::open")
+        // STRICT PATH VALIDATION: Only exact paths allowed
+        let allowed = ALLOWED_OPEN_PATHS.contains(&path) || {
+            #[cfg(test)]
+            {
+                ALLOWED_TEST_PREFIXES
+                    .iter()
+                    .any(|prefix| path.starts_with(prefix))
+            }
+            #[cfg(not(test))]
+            {
+                false
+            }
+        };
+
+        if !allowed {
+            return Err(Error::PathNotAllowed);
+        }
+
+        // Path length check
+        if path.len() > MAX_PATH_LEN {
+            return Err(Error::InvalidInput(alloc::format!(
+                "Path length {} exceeds maximum of {} bytes",
+                path.len(),
+                MAX_PATH_LEN
+            )));
+        }
+
+        // Convert path to C string
+        let mut path_buf = [0u8; PATH_BUF_SIZE];
+        path_buf[..path.len()].copy_from_slice(path.as_bytes());
+
+        // Determine open flags
+        let flags = if self.write {
+            libc::O_WRONLY
+        } else {
+            return Err(Error::InvalidInput(
+                "Only write mode is supported".to_string(),
+            ));
+        };
+
+        // SAFETY: Open file with libc::open
+        let fd = unsafe { libc::open(path_buf.as_ptr() as *const libc::c_char, flags) };
+
+        if fd < 0 {
+            return Err(last_os_error());
+        }
+
+        Ok(File { fd })
     }
 }
 
-/// File metadata
-pub struct Metadata {
-    _private: (),
-}
-
-impl Metadata {
-    pub fn file_type(&self) -> FileType {
-        todo!("Metadata::file_type")
-    }
-
-    pub fn mode(&self) -> u32 {
-        todo!("Metadata::mode")
-    }
-}
-
-/// File type
-pub struct FileType {
-    _private: (),
-}
-
-impl FileType {
-    pub fn is_fifo(&self) -> bool {
-        todo!("FileType::is_fifo")
-    }
-
-    pub fn is_char_device(&self) -> bool {
-        todo!("FileType::is_char_device")
+impl Default for OpenOptions {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -504,6 +580,43 @@ mod tests {
             create_dir_all("/etc/forbidden"),
             Err(Error::PathNotAllowed)
         ));
+    }
+
+    #[test]
+    fn test_file_open_dev_null() {
+        // /dev/null should always be openable for writing
+        let file = File::open("/dev/null");
+        assert!(file.is_ok());
+    }
+
+    #[test]
+    fn test_file_open_whitelist() {
+        // Only /dev/kmsg and /dev/null are allowed
+        assert!(matches!(
+            File::open("/etc/passwd"),
+            Err(Error::PathNotAllowed)
+        ));
+        assert!(matches!(File::open("/dev/sda"), Err(Error::PathNotAllowed)));
+    }
+
+    #[test]
+    fn test_open_options_builder() {
+        // Test OpenOptions builder pattern
+        let file = OpenOptions::new().write(true).open("/dev/null");
+        assert!(file.is_ok());
+
+        // Test file with test path
+        let test_file = test_path("open_options");
+        std::fs::write(&test_file, b"test").unwrap();
+        let file = OpenOptions::new().write(true).open(&test_file);
+        assert!(file.is_ok());
+    }
+
+    #[test]
+    fn test_open_options_write_required() {
+        // Opening without write mode should fail
+        let result = OpenOptions::new().open("/dev/null");
+        assert!(matches!(result, Err(Error::InvalidInput(_))));
     }
 }
 

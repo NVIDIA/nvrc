@@ -4,7 +4,6 @@
 //! OS-specific functionality
 
 pub mod unix {
-    pub mod fs;
     pub mod net;
     pub mod process;
 }

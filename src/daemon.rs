@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use hardened_std::fs;
 
 use crate::execute::background;

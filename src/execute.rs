@@ -2,9 +2,19 @@
 // Copyright (c) NVIDIA CORPORATION
 
 use anyhow::{anyhow, Context, Result};
+use std::os::fd::FromRawFd;
 use std::process::{Child, Command, Stdio};
 
 use crate::kmsg::kmsg;
+
+/// Convert hardened_std::fs::File to std::process::Stdio
+fn file_to_stdio(file: hardened_std::fs::File) -> Stdio {
+    // SAFETY: We're transferring ownership of the fd from hardened_std::fs::File
+    // to std::fs::File, which will then be converted to Stdio
+    let fd = file.into_raw_fd();
+    let std_file = unsafe { std::fs::File::from_raw_fd(fd) };
+    Stdio::from(std_file)
+}
 
 /// Run a command and block until completion. Output goes to kmsg so it appears
 /// in dmesg/kernel log - the only reliable log destination in minimal VMs.
@@ -15,8 +25,12 @@ pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
     let kmsg_file = kmsg().context("Failed to open kmsg device")?;
     let status = Command::new(command)
         .args(args)
-        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg_file))
+        .stdout(file_to_stdio(
+            kmsg_file
+                .try_clone()
+                .map_err(|e| anyhow!("Failed to clone kmsg file: {}", e))?,
+        ))
+        .stderr(file_to_stdio(kmsg_file))
         .status()
         .context(format!("failed to execute {command}"))?;
 
@@ -34,8 +48,12 @@ pub fn background(command: &str, args: &[&str]) -> Result<Child> {
     let kmsg_file = kmsg().context("Failed to open kmsg device")?;
     Command::new(command)
         .args(args)
-        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg_file))
+        .stdout(file_to_stdio(
+            kmsg_file
+                .try_clone()
+                .map_err(|e| anyhow!("Failed to clone kmsg file: {}", e))?,
+        ))
+        .stderr(file_to_stdio(kmsg_file))
         .spawn()
         .with_context(|| format!("Failed to start {}", command))
 }

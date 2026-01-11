@@ -6,7 +6,7 @@
 //! In production, panic triggers VM power-off. For tests, the shutdown
 //! action is configurable via `set_panic_hook_with()`.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use hardened_std::fs;
 use nix::sys::reboot::{reboot, RebootMode};
 use nix::unistd::sync;

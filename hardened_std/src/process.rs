@@ -6,23 +6,28 @@
 use crate::Result;
 
 /// Command builder
+#[allow(dead_code)]
 pub struct Command {
     path: &'static str,
 }
 
 impl Command {
+    #[allow(unused_variables)]
     pub fn new(path: &'static str) -> Self {
         todo!("Command::new")
     }
 
+    #[allow(unused_variables)]
     pub fn args(&mut self, args: &[&'static str]) -> &mut Self {
         todo!("Command::args")
     }
 
+    #[allow(unused_variables)]
     pub fn stdout(&mut self, cfg: Stdio) -> &mut Self {
         todo!("Command::stdout")
     }
 
+    #[allow(unused_variables)]
     pub fn stderr(&mut self, cfg: Stdio) -> &mut Self {
         todo!("Command::stderr")
     }
@@ -41,6 +46,7 @@ impl Command {
 }
 
 /// Child process
+#[allow(dead_code)]
 pub struct Child {
     pid: i32,
 }
@@ -60,6 +66,7 @@ impl Child {
 }
 
 /// Exit status
+#[allow(dead_code)]
 pub struct ExitStatus {
     code: i32,
 }
@@ -79,6 +86,7 @@ pub enum Stdio {
 }
 
 impl Stdio {
+    #[allow(unused_variables)]
     pub fn from(file: crate::fs::File) -> Self {
         todo!("Stdio::from")
     }

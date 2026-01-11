@@ -12,6 +12,7 @@ pub struct Path {
 }
 
 /// Owned path buffer
+#[allow(dead_code)]
 pub struct PathBuf {
     inner: String,
 }
@@ -21,10 +22,12 @@ impl Path {
         unsafe { &*(s.as_ref() as *const str as *const Path) }
     }
 
+    #[allow(dead_code)]
     pub fn exists(&self) -> bool {
         todo!("Path::exists")
     }
 
+    #[allow(dead_code)]
     pub fn is_symlink(&self) -> bool {
         todo!("Path::is_symlink")
     }
@@ -41,7 +44,14 @@ impl AsRef<str> for Path {
 }
 
 impl PathBuf {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         todo!("PathBuf::new")
+    }
+}
+
+impl Default for PathBuf {
+    fn default() -> Self {
+        Self::new()
     }
 }

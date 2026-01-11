@@ -193,7 +193,7 @@ mod tests {
 
         mknod(devpath.to_str().unwrap(), SFlag::S_IFCHR, 1, 3).unwrap();
 
-        let meta = fs::metadata(&devpath).unwrap();
+        let meta = std::fs::metadata(&devpath).unwrap();
         assert!(meta.file_type().is_char_device());
     }
 
