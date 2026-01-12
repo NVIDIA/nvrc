@@ -6,12 +6,12 @@
 //! This module provides a stack-allocated HashMap with a fixed maximum size
 //! to avoid heap allocations while maintaining the std::collections::HashMap API.
 //!
-//! Security constraint: Only supports &'static str keys and Copy values (function pointers).
+//! Security constraint: Only supports &'static str keys and fn(&mut T) function pointer values.
 //! This restriction ensures:
 //! - No heap allocations
 //! - No dynamic strings that could be controlled by attackers
 //! - Only compile-time known keys
-//! - Only function pointers or other Copy types as values
+//! - Only function pointers of the form fn(&mut T) as values
 
 /// Sealed traits to restrict HashMap key and value types.
 /// Cannot be implemented outside this module - this is the security boundary.
@@ -54,9 +54,9 @@ impl<T> HashMapValue for fn(&mut T) {}
 /// **What you CANNOT use (compile-time errors):**
 /// - Keys: String, &str, i32, or any other type - ONLY &'static str works
 /// - Values: i32, bool, String, Vec, fn(), fn(T), or any other type - ONLY fn(&mut T) works
+#[derive(Copy, Clone)]
 pub struct HashMap<K: HashMapKey, V: HashMapValue> {
     entries: [(K, V); 4],
-    len: usize,
 }
 
 impl<V: HashMapValue> HashMap<&'static str, V> {
@@ -67,26 +67,14 @@ impl<V: HashMapValue> HashMap<&'static str, V> {
     /// Keys must be &'static str - compile-time constants only.
     /// No runtime strings allowed.
     pub fn from(entries: [(&'static str, V); 4]) -> Self {
-        Self { entries, len: 4 }
+        Self { entries }
     }
 
     /// Get a reference to the value associated with a key.
     /// Returns None if the key is not found.
     /// Time complexity: O(n) where n=4 (linear search, acceptable for small fixed size).
     pub fn get(&self, key: &str) -> Option<&V> {
-        self.entries[..self.len]
-            .iter()
-            .find(|(k, _)| *k == key)
-            .map(|(_, v)| v)
-    }
-
-    /// Returns a copy of the HashMap.
-    /// Used in main.rs for copying function pointers: `modes.get(mode).copied()`
-    pub fn copied(&self) -> Self {
-        Self {
-            entries: self.entries,
-            len: self.len,
-        }
+        self.entries.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
     }
 }
 
@@ -166,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hashmap_copied() {
+    fn test_hashmap_copy() {
         type CounterFn = fn(&mut usize);
 
         fn inc(x: &mut usize) {
@@ -189,12 +177,17 @@ mod tests {
             ("reset", reset as CounterFn),
         ]);
 
-        let map2 = map1.copied();
+        // HashMap derives Copy, so we can copy it directly
+        let map2: HashMap<&str, CounterFn> = map1;
 
         let mut val = 5;
-        if let Some(&func) = map2.get("double") {
+        // Option::copied() works because fn pointers are Copy
+        if let Some(func) = map2.get("double").copied() {
             func(&mut val);
         }
         assert_eq!(val, 10);
+
+        // Verify map1 is still usable (it was copied, not moved)
+        assert!(map1.get("inc").is_some());
     }
 }
