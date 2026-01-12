@@ -78,8 +78,6 @@ mod tests {
 
     #[test]
     fn test_kmsg_at_temp_file() {
-        use std::os::unix::io::AsRawFd;
-
         // Create a temp file to verify we can actually write to it
         let temp = NamedTempFile::new().unwrap();
         let path = temp.path().to_str().unwrap();
