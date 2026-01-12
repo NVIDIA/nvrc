@@ -250,7 +250,7 @@ additional functions that can be enabled or disabled depending on the use case.
 # NVIDIA_GPU_STACK="latest,compute,dcgm,nvswitch,gpudirect"
 ```
 
-### **NVRC - (NVIDIA runcom) simplistic init system** — *in progress*
+### **NVRC - (NVIDIA runcom) simplistic init system** [#104](https://github.com/NVIDIA/nvrc/issues/104)
 
 The minimal init system is the lightweight, formally verified entry point
 responsible solely for initializing the runtime environment and launching the
@@ -312,7 +312,7 @@ flowchart BT
     style guest_os stroke:#76B900,color:#76B900,stroke-width:3px
 ```
 
-### **Seccomp Secure Computing Mode** — *planned*
+### **Seccomp Secure Computing Mode** [#105](https://github.com/NVIDIA/nvrc/issues/105)
 
 **Seccomp** allows the kernel to enforce a per-process *allow list* of system
 calls, optionally gated by argument filters. Because a rootkit must invoke
@@ -326,7 +326,7 @@ malicious code to create or disguise a listening socket will be aborted by the
 kernel (returning `EPERM` or killing the task), eliminating the rootkit's
 primary avenue for connection hiding.
 
-### **SELinux** — *in progress*
+### **SELinux** [#106](https://github.com/NVIDIA/nvrc/issues/106)
 
 SELinux provides mandatory access control policies that strictly separate the
 container context from the host context, effectively limiting interactions
@@ -360,7 +360,7 @@ persistence attacks.
 This mechanism is also activated with each PR, meaning that every build of the
 Kernel and/or Rootfs will trigger the creation of a new rotating key.
 
-### **Kernel Hardening** — *in progress*
+### **Kernel Hardening** [#107](https://github.com/NVIDIA/nvrc/issues/107)
 
 To raise the bar against kernel-level exploits, the micro-VM guest enables a
 focused set of Linux Security Modules (LSMs) that operate even before user
@@ -382,7 +382,7 @@ Further kernel hardening options are, e.g.
 |                             | **`CONFIG_INIT_ON_ALLOC` and `CONFIG_INIT_ON_FREE`**     | Zeroes every page on allocation/free, preventing information leaks if an attacker does gain arbitrary-read primitives. |
 |                             | **`STRICT_MODULE_RWX` \+ `rodata=on`**                   | Forces module text read-only/exec-only and kernel read-only data permanent, thwarting live patching attempts.          |
 
-### **Integrity Policy Enforcement (IPE)** — *planned*
+### **Integrity Policy Enforcement (IPE)** [#108](https://github.com/NVIDIA/nvrc/issues/108)
 
 Integrity Policy Enforcement is a modern Linux security module that takes code
 integrity one step beyond traditional access control. Rather than looking at
@@ -404,7 +404,7 @@ modules, IPE completes the defense-in-depth story, ensuring that every
 executable bit in the confidential AI workload is both *origin-verified* and
 *policy-approved* before it ever reaches the CPU.
 
-### **Measured Rootfs** — *in progress*
+### **Measured Rootfs** [#109](https://github.com/NVIDIA/nvrc/issues/109)
 
 The guest’s root is *measured* in two complementary layers:
 
@@ -430,7 +430,7 @@ authenticity of new or mutable files, and IPE enforces that only measured,
 policy-approved code ever reaches the CPU, delivering continuous, verifiable
 integrity from boot through runtime.
 
-### **Linux Kernel Runtime Guard (LKRG)** — *planned*
+### **Linux Kernel Runtime Guard (LKRG)** [#110](https://github.com/NVIDIA/nvrc/issues/110)
 
 Linux Kernel Runtime Guard is a self-protecting kernel module that continuously
 monitors the kernel's internal state for unexpected changes and enforces
@@ -448,7 +448,7 @@ key, it loads automatically at boot and operates with negligible overhead,
 rounding out the defense-in-depth chain from measured boot, through
 policy-enforced execution, to continuous kernel integrity monitoring.
 
-### **VM Introspection, DOCA AppShield** — *in progress*
+### **VM Introspection, DOCA AppShield** [#111](https://github.com/NVIDIA/nvrc/issues/111)
 
 DOCA AppShield offloads intrusion detection to the BlueField DPU. The DPU
 exposes a **DMA engine** that can read guest or host memory directly,
@@ -519,7 +519,7 @@ forensics more than the marginal decrease in isolation, and ensure the DPU
 firmware and mediation layer are themselves measured and attested (they can be
 logged to a ledger and included in the attestation evidence bundle).
 
-### **Guest File System Software Bill of Materials (SBOM) Enforcement** — *planned*
+### **Guest File System Software Bill of Materials (SBOM) Enforcement** [#112](https://github.com/NVIDIA/nvrc/issues/112)
 
 For every build of the chiselled root file system, we emit a file-based SBOM,
 recorded in, for example, SPDX-JSON and bundled alongside the image hash, that
@@ -548,7 +548,7 @@ the friction-free developer experience of containers while silently delivering
 the hardened, measured environment detailed throughout the "Security Mechanisms
 and Countermeasures" section.
 
-### **Trusted Device Manager (TDM) for TDISP/IDE** — *in progress*
+### **Trusted Device Manager (TDM) for TDISP/IDE** [#113](https://github.com/NVIDIA/nvrc/issues/113)
 
 Specific accelerators, GPUs, SmartNICs, PCIe 5.0/CXL devices, ship with
 **TDISP / IDE** (Integrity & Data-Encryption) support so that all on-the-wire
@@ -606,7 +606,7 @@ runtime not only keeps the state machine small and verifiable, but it also
 guarantees that the cryptographic protection offered by TDISP/IDE remains
 intact for the entire life cycle of the confidential workload.
 
-### **Provenance & Supply-Chain Security** — *planned*
+### **Provenance & Supply-Chain Security** [#114](https://github.com/NVIDIA/nvrc/issues/114)
 
 Every artifact that lands in the micro-VM, the kernel, signed LKMs, chiselled
 rootfs image, SBOM, seccomp profile, LKRG policy, and Trusted-Device-Manager
@@ -634,7 +634,7 @@ This process yields a **single source of truth**, a cryptographically
 verifiable ledger entry, for every piece of software that will ever execute in
 the confidential guest.
 
-### **Attestation & Runtime Integrity** — *planned*
+### **Attestation & Runtime Integrity** [#115](https://github.com/NVIDIA/nvrc/issues/115)
 
 At launch, **NVRC**  **(NVIDIA runcom)** assembles an **evidence bundle** that
 fuses hardware, software, and supply-chain claims:
@@ -673,7 +673,7 @@ unbroken chain: build-time transparency creates the reference values, and
 run-time attestation continually proves that those values still govern the
 executing system.
 
-### **Attesting PCIe Topology and ACPI Tables in Confidential VMs** — *planned*
+### **Attesting PCIe Topology and ACPI Tables in Confidential VMs** [#116](https://github.com/NVIDIA/nvrc/issues/116)
 
 In Confidential Computing (CC) environments like those enabled by Kata
 Containers, the VMM and firmware stack are not inherently trusted. When PCI
@@ -827,7 +827,7 @@ Thus, executable packing reduces every VM image we ship while remaining fully
 compatible with the measured-boot, SBOM, and attestation flow described
 earlier in this document.
 
-### **Side-Channel Mitigations Using LSM and System Hardening** — *planned*
+### **Side-Channel Mitigations Using LSM and System Hardening** [#117](https://github.com/NVIDIA/nvrc/issues/117)
 
 While TEEs help reduce observability, side-channel attacks can still exploit
 kernel or user-space telemetry to infer sensitive workload behavior.
@@ -934,7 +934,7 @@ side-channel risk, ideal for sensitive workloads.
 
 Reference: [https://www.ndss-symposium.org/ndss-paper/counterseveillance-performance-counter-attacks-on-amd-sev-snp/](https://www.ndss-symposium.org/ndss-paper/counterseveillance-performance-counter-attacks-on-amd-sev-snp/)
 
-### **libc-free Rust, musl-static, and `no_std`** — *in progress*
+### **libc-free Rust, musl-static, and `no_std`** [#118](https://github.com/NVIDIA/nvrc/issues/118)
 
 For all in-guest control components (Rust init, Trusted Device Manager helpers,
 small utilities) we remove the C runtime where feasible and **do not rely on
