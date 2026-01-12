@@ -7,12 +7,12 @@
 //! this socket and forward messages to the kernel log via trace!(). Severity
 //! levels are stripped since all messages go to the same destination anyway.
 
+use hardened_std::os::unix::net::UnixDatagram;
+use hardened_std::{Error, Result};
 use log::trace;
 use nix::poll::{PollFd, PollFlags, PollTimeout};
 use once_cell::sync::OnceCell;
 use std::os::fd::AsFd;
-use std::os::unix::net::UnixDatagram;
-use std::path::Path;
 
 /// Global syslog socket—lazily initialized on first poll().
 /// OnceCell ensures thread-safe one-time init. Ephemeral init runs once,
@@ -21,18 +21,22 @@ static SYSLOG: OnceCell<UnixDatagram> = OnceCell::new();
 
 const DEV_LOG: &str = "/dev/log";
 
+/// Convert nix::Error to hardened_std::Error
+fn nix_to_error(e: nix::Error) -> Error {
+    Error::Io(e as i32)
+}
+
 /// Create and bind a Unix datagram socket at the given path.
-fn bind(path: &Path) -> std::io::Result<UnixDatagram> {
+fn bind(path: &str) -> Result<UnixDatagram> {
     UnixDatagram::bind(path)
 }
 
 /// Check socket for pending messages (non-blocking).
 /// Returns None if no data available, Some(msg) if a message was read.
-fn poll_socket(sock: &UnixDatagram) -> std::io::Result<Option<String>> {
+fn poll_socket(sock: &UnixDatagram) -> Result<Option<String>> {
     let mut fds = [PollFd::new(sock.as_fd(), PollFlags::POLLIN)];
     // Non-blocking poll—init loop calls this frequently, can't afford to block
-    let count = nix::poll::poll(&mut fds, PollTimeout::ZERO)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let count = nix::poll::poll(&mut fds, PollTimeout::ZERO).map_err(nix_to_error)?;
 
     if count == 0 {
         return Ok(None); // No events, no data waiting
@@ -57,8 +61,8 @@ fn poll_socket(sock: &UnixDatagram) -> std::io::Result<Option<String>> {
 /// Lazily initializes /dev/log on first call.
 /// Drains one message per call—rate-limited to prevent DoS by syslog flooding.
 /// Caller loops at ~2 msg/sec (500ms sleep between calls).
-pub fn poll() -> std::io::Result<()> {
-    poll_at(Path::new(DEV_LOG))
+pub fn poll() -> Result<()> {
+    poll_at(DEV_LOG)
 }
 
 /// Poll with timeout (milliseconds). Blocks until data arrives or timeout.
@@ -67,13 +71,13 @@ pub fn poll() -> std::io::Result<()> {
 ///
 /// **Timeout limits:** Values are clamped to 65535ms (~65s). Negative values
 /// block indefinitely. For production 500ms polling, this is not a concern.
-pub fn poll_timeout(timeout_ms: i32) -> std::io::Result<bool> {
-    poll_timeout_at(Path::new(DEV_LOG), timeout_ms)
+pub fn poll_timeout(timeout_ms: i32) -> Result<bool> {
+    poll_timeout_at(DEV_LOG, timeout_ms)
 }
 
 /// Internal: poll with timeout at a specific path.
-fn poll_timeout_at(path: &Path, timeout_ms: i32) -> std::io::Result<bool> {
-    let sock: &UnixDatagram = if path == Path::new(DEV_LOG) {
+fn poll_timeout_at(path: &str, timeout_ms: i32) -> Result<bool> {
+    let sock: &UnixDatagram = if path == DEV_LOG {
         SYSLOG.get_or_try_init(|| bind(path))?
     } else {
         return poll_once_timeout(path, timeout_ms);
@@ -83,7 +87,7 @@ fn poll_timeout_at(path: &Path, timeout_ms: i32) -> std::io::Result<bool> {
 }
 
 /// Poll socket with timeout. Returns Ok(true) if message read, Ok(false) on timeout.
-fn poll_socket_timeout(sock: &UnixDatagram, timeout_ms: i32) -> std::io::Result<bool> {
+fn poll_socket_timeout(sock: &UnixDatagram, timeout_ms: i32) -> Result<bool> {
     let mut fds = [PollFd::new(sock.as_fd(), PollFlags::POLLIN)];
     let timeout = if timeout_ms < 0 {
         PollTimeout::NONE
@@ -93,8 +97,7 @@ fn poll_socket_timeout(sock: &UnixDatagram, timeout_ms: i32) -> std::io::Result<
         PollTimeout::from(ms)
     };
 
-    let count =
-        nix::poll::poll(&mut fds, timeout).map_err(|e| std::io::Error::other(e.to_string()))?;
+    let count = nix::poll::poll(&mut fds, timeout).map_err(nix_to_error)?;
 
     if count == 0 {
         return Ok(false); // Timeout
@@ -116,15 +119,15 @@ fn poll_socket_timeout(sock: &UnixDatagram, timeout_ms: i32) -> std::io::Result<
 }
 
 /// One-shot poll with timeout for testing.
-fn poll_once_timeout(path: &Path, timeout_ms: i32) -> std::io::Result<bool> {
+fn poll_once_timeout(path: &str, timeout_ms: i32) -> Result<bool> {
     let sock = bind(path)?;
     poll_socket_timeout(&sock, timeout_ms)
 }
 
 /// Internal: poll a specific socket path (for unit tests).
 /// Production code uses poll() which hardcodes /dev/log.
-fn poll_at(path: &Path) -> std::io::Result<()> {
-    let sock: &UnixDatagram = if path == Path::new(DEV_LOG) {
+fn poll_at(path: &str) -> Result<()> {
+    let sock: &UnixDatagram = if path == DEV_LOG {
         SYSLOG.get_or_try_init(|| bind(path))?
     } else {
         // For testing: create a one-shot socket (caller manages lifecycle)
@@ -140,7 +143,7 @@ fn poll_at(path: &Path) -> std::io::Result<()> {
 
 /// One-shot poll for testing: bind, poll once, return.
 /// Socket is dropped after call—suitable for tests with temp paths.
-fn poll_once(path: &Path) -> std::io::Result<()> {
+fn poll_once(path: &str) -> Result<()> {
     let sock = bind(path)?;
     if let Some(msg) = poll_socket(&sock)? {
         trace!("{}", msg);
@@ -160,6 +163,7 @@ fn strip_priority(msg: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::net::UnixDatagram as StdUnixDatagram;
     use tempfile::TempDir;
 
     // === strip_priority tests ===
@@ -191,26 +195,27 @@ mod tests {
     fn test_bind_success() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
-        let sock = bind(&path);
+        let path_str = path.to_str().unwrap();
+        let sock = bind(path_str);
         assert!(sock.is_ok());
     }
 
     #[test]
-    fn test_bind_nonexistent_dir() {
-        let path = Path::new("/nonexistent/dir/test.sock");
-        let err = bind(path).unwrap_err();
-        // Should fail with "No such file or directory" (ENOENT)
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    fn test_bind_disallowed_path() {
+        // hardened_std rejects paths outside the whitelist before attempting bind
+        let err = bind("/nonexistent/dir/test.sock").unwrap_err();
+        assert!(matches!(err, Error::PathNotAllowed));
     }
 
     #[test]
     fn test_bind_already_exists() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
-        let _sock1 = bind(&path).unwrap();
-        // Binding again to same path should fail with "Address already in use"
-        let err = bind(&path).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+        let path_str = path.to_str().unwrap();
+        let _sock1 = bind(path_str).unwrap();
+        // Binding again to same path should fail with EADDRINUSE
+        let err = bind(path_str).unwrap_err();
+        assert!(matches!(err, Error::Io(libc::EADDRINUSE)));
     }
 
     // === poll_socket tests ===
@@ -219,7 +224,8 @@ mod tests {
     fn test_poll_socket_no_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
-        let sock = bind(&path).unwrap();
+        let path_str = path.to_str().unwrap();
+        let sock = bind(path_str).unwrap();
 
         let result = poll_socket(&sock).unwrap();
         assert_eq!(result, None);
@@ -229,9 +235,11 @@ mod tests {
     fn test_poll_socket_with_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
+        let path_str = path.to_str().unwrap();
+        let server = bind(path_str).unwrap();
 
-        let client = UnixDatagram::unbound().unwrap();
+        // Use std::os::unix::net for client (test-only, no restrictions needed)
+        let client = StdUnixDatagram::unbound().unwrap();
         client.send_to(b"<6>hello world", &path).unwrap();
 
         let result = poll_socket(&server).unwrap();
@@ -242,9 +250,10 @@ mod tests {
     fn test_poll_socket_strips_priority() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
+        let path_str = path.to_str().unwrap();
+        let server = bind(path_str).unwrap();
 
-        let client = UnixDatagram::unbound().unwrap();
+        let client = StdUnixDatagram::unbound().unwrap();
         client.send_to(b"<3>error message", &path).unwrap();
 
         let result = poll_socket(&server).unwrap();
@@ -255,9 +264,10 @@ mod tests {
     fn test_poll_socket_multiple_messages() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
+        let path_str = path.to_str().unwrap();
+        let server = bind(path_str).unwrap();
 
-        let client = UnixDatagram::unbound().unwrap();
+        let client = StdUnixDatagram::unbound().unwrap();
         client.send_to(b"<6>first", &path).unwrap();
         client.send_to(b"<6>second", &path).unwrap();
 
@@ -277,9 +287,10 @@ mod tests {
     fn test_poll_socket_trims_trailing_whitespace() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
+        let path_str = path.to_str().unwrap();
+        let server = bind(path_str).unwrap();
 
-        let client = UnixDatagram::unbound().unwrap();
+        let client = StdUnixDatagram::unbound().unwrap();
         client.send_to(b"<6>message with newline\n", &path).unwrap();
 
         let result = poll_socket(&server).unwrap();
@@ -292,9 +303,10 @@ mod tests {
     fn test_poll_once_no_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
+        let path_str = path.to_str().unwrap();
 
         // poll_once will bind and poll - should succeed with no messages
-        let result = poll_once(&path);
+        let result = poll_once(path_str);
         assert!(result.is_ok());
     }
 
@@ -302,12 +314,13 @@ mod tests {
     fn test_poll_once_with_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
+        let path_str = path.to_str().unwrap();
 
         // Create server socket first
-        let server = bind(&path).unwrap();
+        let server = bind(path_str).unwrap();
 
         // Send data
-        let client = UnixDatagram::unbound().unwrap();
+        let client = StdUnixDatagram::unbound().unwrap();
         client.send_to(b"<6>poll_once test", &path).unwrap();
 
         // poll_socket on the server
@@ -319,9 +332,10 @@ mod tests {
     fn test_poll_at_custom_path() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("custom.sock");
+        let path_str = path.to_str().unwrap();
 
         // poll_at with non-/dev/log path uses poll_once internally
-        let result = poll_at(&path);
+        let result = poll_at(path_str);
         assert!(result.is_ok());
     }
 
@@ -338,7 +352,8 @@ mod tests {
     fn test_poll_socket_timeout_no_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("timeout.sock");
-        let sock = bind(&path).unwrap();
+        let path_str = path.to_str().unwrap();
+        let sock = bind(path_str).unwrap();
 
         let start = std::time::Instant::now();
         let result = poll_socket_timeout(&sock, 100).unwrap();
@@ -354,9 +369,10 @@ mod tests {
     fn test_poll_socket_timeout_with_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("timeout_data.sock");
-        let server = bind(&path).unwrap();
+        let path_str = path.to_str().unwrap();
+        let server = bind(path_str).unwrap();
 
-        let client = UnixDatagram::unbound().unwrap();
+        let client = StdUnixDatagram::unbound().unwrap();
         client.send_to(b"<6>timeout test", &path).unwrap();
 
         let start = std::time::Instant::now();
@@ -372,7 +388,8 @@ mod tests {
     fn test_poll_socket_timeout_negative_zero_timeout() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("zero_timeout.sock");
-        let sock = bind(&path).unwrap();
+        let path_str = path.to_str().unwrap();
+        let sock = bind(path_str).unwrap();
 
         // Zero timeout should return immediately (no data)
         let result = poll_socket_timeout(&sock, 0).unwrap();
@@ -383,9 +400,10 @@ mod tests {
     fn test_poll_timeout_at_custom_path() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("timeout_custom.sock");
+        let path_str = path.to_str().unwrap();
 
         // poll_timeout_at with custom path uses poll_once_timeout
-        let result = poll_timeout_at(&path, 10);
+        let result = poll_timeout_at(path_str, 10);
         assert!(result.is_ok());
         assert!(!result.unwrap()); // No data, should timeout
     }

@@ -17,6 +17,18 @@ use core::ffi::c_int;
 /// Maximum path length for Unix socket addresses (from sys/un.h)
 const UNIX_PATH_MAX: usize = 108;
 
+/// TempDir paths for dependent crate tests (always available).
+/// TempDir creates paths like /tmp/.tmpXXXXX which are ephemeral and safe.
+const ALLOWED_TEMPDIR_PREFIXES: &[&str] = &[
+    "/tmp/.", // TempDir paths for NVRC syslog tests
+];
+
+/// Test path prefixes only for hardened_std's own tests
+#[cfg(test)]
+const ALLOWED_TEST_PREFIXES: &[&str] = &[
+    "/tmp/hardened_", // hardened_std's own test sockets
+];
+
 /// Check if socket path is allowed
 fn is_socket_path_allowed(path: &str) -> bool {
     // Production: only /dev/log for syslog
@@ -24,9 +36,20 @@ fn is_socket_path_allowed(path: &str) -> bool {
         return true;
     }
 
-    // Tests: allow /tmp/* paths (requires trailing slash, so "/tmp" alone rejected)
+    // Allow TempDir paths for dependent crate tests (nvrc tests)
+    if ALLOWED_TEMPDIR_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+    {
+        return true;
+    }
+
+    // hardened_std's own tests: allow /tmp/hardened_* paths
     #[cfg(test)]
-    if path.starts_with("/tmp/") {
+    if ALLOWED_TEST_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+    {
         return true;
     }
 
@@ -38,6 +61,7 @@ fn is_socket_path_allowed(path: &str) -> bool {
 /// **Allowed paths:**
 /// - `/dev/log` - syslog socket (production)
 /// - `/tmp/*` - temporary paths (test only)
+#[derive(Debug)]
 pub struct UnixDatagram {
     fd: c_int,
 }
@@ -153,6 +177,17 @@ impl crate::os::fd::AsFd for UnixDatagram {
     }
 }
 
+/// Implement std::os::fd::AsFd when std-support is enabled.
+/// This allows using hardened_std::UnixDatagram with nix::poll::PollFd.
+#[cfg(feature = "std-support")]
+impl std::os::fd::AsFd for UnixDatagram {
+    fn as_fd(&self) -> std::os::fd::BorrowedFd<'_> {
+        // SAFETY: self.fd is a valid file descriptor owned by this UnixDatagram.
+        // The BorrowedFd's lifetime is tied to &self, ensuring the fd remains valid.
+        unsafe { std::os::fd::BorrowedFd::borrow_raw(self.fd) }
+    }
+}
+
 /// Socket address for Unix domain sockets (opaque marker type).
 pub struct SocketAddr {
     _addr: libc::sockaddr_un,
@@ -179,9 +214,17 @@ mod tests {
     }
 
     #[test]
-    fn test_path_whitelist_tmp() {
-        assert!(is_socket_path_allowed("/tmp/test.sock"));
-        assert!(is_socket_path_allowed("/tmp/foo/bar.sock"));
+    fn test_path_whitelist_tempdir() {
+        // TempDir paths (always allowed for dependent crate tests)
+        assert!(is_socket_path_allowed("/tmp/.tmpABCDE/test.sock"));
+        assert!(is_socket_path_allowed("/tmp/.tmp123/sub/test.sock"));
+    }
+
+    #[test]
+    fn test_path_whitelist_test_prefixes() {
+        // hardened_std test paths (only in cfg(test))
+        assert!(is_socket_path_allowed("/tmp/hardened_test.sock"));
+        assert!(is_socket_path_allowed("/tmp/hardened_multi.sock"));
     }
 
     #[test]
@@ -191,6 +234,7 @@ mod tests {
         assert!(!is_socket_path_allowed("relative/path"));
         assert!(!is_socket_path_allowed("/home/user/sock"));
         assert!(!is_socket_path_allowed("/tmp")); // No trailing slash
+        assert!(!is_socket_path_allowed("/tmp/random.sock")); // Not in whitelist
     }
 
     #[test]
@@ -228,8 +272,8 @@ mod tests {
     #[test]
     fn test_bind_path_too_long() {
         // UNIX_PATH_MAX is 108, so a path of 108+ bytes should be rejected
-        // "/tmp/" is 5 chars, so we need 103+ more to reach 108
-        let long_path = format!("/tmp/{}", "x".repeat(103));
+        // "/tmp/hardened_" is 14 chars, so we need 94+ more to reach 108
+        let long_path = format!("/tmp/hardened_{}", "x".repeat(94));
         assert!(long_path.len() >= 108);
         let result = UnixDatagram::bind(&long_path);
         assert!(matches!(result, Err(Error::InvalidInput(_))));

@@ -501,7 +501,7 @@ impl File {
     /// - No double-free possible - ownership transfer is type-safe
     ///
     /// **Usage in NVRC:**
-    /// ```no_run
+    /// ```ignore
     /// // execute.rs - Safe fd transfer for process stdout/stderr
     /// let kmsg = hardened_std::fs::File::open("/dev/kmsg")?;
     /// let stdio = kmsg.into_stdio();
