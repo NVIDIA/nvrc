@@ -12,10 +12,6 @@ on:
       - synchronize
       - reopened
       - labeled
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
 
 permissions:
   contents: read
@@ -25,8 +21,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect if only docs changed - skip CI if so
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # For pull_request_target, checkout the PR head to detect changes
+          ref: ${{ github.event.pull_request.head.sha }}
+          # Fetch enough history to compare with base
+          fetch-depth: 0
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        id: filter
+        with:
+          # For pull_request_target, explicitly specify base and ref
+          base: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          filters: |
+            code:
+              - '**/*.rs'
+              - '**/*.toml'
+              - '**/*.lock'
+              - 'Cargo.lock'
+              - '.cargo/**'
+
   nvrc-ci-on-push:
-    if: contains(github.event.pull_request.labels.*.name, 'ok-to-test')
+    needs: changes
+    # Only run on self-hosted runner if: 1) ok-to-test label present (security), 2) code changed (efficiency)
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') && needs.changes.outputs.code == 'true' }}
     permissions:
       contents: read
       packages: write
