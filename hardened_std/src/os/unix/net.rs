@@ -4,7 +4,7 @@
 //! Hardened Unix domain sockets
 //!
 //! **Security Model:**
-//! - Only whitelisted paths can be bound (compile-time enforcement)
+//! - Only whitelisted paths can be bound (runtime enforcement at bind time)
 //! - Production: only `/dev/log` allowed for syslog
 //! - Tests: `/tmp/*` paths allowed for testing
 //!
@@ -24,7 +24,7 @@ fn is_socket_path_allowed(path: &str) -> bool {
         return true;
     }
 
-    // Tests: allow /tmp paths for testing
+    // Tests: allow /tmp/* paths (requires trailing slash, so "/tmp" alone rejected)
     #[cfg(test)]
     if path.starts_with("/tmp/") {
         return true;
@@ -137,7 +137,12 @@ impl UnixDatagram {
 
 impl Drop for UnixDatagram {
     fn drop(&mut self) {
-        // SAFETY: close() is safe with valid fd
+        // SAFETY: close() is safe with valid fd.
+        //
+        // Note: We intentionally do NOT unlink the socket path from the
+        // filesystem. This matches std::os::unix::net::UnixDatagram behavior.
+        // In ephemeral VMs with fresh filesystems, if a socket file exists
+        // on next bind, it indicates an error (EADDRINUSE).
         unsafe { libc::close(self.fd) };
     }
 }
@@ -164,6 +169,10 @@ mod tests {
     use super::*;
     use alloc::format;
 
+    // Note: Tests use std::fs::remove_file for cleanup. While hardened_std
+    // avoids remove_file in production (ephemeral VMs start fresh), tests
+    // need cleanup to avoid /tmp artifacts and EADDRINUSE on re-runs.
+
     #[test]
     fn test_path_whitelist_dev_log() {
         assert!(is_socket_path_allowed("/dev/log"));
@@ -181,11 +190,16 @@ mod tests {
         assert!(!is_socket_path_allowed("/etc/passwd"));
         assert!(!is_socket_path_allowed("relative/path"));
         assert!(!is_socket_path_allowed("/home/user/sock"));
+        assert!(!is_socket_path_allowed("/tmp")); // No trailing slash
     }
 
     #[test]
     fn test_bind_and_recv() {
-        let path = format!("/tmp/hardened_test_{}.sock", std::process::id());
+        let path = format!(
+            "/tmp/hardened_test_{}_{:?}.sock",
+            std::process::id(),
+            std::thread::current().id()
+        );
         let _ = std::fs::remove_file(&path);
 
         // Bind server socket (hardened_std)
@@ -212,8 +226,22 @@ mod tests {
     }
 
     #[test]
+    fn test_bind_path_too_long() {
+        // UNIX_PATH_MAX is 108, so a path of 108+ bytes should be rejected
+        // "/tmp/" is 5 chars, so we need 103+ more to reach 108
+        let long_path = format!("/tmp/{}", "x".repeat(103));
+        assert!(long_path.len() >= 108);
+        let result = UnixDatagram::bind(&long_path);
+        assert!(matches!(result, Err(Error::InvalidInput(_))));
+    }
+
+    #[test]
     fn test_multiple_messages() {
-        let path = format!("/tmp/hardened_multi_{}.sock", std::process::id());
+        let path = format!(
+            "/tmp/hardened_multi_{}_{:?}.sock",
+            std::process::id(),
+            std::thread::current().id()
+        );
         let _ = std::fs::remove_file(&path);
 
         let server = UnixDatagram::bind(&path).unwrap();
