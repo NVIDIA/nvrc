@@ -80,9 +80,10 @@ impl UnixDatagram {
         addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
 
         // Copy path into sun_path using safe iteration
+        // Note: sun_path is i8 on glibc, u8 on musl - cast handles both
         let path_bytes = path.as_bytes();
         for (i, &b) in path_bytes.iter().enumerate() {
-            addr.sun_path[i] = b as i8;
+            addr.sun_path[i] = b as _;
         }
 
         // Bind the socket
