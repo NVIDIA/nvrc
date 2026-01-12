@@ -23,7 +23,7 @@ mod test_utils;
 extern crate log;
 extern crate kernlog;
 
-use std::collections::HashMap;
+use hardened_std::collections::HashMap;
 
 use kata_agent::SYSLOG_POLL_FOREVER as POLL_FOREVER;
 use nvrc::NVRC;
