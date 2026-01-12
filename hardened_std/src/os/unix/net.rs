@@ -142,39 +142,14 @@ impl crate::os::fd::AsFd for UnixDatagram {
     }
 }
 
-/// Socket address for Unix domain sockets.
-///
-/// Contains the path of the peer socket (if available).
+/// Socket address for Unix domain sockets (opaque marker type).
 pub struct SocketAddr {
-    addr: libc::sockaddr_un,
+    _addr: libc::sockaddr_un,
 }
 
 impl SocketAddr {
-    /// Create from raw sockaddr_un
     fn from_raw(addr: libc::sockaddr_un) -> Self {
-        Self { addr }
-    }
-
-    /// Get the path of this socket address, if it's a pathname socket.
-    #[allow(dead_code)]
-    pub fn as_pathname(&self) -> Option<&str> {
-        // Check if sun_path is non-empty
-        if self.addr.sun_path[0] == 0 {
-            return None;
-        }
-
-        // Find null terminator
-        let len = self
-            .addr
-            .sun_path
-            .iter()
-            .position(|&c| c == 0)
-            .unwrap_or(UNIX_PATH_MAX);
-
-        // Convert to str
-        let bytes =
-            unsafe { core::slice::from_raw_parts(self.addr.sun_path.as_ptr() as *const u8, len) };
-        core::str::from_utf8(bytes).ok()
+        Self { _addr: addr }
     }
 }
 
@@ -255,25 +230,5 @@ mod tests {
 
         drop(server);
         let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn test_socket_addr_pathname() {
-        let mut addr: libc::sockaddr_un = unsafe { core::mem::zeroed() };
-        addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
-
-        let path = b"/tmp/test.sock";
-        addr.sun_path[..path.len()]
-            .copy_from_slice(unsafe { &*(path as *const [u8] as *const [i8]) });
-
-        let sock_addr = SocketAddr::from_raw(addr);
-        assert_eq!(sock_addr.as_pathname(), Some("/tmp/test.sock"));
-    }
-
-    #[test]
-    fn test_socket_addr_empty() {
-        let addr: libc::sockaddr_un = unsafe { core::mem::zeroed() };
-        let sock_addr = SocketAddr::from_raw(addr);
-        assert_eq!(sock_addr.as_pathname(), None);
     }
 }
