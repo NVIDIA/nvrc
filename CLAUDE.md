@@ -1,5 +1,8 @@
 # NVRC Development Guide
 
+**Read [ARCHITECTURE.md](ARCHITECTURE.md) first** to understand the security
+model, threat landscape, and design rationale before making changes.
+
 ## Project Overview
 NVRC is a minimal init process (PID 1) for ephemeral confidential VMs with
 NVIDIA GPUs. It configures GPU resources, starts required daemons

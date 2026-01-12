@@ -53,27 +53,27 @@ NVRC is configured entirely via kernel command-line parameters (no config files)
 
 ### Core Parameters
 
-| Parameter | Values | Default | Description |
-|-----------|--------|---------|-------------|
-| `nvrc.mode` | `gpu`, `cpu`, `nvswitch-nvl4`, `nvswitch-nvl5` | `gpu` | Operation mode. `cpu` for CPU-only, `nvswitch-nvl4` for H100/H200/H800 service VMs, `nvswitch-nvl5` for B200/B300/B100 service VMs. |
-| `nvrc.log` | `off`, `error`, `warn`, `info`, `debug`, `trace` | `off` | Log verbosity level. Also enables `/proc/sys/kernel/printk_devkmsg`. |
+| Parameter   | Values                                           | Default | Description                                                                                                                         |
+| ----------- | ------------------------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `nvrc.mode` | `gpu`, `cpu`, `nvswitch-nvl4`, `nvswitch-nvl5`   | `gpu`   | Operation mode. `cpu` for CPU-only, `nvswitch-nvl4` for H100/H200/H800 service VMs, `nvswitch-nvl5` for B200/B300/B100 service VMs. |
+| `nvrc.log`  | `off`, `error`, `warn`, `info`, `debug`, `trace` | `off`   | Log verbosity level. Also enables `/proc/sys/kernel/printk_devkmsg`.                                                                |
 
 ### GPU Configuration
 
-| Parameter | Values | Default | Description |
-|-----------|--------|---------|-------------|
-| `nvrc.smi.lgc` | `<MHz>` | - | Lock GPU core clocks to fixed frequency. Eliminates thermal throttling for consistent performance. |
-| `nvrc.smi.lmc` | `<MHz>` | - | Lock memory clocks to fixed frequency. Used alongside lgc for fully deterministic GPU behavior. |
-| `nvrc.smi.pl` | `<Watts>` | - | Set GPU power limit. Lower values reduce heat/power; higher allows peak performance. |
-| `nvrc.smi.srs` | `enabled`, `disabled` | - | Secure Randomization Seed for GPU memory (passed to nvidia-smi). |
+| Parameter      | Values                 | Default | Description                                                                                        |
+| -------------- | ---------------------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `nvrc.smi.lgc` | `<MHz>`                | -       | Lock GPU core clocks to fixed frequency. Eliminates thermal throttling for consistent performance. |
+| `nvrc.smi.lmc` | `<MHz>`                | -       | Lock memory clocks to fixed frequency. Used alongside lgc for fully deterministic GPU behavior.    |
+| `nvrc.smi.pl`  | `<Watts>`              | -       | Set GPU power limit. Lower values reduce heat/power; higher allows peak performance.               |
+| `nvrc.smi.srs` | `enabled`, `disabled`  | -       | Secure Randomization Seed for GPU memory (passed to nvidia-smi).                                   |
 
 ### Daemon Control
 
-| Parameter | Values | Default | Description |
-|-----------|--------|---------|-------------|
-| `nvrc.uvm.persistence.mode` | `on/off`, `true/false`, `1/0`, `yes/no` | `true` | UVM persistence mode keeps unified memory state across CUDA context teardowns. |
-| `nvrc.dcgm` | `on/off`, `true/false`, `1/0`, `yes/no` | `false` | Enable DCGM (Data Center GPU Manager) for telemetry and health monitoring. |
-| `nvrc.fabricmanager` | `on/off`, `true/false`, `1/0`, `yes/no` | `false` | Enable Fabric Manager for NVLink/NVSwitch multi-GPU communication. |
+| Parameter                   | Values                                  | Default | Description                                                                    |
+| --------------------------- | --------------------------------------- | ------- | ------------------------------------------------------------------------------ |
+| `nvrc.uvm.persistence.mode` | `on/off`, `true/false`, `1/0`, `yes/no` | `true`  | UVM persistence mode keeps unified memory state across CUDA context teardowns. |
+| `nvrc.dcgm`                 | `on/off`, `true/false`, `1/0`, `yes/no` | `false` | Enable DCGM (Data Center GPU Manager) for telemetry and health monitoring.     |
+| `nvrc.fabricmanager`        | `on/off`, `true/false`, `1/0`, `yes/no` | `false` | Enable Fabric Manager for NVLink/NVSwitch multi-GPU communication.             |
 
 ### Example Configurations
 
@@ -194,7 +194,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for DCO sign-off requirements.
 
 ## Verification
 
-See [VERIFY.md](VERIFY.md) for instructions on verifying release artifacts with Sigstore.
+See [VERIFY.md](VERIFY.md) for instructions on verifying release artifacts
+with Sigstore.
 
 ## License
 
