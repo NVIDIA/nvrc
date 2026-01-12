@@ -4,7 +4,7 @@
 //! NVRC configuration state and daemon lifecycle management.
 
 use anyhow::{anyhow, Result};
-use std::process::Child;
+use hardened_std::process::Child;
 
 /// Central configuration state for the NVIDIA Runtime Container init.
 /// Fields are populated from kernel command-line parameters and control
@@ -58,7 +58,7 @@ impl NVRC {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
+    use hardened_std::process::Command;
 
     #[test]
     fn test_default() {
@@ -104,7 +104,9 @@ mod tests {
     fn test_check_daemons_still_running() {
         let mut nvrc = NVRC::default();
         // sleep 1 will still be running when we check immediately
-        let child = Command::new("/bin/sleep").arg("1").spawn().unwrap();
+        let mut cmd = Command::new("/bin/sleep");
+        cmd.args(&["1"]).unwrap();
+        let child = cmd.spawn().unwrap();
         nvrc.track_daemon("slow-daemon", child);
         // Check immediately while still running
         assert!(nvrc.check_daemons().is_ok());

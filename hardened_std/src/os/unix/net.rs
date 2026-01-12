@@ -60,7 +60,8 @@ fn is_socket_path_allowed(path: &str) -> bool {
 ///
 /// **Allowed paths:**
 /// - `/dev/log` - syslog socket (production)
-/// - `/tmp/*` - temporary paths (test only)
+/// - `/tmp/.*` - TempDir paths (for dependent crate tests)
+/// - `/tmp/hardened_*` - test paths (cfg(test) only)
 #[derive(Debug)]
 pub struct UnixDatagram {
     fd: c_int,
@@ -72,7 +73,8 @@ impl UnixDatagram {
     /// # Security
     /// Only whitelisted paths are allowed:
     /// - `/dev/log` (production syslog)
-    /// - `/tmp/*` (tests only)
+    /// - `/tmp/.*` (TempDir paths for dependent crate tests)
+    /// - `/tmp/hardened_*` (cfg(test) only)
     ///
     /// If the socket file already exists, bind() will fail with EADDRINUSE.
     /// In an ephemeral VM with fresh filesystem, this indicates an error.

@@ -46,6 +46,7 @@ fn poll_socket_timeout(sock: &UnixDatagram, timeout_ms: i32) -> Result<bool> {
         PollTimeout::from(ms)
     };
 
+    // nix::Errno is #[repr(i32)] so `as i32` extracts the raw errno value
     let count = nix::poll::poll(&mut fds, timeout).map_err(|e| Error::Io(e as i32))?;
 
     if count == 0 {

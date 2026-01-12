@@ -71,6 +71,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // DANGEROUS: permanently disables module loading until reboot - only run in ephemeral VMs
     fn test_disable_modules_loading() {
         require_root();
 
@@ -91,6 +92,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // DANGEROUS: installs real power_off hook - any subsequent panic reboots the system
     fn test_set_panic_hook() {
         // Installs the real hook (with power_off) - just don't trigger it!
         let _ = set_panic_hook();

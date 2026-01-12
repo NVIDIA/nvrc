@@ -4,22 +4,22 @@
 //! Process execution with security-hardened restrictions
 //!
 //! **Security Model:**
-//! - Only whitelisted binaries can be executed (compile-time enforcement)
-//! - All arguments must be &'static str (no dynamic strings) to prevent injection
-//!   attacks from runtime data - only compile-time constants are accepted
+//! - Only whitelisted binaries can be executed (runtime enforcement at spawn/status/exec time)
+//! - Binary paths must be &'static str (compile-time constants) - no dynamic paths
+//! - Arguments can be dynamic &str - validated but not restricted to static strings
 //! - Maximum security for ephemeral VM init process
 //!
 //! **Allowed binaries (production):**
-//! - /usr/bin/nvidia-smi - GPU configuration
-//! - /usr/bin/nvidia-ctk - Container toolkit
-//! - /usr/sbin/modprobe - Kernel module loading
-//! - /usr/bin/nvidia-persistenced - GPU persistence daemon
-//! - /usr/bin/nv-hostengine - DCGM host engine
-//! - /usr/bin/dcgm-exporter - DCGM metrics exporter
-//! - /usr/bin/nv-fabricmanager - NVLink fabric manager
-//! - /usr/bin/kata-agent - Kata runtime agent
+//! - /bin/nvidia-smi - GPU configuration
+//! - /bin/nvidia-ctk - Container toolkit
+//! - /sbin/modprobe - Kernel module loading
+//! - /bin/nvidia-persistenced - GPU persistence daemon
+//! - /bin/nv-hostengine - DCGM host engine
+//! - /bin/dcgm-exporter - DCGM metrics exporter
+//! - /bin/nv-fabricmanager - NVLink fabric manager
+//! - /bin/kata-agent - Kata runtime agent
 //!
-//! **Test binaries (cfg(test) only):**
+//! **Test binaries (debug builds only):**
 //! - /bin/true, /bin/false, /bin/sleep, /bin/sh - For unit tests
 
 use crate::{last_os_error, Error, Result};
@@ -38,68 +38,72 @@ fn is_binary_allowed(path: &str) -> bool {
     // Production binaries - always allowed
     let production_allowed = matches!(
         path,
-        "/usr/bin/nvidia-smi"
-            | "/usr/bin/nvidia-ctk"
-            | "/usr/sbin/modprobe"
-            | "/usr/bin/nvidia-persistenced"
-            | "/usr/bin/nv-hostengine"
-            | "/usr/bin/dcgm-exporter"
-            | "/usr/bin/nv-fabricmanager"
-            | "/usr/bin/kata-agent"
+        "/bin/nvidia-smi"
+            | "/bin/nvidia-ctk"
+            | "/sbin/modprobe"
+            | "/bin/nvidia-persistenced"
+            | "/bin/nv-hostengine"
+            | "/bin/dcgm-exporter"
+            | "/bin/nv-fabricmanager"
+            | "/bin/kata-agent"
     );
 
     if production_allowed {
         return true;
     }
 
-    // Test binaries - only allowed in test builds
-    #[cfg(test)]
+    // Test binaries - only allowed in debug builds (never in release)
+    #[cfg(debug_assertions)]
     {
         matches!(path, "/bin/true" | "/bin/false" | "/bin/sleep" | "/bin/sh")
     }
-    #[cfg(not(test))]
+    #[cfg(not(debug_assertions))]
     {
         false
     }
 }
 
+/// Maximum number of arguments allowed
+const MAX_ARGS: usize = 32;
+
 /// Command builder with security restrictions
 pub struct Command {
     path: &'static str,
-    args: [Option<&'static str>; 16], // Max 16 args
-    arg_count: usize,
+    args: alloc::vec::Vec<alloc::string::String>,
     stdout_fd: Option<c_int>,
     stderr_fd: Option<c_int>,
 }
 
 impl Command {
     /// Create a new Command for the given binary path.
-    /// Returns BinaryNotAllowed error if path is not in the whitelist.
-    pub fn new(path: &'static str) -> Result<Self> {
-        if !is_binary_allowed(path) {
-            return Err(Error::BinaryNotAllowed);
-        }
-        Ok(Self {
+    /// Binary whitelist is checked at spawn/status/exec time, not here.
+    pub fn new(path: &'static str) -> Self {
+        Self {
             path,
-            args: [None; 16],
-            arg_count: 0,
+            args: alloc::vec::Vec::new(),
             stdout_fd: None,
             stderr_fd: None,
-        })
+        }
+    }
+
+    /// Check if the binary is allowed before execution.
+    fn check_allowed(&self) -> Result<()> {
+        if !is_binary_allowed(self.path) {
+            return Err(Error::BinaryNotAllowed);
+        }
+        Ok(())
     }
 
     /// Add arguments to the command.
-    /// Arguments must be &'static str for security (no dynamic strings).
-    /// Maximum 16 arguments supported.
-    pub fn args(&mut self, args: &[&'static str]) -> Result<&mut Self> {
-        if self.arg_count + args.len() > 16 {
+    /// Maximum 32 arguments supported.
+    pub fn args(&mut self, args: &[&str]) -> Result<&mut Self> {
+        if self.args.len() + args.len() > MAX_ARGS {
             return Err(Error::InvalidInput(alloc::string::String::from(
-                "Too many arguments (max 16)",
+                "Too many arguments (max 32)",
             )));
         }
         for &arg in args {
-            self.args[self.arg_count] = Some(arg);
-            self.arg_count += 1;
+            self.args.push(alloc::string::String::from(arg));
         }
         Ok(self)
     }
@@ -118,6 +122,9 @@ impl Command {
 
     /// Spawn the command as a child process.
     pub fn spawn(&mut self) -> Result<Child> {
+        // Check whitelist before forking
+        self.check_allowed()?;
+
         // SAFETY: fork() is safe here because we're in a controlled init environment
         let pid = unsafe { libc::fork() };
         if pid < 0 {
@@ -128,8 +135,9 @@ impl Command {
             // Child process - setup stdio and exec
             self.setup_stdio();
             let _ = self.do_exec();
-            // If exec fails, exit child
-            unsafe { libc::_exit(1) };
+            // If exec fails, exit with 127 (standard "command not found" exit code)
+            // This distinguishes exec failures from the spawned command returning 1
+            unsafe { libc::_exit(127) };
         }
 
         // Parent process
@@ -145,6 +153,11 @@ impl Command {
     /// Replace current process with the command (exec).
     /// Never returns on success - only returns Error on failure.
     pub fn exec(&mut self) -> Error {
+        // Check whitelist before exec
+        if let Err(e) = self.check_allowed() {
+            return e;
+        }
+
         self.setup_stdio();
         match self.do_exec() {
             Ok(_) => unreachable!("exec should never return Ok"),
@@ -189,13 +202,11 @@ impl Command {
         })?;
 
         let mut c_args: Vec<CString> = Vec::new();
-        for i in 0..self.arg_count {
-            if let Some(arg) = self.args[i] {
-                let c_arg = CString::new(arg).map_err(|_| {
-                    Error::InvalidInput(alloc::string::String::from("Arg contains null byte"))
-                })?;
-                c_args.push(c_arg);
-            }
+        for arg in &self.args {
+            let c_arg = CString::new(arg.as_str()).map_err(|_| {
+                Error::InvalidInput(alloc::string::String::from("Arg contains null byte"))
+            })?;
+            c_args.push(c_arg);
         }
 
         // Build argv: [path, args..., NULL]
@@ -217,6 +228,7 @@ impl Command {
 }
 
 /// Child process handle
+#[derive(Debug)]
 pub struct Child {
     pid: c_int,
 }
@@ -277,12 +289,23 @@ impl ExitStatus {
     }
 
     /// Get the exit code if the process exited normally.
-    #[cfg(test)]
     pub fn code(&self) -> Option<i32> {
         if libc::WIFEXITED(self.status) {
             Some(libc::WEXITSTATUS(self.status))
         } else {
             None
+        }
+    }
+}
+
+impl core::fmt::Display for ExitStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if libc::WIFEXITED(self.status) {
+            write!(f, "exit status: {}", libc::WEXITSTATUS(self.status))
+        } else if libc::WIFSIGNALED(self.status) {
+            write!(f, "signal: {}", libc::WTERMSIG(self.status))
+        } else {
+            write!(f, "unknown status: {}", self.status)
         }
     }
 }
@@ -340,14 +363,14 @@ mod tests {
     #[test]
     fn test_allowed_production_binaries() {
         // All production binaries should be allowed
-        assert!(is_binary_allowed("/usr/bin/nvidia-smi"));
-        assert!(is_binary_allowed("/usr/bin/nvidia-ctk"));
-        assert!(is_binary_allowed("/usr/sbin/modprobe"));
-        assert!(is_binary_allowed("/usr/bin/nvidia-persistenced"));
-        assert!(is_binary_allowed("/usr/bin/nv-hostengine"));
-        assert!(is_binary_allowed("/usr/bin/dcgm-exporter"));
-        assert!(is_binary_allowed("/usr/bin/nv-fabricmanager"));
-        assert!(is_binary_allowed("/usr/bin/kata-agent"));
+        assert!(is_binary_allowed("/bin/nvidia-smi"));
+        assert!(is_binary_allowed("/bin/nvidia-ctk"));
+        assert!(is_binary_allowed("/sbin/modprobe"));
+        assert!(is_binary_allowed("/bin/nvidia-persistenced"));
+        assert!(is_binary_allowed("/bin/nv-hostengine"));
+        assert!(is_binary_allowed("/bin/dcgm-exporter"));
+        assert!(is_binary_allowed("/bin/nv-fabricmanager"));
+        assert!(is_binary_allowed("/bin/kata-agent"));
     }
 
     #[test]
@@ -372,40 +395,42 @@ mod tests {
 
     #[test]
     fn test_command_new_allowed() {
-        let cmd = Command::new("/bin/true");
-        assert!(cmd.is_ok());
+        // new() is infallible, whitelist checked at spawn time
+        let mut cmd = Command::new("/bin/true");
+        assert!(cmd.spawn().is_ok());
     }
 
     #[test]
     fn test_command_new_disallowed() {
-        let cmd = Command::new("/bin/bash");
-        assert!(matches!(cmd, Err(Error::BinaryNotAllowed)));
+        // new() succeeds, but spawn() fails for disallowed binary
+        let mut cmd = Command::new("/bin/bash");
+        assert!(matches!(cmd.spawn(), Err(Error::BinaryNotAllowed)));
     }
 
     // ==================== Command execution tests ====================
 
     #[test]
     fn test_command_status_success() {
-        let mut cmd = Command::new("/bin/true").unwrap();
+        let mut cmd = Command::new("/bin/true");
         let status = cmd.status().unwrap();
         assert!(status.success());
     }
 
     #[test]
     fn test_command_status_failure() {
-        let mut cmd = Command::new("/bin/false").unwrap();
+        let mut cmd = Command::new("/bin/false");
         let status = cmd.status().unwrap();
         assert!(!status.success());
     }
 
     #[test]
     fn test_command_with_args() {
-        let mut cmd = Command::new("/bin/sh").unwrap();
+        let mut cmd = Command::new("/bin/sh");
         cmd.args(&["-c", "exit 0"]).unwrap();
         let status = cmd.status().unwrap();
         assert!(status.success());
 
-        let mut cmd = Command::new("/bin/sh").unwrap();
+        let mut cmd = Command::new("/bin/sh");
         cmd.args(&["-c", "exit 42"]).unwrap();
         let status = cmd.status().unwrap();
         assert!(!status.success());
@@ -416,7 +441,7 @@ mod tests {
 
     #[test]
     fn test_spawn_and_wait() {
-        let mut cmd = Command::new("/bin/true").unwrap();
+        let mut cmd = Command::new("/bin/true");
         let mut child = cmd.spawn().unwrap();
         let status = child.wait().unwrap();
         assert!(status.success());
@@ -424,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_try_wait() {
-        let mut cmd = Command::new("/bin/sleep").unwrap();
+        let mut cmd = Command::new("/bin/sleep");
         cmd.args(&["1"]).unwrap();
         let mut child = cmd.spawn().unwrap();
 
@@ -439,7 +464,7 @@ mod tests {
 
     #[test]
     fn test_kill() {
-        let mut cmd = Command::new("/bin/sleep").unwrap();
+        let mut cmd = Command::new("/bin/sleep");
         cmd.args(&["10"]).unwrap();
         let mut child = cmd.spawn().unwrap();
 
@@ -455,7 +480,7 @@ mod tests {
 
     #[test]
     fn test_stdio_null() {
-        let mut cmd = Command::new("/bin/sh").unwrap();
+        let mut cmd = Command::new("/bin/sh");
         cmd.args(&["-c", "echo test"]).unwrap();
         cmd.stdout(Stdio::Null);
         let status = cmd.status().unwrap();
@@ -464,11 +489,12 @@ mod tests {
 
     #[test]
     fn test_max_args_exceeded() {
-        let mut cmd = Command::new("/bin/true").unwrap();
-        // Try to add 17 args (exceeds max of 16)
-        let many_args: [&'static str; 17] = [
+        let mut cmd = Command::new("/bin/true");
+        // Try to add 33 args (exceeds max of 32)
+        let many_args: [&str; 33] = [
             "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
-            "17",
+            "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30",
+            "31", "32", "33",
         ];
         let result = cmd.args(&many_args);
         assert!(result.is_err());
@@ -482,7 +508,7 @@ mod tests {
         let file = OpenOptions::new().write(true).open("/dev/null").unwrap();
         let stdio = Stdio::from(file);
 
-        let mut cmd = Command::new("/bin/sh").unwrap();
+        let mut cmd = Command::new("/bin/sh");
         cmd.args(&["-c", "echo test"]).unwrap();
         cmd.stdout(stdio);
         let status = cmd.status().unwrap();

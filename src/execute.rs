@@ -2,49 +2,33 @@
 // Copyright (c) NVIDIA CORPORATION
 
 use anyhow::{anyhow, Context, Result};
-use std::process::{Child, Command, Stdio};
+use hardened_std::process::{Child, Command, Stdio};
 
 use crate::kmsg::kmsg;
-
-/// Convert hardened_std::fs::File to std::process::Stdio safely.
-///
-/// **Security Design:**
-/// Uses hardened_std's safe `into_stdio()` method instead of exposing raw fds.
-/// This prevents fd leaks by keeping ownership tracking through Rust's type system.
-///
-/// **Why this is safe:**
-/// - No raw fd exposure - conversion happens inside hardened_std
-/// - Automatic cleanup - Stdio's Drop will close the fd
-/// - No manual close() needed - prevents use-after-free bugs
-/// - No double-free possible - ownership transfer is type-safe
-/// - Maintains hardened_std's security guarantees
-fn file_to_stdio(file: hardened_std::fs::File) -> Stdio {
-    // Safe conversion - hardened_std handles the fd transfer internally
-    // The fd goes: hardened_std::File -> std::fs::File -> Stdio
-    // All managed by Rust's ownership system, no manual cleanup needed
-    file.into_stdio()
-}
 
 /// Run a command and block until completion. Output goes to kmsg so it appears
 /// in dmesg/kernel log - the only reliable log destination in minimal VMs.
 /// Used for setup commands that must succeed before continuing (nvidia-smi, modprobe).
-pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
+pub fn foreground(command: &'static str, args: &[&str]) -> Result<()> {
     debug!("{} {}", command, args.join(" "));
 
     let kmsg_file = kmsg().context("Failed to open kmsg device")?;
-    let status = Command::new(command)
-        .args(args)
-        .stdout(file_to_stdio(
-            kmsg_file
-                .try_clone()
-                .map_err(|e| anyhow!("Failed to clone kmsg file: {}", e))?,
-        ))
-        .stderr(file_to_stdio(kmsg_file))
+    let mut cmd = Command::new(command);
+    cmd.args(args)
+        .map_err(|e| anyhow!("Invalid arguments: {}", e))?;
+    cmd.stdout(Stdio::from(
+        kmsg_file
+            .try_clone()
+            .map_err(|e| anyhow!("Failed to clone kmsg file: {}", e))?,
+    ));
+    cmd.stderr(Stdio::from(kmsg_file));
+
+    let status = cmd
         .status()
-        .context(format!("failed to execute {command}"))?;
+        .map_err(|e| anyhow!("Binary not allowed or failed to execute {}: {}", command, e))?;
 
     if !status.success() {
-        return Err(anyhow!("{} failed with status: {}", command, status));
+        return Err(anyhow!("{} failed ({})", command, status));
     }
     Ok(())
 }
@@ -52,19 +36,21 @@ pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
 /// Spawn a daemon without waiting. Returns Child so caller can track it later.
 /// Used for long-running services (nvidia-persistenced, fabricmanager) that run
 /// alongside kata-agent. Output to kmsg for visibility in kernel log.
-pub fn background(command: &str, args: &[&str]) -> Result<Child> {
+pub fn background(command: &'static str, args: &[&str]) -> Result<Child> {
     debug!("{} {}", command, args.join(" "));
     let kmsg_file = kmsg().context("Failed to open kmsg device")?;
-    Command::new(command)
-        .args(args)
-        .stdout(file_to_stdio(
-            kmsg_file
-                .try_clone()
-                .map_err(|e| anyhow!("Failed to clone kmsg file: {}", e))?,
-        ))
-        .stderr(file_to_stdio(kmsg_file))
-        .spawn()
-        .with_context(|| format!("Failed to start {}", command))
+    let mut cmd = Command::new(command);
+    cmd.args(args)
+        .map_err(|e| anyhow!("Invalid arguments: {}", e))?;
+    cmd.stdout(Stdio::from(
+        kmsg_file
+            .try_clone()
+            .map_err(|e| anyhow!("Failed to clone kmsg file: {}", e))?,
+    ));
+    cmd.stderr(Stdio::from(kmsg_file));
+
+    cmd.spawn()
+        .map_err(|e| anyhow!("Binary not allowed or failed to start {}: {}", command, e))
 }
 
 #[cfg(test)]
@@ -89,12 +75,12 @@ mod tests {
     }
 
     #[test]
-    fn test_foreground_not_found() {
-        // Command doesn't exist - triggers .context() error path
+    fn test_foreground_not_allowed() {
+        // Command not in whitelist
         let result = foreground("/nonexistent/command", &[]);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("execute"));
+        assert!(err.contains("not allowed"));
     }
 
     #[test]
@@ -118,12 +104,16 @@ mod tests {
     }
 
     #[test]
-    fn test_background_not_found() {
-        // Command doesn't exist - triggers .with_context() error path
+    fn test_background_not_allowed() {
+        // Command not in whitelist
         let result = background("/nonexistent/command", &[]);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("start"), "error should mention start: {}", err);
+        assert!(
+            err.contains("not allowed"),
+            "error should mention not allowed: {}",
+            err
+        );
     }
 
     #[test]

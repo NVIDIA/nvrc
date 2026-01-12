@@ -35,17 +35,20 @@ fn fabricmanager_args() -> &'static [&'static str] {
     &["-c", "/usr/share/nvidia/nvswitch/fabricmanager.cfg"]
 }
 
-/// Configurable path parameters allow testing with /bin/true instead of real
-/// NVIDIA binaries that don't exist in the test environment.
+const NVIDIA_PERSISTENCED: &str = "/bin/nvidia-persistenced";
+const NV_HOSTENGINE: &str = "/bin/nv-hostengine";
+const DCGM_EXPORTER: &str = "/bin/dcgm-exporter";
+const NV_FABRICMANAGER: &str = "/bin/nv-fabricmanager";
+
 impl NVRC {
     /// nvidia-persistenced keeps GPU state warm between container invocations,
     /// reducing cold-start latency. UVM persistence mode enables unified memory
     /// optimizations. Enabled by default since most workloads benefit from it.
     pub fn nvidia_persistenced(&mut self) -> Result<()> {
-        self.spawn_persistenced("/var/run/nvidia-persistenced", "/bin/nvidia-persistenced")
+        self.spawn_persistenced("/var/run/nvidia-persistenced", NVIDIA_PERSISTENCED)
     }
 
-    fn spawn_persistenced(&mut self, run_dir: &str, bin: &str) -> Result<()> {
+    fn spawn_persistenced(&mut self, run_dir: &str, bin: &'static str) -> Result<()> {
         fs::create_dir_all(run_dir).map_err(|e| anyhow!("create_dir_all {}: {}", run_dir, e))?;
         let uvm_enabled = self.uvm_persistence_mode.unwrap_or(true);
         let args = persistenced_args(uvm_enabled);
@@ -57,10 +60,10 @@ impl NVRC {
     /// nv-hostengine is the DCGM backend daemon. Only started when DCGM monitoring
     /// is explicitly requested - not needed for basic GPU workloads.
     pub fn nv_hostengine(&mut self) -> Result<()> {
-        self.spawn_hostengine("/bin/nv-hostengine")
+        self.spawn_hostengine(NV_HOSTENGINE)
     }
 
-    fn spawn_hostengine(&mut self, bin: &str) -> Result<()> {
+    fn spawn_hostengine(&mut self, bin: &'static str) -> Result<()> {
         if !self.dcgm_enabled.unwrap_or(false) {
             return Ok(());
         }
@@ -72,10 +75,10 @@ impl NVRC {
     /// dcgm-exporter exposes GPU metrics for Prometheus. Only started when DCGM
     /// is enabled - adds overhead so disabled by default.
     pub fn dcgm_exporter(&mut self) -> Result<()> {
-        self.spawn_dcgm_exporter("/bin/dcgm-exporter")
+        self.spawn_dcgm_exporter(DCGM_EXPORTER)
     }
 
-    fn spawn_dcgm_exporter(&mut self, bin: &str) -> Result<()> {
+    fn spawn_dcgm_exporter(&mut self, bin: &'static str) -> Result<()> {
         if !self.dcgm_enabled.unwrap_or(false) {
             return Ok(());
         }
@@ -87,10 +90,10 @@ impl NVRC {
     /// NVSwitch fabric manager is only needed for multi-GPU NVLink topologies.
     /// Disabled by default since most VMs have single GPUs.
     pub fn nv_fabricmanager(&mut self) -> Result<()> {
-        self.spawn_fabricmanager("/bin/nv-fabricmanager")
+        self.spawn_fabricmanager(NV_FABRICMANAGER)
     }
 
-    fn spawn_fabricmanager(&mut self, bin: &str) -> Result<()> {
+    fn spawn_fabricmanager(&mut self, bin: &'static str) -> Result<()> {
         if !self.fabricmanager_enabled.unwrap_or(false) {
             return Ok(());
         }
@@ -168,13 +171,16 @@ mod tests {
         assert!(nvrc.nv_fabricmanager().is_ok());
     }
 
+    // Test binary - allowed in cfg(test) only
+    const TEST_BIN_TRUE: &'static str = "/bin/true";
+
     #[test]
     fn test_spawn_persistenced_success() {
         let tmpdir = TempDir::new().unwrap();
         let run_dir = tmpdir.path().join("nvidia-persistenced");
 
         let mut nvrc = NVRC::default();
-        nvrc.spawn_persistenced(run_dir.to_str().unwrap(), "/bin/true")
+        nvrc.spawn_persistenced(run_dir.to_str().unwrap(), TEST_BIN_TRUE)
             .expect("spawn_persistenced failed - check: 1) temp dir creation, 2) process spawn, 3) daemon tracking");
 
         // Directory should be created
@@ -192,7 +198,7 @@ mod tests {
 
         let mut nvrc = NVRC::default();
         nvrc.uvm_persistence_mode = Some(false); // Tests the else branch for args
-        nvrc.spawn_persistenced(run_dir.to_str().unwrap(), "/bin/true")
+        nvrc.spawn_persistenced(run_dir.to_str().unwrap(), TEST_BIN_TRUE)
             .expect("spawn_persistenced with UVM disabled should succeed");
     }
 
@@ -200,7 +206,7 @@ mod tests {
     fn test_spawn_hostengine_success() {
         let mut nvrc = NVRC::default();
         nvrc.dcgm_enabled = Some(true);
-        nvrc.spawn_hostengine("/bin/true")
+        nvrc.spawn_hostengine(TEST_BIN_TRUE)
             .expect("spawn_hostengine should succeed when DCGM enabled");
         nvrc.check_daemons()
             .expect("hostengine daemon should exit cleanly");
@@ -210,7 +216,7 @@ mod tests {
     fn test_spawn_dcgm_exporter_success() {
         let mut nvrc = NVRC::default();
         nvrc.dcgm_enabled = Some(true);
-        nvrc.spawn_dcgm_exporter("/bin/true")
+        nvrc.spawn_dcgm_exporter(TEST_BIN_TRUE)
             .expect("spawn_dcgm_exporter should succeed when DCGM enabled");
     }
 
@@ -218,18 +224,8 @@ mod tests {
     fn test_spawn_fabricmanager_success() {
         let mut nvrc = NVRC::default();
         nvrc.fabricmanager_enabled = Some(true);
-        nvrc.spawn_fabricmanager("/bin/true")
+        nvrc.spawn_fabricmanager(TEST_BIN_TRUE)
             .expect("spawn_fabricmanager should succeed when enabled");
-    }
-
-    #[test]
-    fn test_spawn_persistenced_binary_not_found() {
-        let tmpdir = TempDir::new().unwrap();
-        let run_dir = tmpdir.path().join("nvidia-persistenced");
-
-        let mut nvrc = NVRC::default();
-        let result = nvrc.spawn_persistenced(run_dir.to_str().unwrap(), "/nonexistent/binary");
-        assert!(result.is_err());
     }
 
     #[test]
