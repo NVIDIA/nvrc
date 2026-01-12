@@ -25,6 +25,14 @@
 use crate::{last_os_error, Error, Result};
 use core::ffi::{c_char, c_int};
 
+/// Terminate the process with the given exit code.
+/// This is a thin wrapper around libc::_exit() - it never returns.
+/// Use this instead of std::process::exit() for no_std compatibility.
+pub fn exit(code: i32) -> ! {
+    // SAFETY: _exit() is always safe and never returns
+    unsafe { libc::_exit(code) }
+}
+
 /// Check if binary is in the allowed list
 fn is_binary_allowed(path: &str) -> bool {
     // Production binaries - always allowed

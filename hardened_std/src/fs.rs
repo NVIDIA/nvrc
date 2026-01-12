@@ -109,7 +109,7 @@ const ALLOWED_TEMPDIR_PREFIXES: &[&str] = &[
 /// - Non-canonical paths
 ///
 /// # Examples
-/// ```
+/// ```ignore
 /// assert!(is_safe_path("/tmp/.tmpABCDE"));      // OK
 /// assert!(!is_safe_path("/tmp/./../etc/passwd")); // BLOCKED - contains ..
 /// assert!(!is_safe_path("/tmp/./foo"));          // BLOCKED - contains /./

@@ -15,6 +15,8 @@ processes, and sockets.
 - Whitelist-only: paths, binaries, socket paths must be explicitly allowed
 - Static arguments: `&'static str` only (no runtime injection)
 - Minimal surface: implement only what NVRC actually needs
+- Single-threaded: NVRC is PID 1 (init) with no threads - no thread::sleep, no
+  mutexes, no thread-safe synchronization needed in production code
 
 ## Guidelines
 

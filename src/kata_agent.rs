@@ -8,8 +8,6 @@ use nix::unistd::{fork, ForkResult};
 use rlimit::{setrlimit, Resource};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
-use std::thread::sleep;
-use std::time::Duration;
 
 const KATA_AGENT_PATH: &str = "/usr/bin/kata-agent";
 
@@ -50,11 +48,12 @@ fn kata_agent(path: &str) -> Result<()> {
 
 /// Guest VMs lack a syslog daemon, so we poll /dev/log to drain messages
 /// and forward them to kmsg. Timeout enables testing without infinite loops.
+/// Uses blocking poll with 500ms timeout instead of sleep+poll for no_std compat.
 fn syslog_loop(timeout_secs: u32) -> Result<()> {
     let iterations = (timeout_secs as u64) * 2; // 500ms per iteration
     for _ in 0..iterations {
-        sleep(Duration::from_millis(500));
-        if let Err(e) = crate::syslog::poll() {
+        // poll_timeout blocks for up to 500ms, returning when data arrives or timeout
+        if let Err(e) = crate::syslog::poll_timeout(500) {
             return Err(anyhow!("poll syslog: {e}"));
         }
     }
@@ -68,7 +67,7 @@ pub fn fork_agent(timeout_secs: u32) -> Result<()> {
     // SAFETY: fork() is safe here because:
     // 1. We are PID 1 with no other threads (single-threaded process)
     // 2. Parent immediately execs kata-agent (no shared state issues)
-    // 3. Child only calls async-signal-safe functions (syslog::poll, sleep)
+    // 3. Child only calls async-signal-safe functions (poll syscall)
     // 4. No locks or mutexes exist that could deadlock in child
     match unsafe { fork() }.expect("fork agent") {
         ForkResult::Parent { .. } => {
@@ -141,18 +140,24 @@ mod tests {
     #[test]
     fn test_syslog_loop_timeout() {
         // syslog_loop with 1 second timeout runs up to 2 iterations (500ms each).
-        // Two possible outcomes:
-        // 1. poll() works: runs full 2 iterations (~1000ms)
-        // 2. poll() fails: exits early after 1st iteration (~500ms) due to missing /dev/log
-        // Either way, verifies the loop terminates properly.
+        //
+        // **Why no minimum time assertion:**
+        // When /dev/log doesn't exist (common in test environments), poll_timeout()
+        // returns Err immediately on each iteration - no blocking occurs. A minimum
+        // time assertion would cause test failures in environments without /dev/log.
+        //
+        // The poll_socket_timeout tests in syslog.rs verify timeout behavior directly
+        // with controlled sockets. This test verifies syslog_loop's error handling.
         let start = std::time::Instant::now();
-        let _ = syslog_loop(1); // May error if /dev/log not bound, that's fine
+        let result = syslog_loop(1);
         let elapsed = start.elapsed();
 
-        // Lower bound: at least 1 sleep cycle (500ms) runs before poll
-        // Upper bound: 2 iterations + scheduling overhead = ~1200ms max
-        assert!(elapsed.as_millis() >= 400);
+        // Upper bound: 2 iterations * 500ms + scheduling overhead = ~1200ms max
+        // (when /dev/log exists and poll blocks). When it doesn't, exits immediately.
         assert!(elapsed.as_millis() < 1500);
+
+        // Result depends on /dev/log availability - both outcomes are valid
+        let _ = result;
     }
 
     #[test]

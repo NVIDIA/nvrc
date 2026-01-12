@@ -61,6 +61,66 @@ pub fn poll() -> std::io::Result<()> {
     poll_at(Path::new(DEV_LOG))
 }
 
+/// Poll with timeout (milliseconds). Blocks until data arrives or timeout.
+/// Returns Ok(true) if a message was processed, Ok(false) on timeout.
+/// This replaces the sleep+poll pattern, eliminating thread::sleep dependency.
+///
+/// **Timeout limits:** Values are clamped to 65535ms (~65s). Negative values
+/// block indefinitely. For production 500ms polling, this is not a concern.
+pub fn poll_timeout(timeout_ms: i32) -> std::io::Result<bool> {
+    poll_timeout_at(Path::new(DEV_LOG), timeout_ms)
+}
+
+/// Internal: poll with timeout at a specific path.
+fn poll_timeout_at(path: &Path, timeout_ms: i32) -> std::io::Result<bool> {
+    let sock: &UnixDatagram = if path == Path::new(DEV_LOG) {
+        SYSLOG.get_or_try_init(|| bind(path))?
+    } else {
+        return poll_once_timeout(path, timeout_ms);
+    };
+
+    poll_socket_timeout(sock, timeout_ms)
+}
+
+/// Poll socket with timeout. Returns Ok(true) if message read, Ok(false) on timeout.
+fn poll_socket_timeout(sock: &UnixDatagram, timeout_ms: i32) -> std::io::Result<bool> {
+    let mut fds = [PollFd::new(sock.as_fd(), PollFlags::POLLIN)];
+    let timeout = if timeout_ms < 0 {
+        PollTimeout::NONE
+    } else {
+        // Clamp to u16::MAX (65535ms = ~65s) then convert infallibly
+        let ms = (timeout_ms as u32).min(u16::MAX as u32) as u16;
+        PollTimeout::from(ms)
+    };
+
+    let count =
+        nix::poll::poll(&mut fds, timeout).map_err(|e| std::io::Error::other(e.to_string()))?;
+
+    if count == 0 {
+        return Ok(false); // Timeout
+    }
+
+    let Some(revents) = fds[0].revents() else {
+        return Ok(false);
+    };
+
+    if !revents.contains(PollFlags::POLLIN) {
+        return Ok(false);
+    }
+
+    let mut buf = [0u8; 4096];
+    let (len, _) = sock.recv_from(&mut buf)?;
+    let msg = String::from_utf8_lossy(&buf[..len]);
+    trace!("{}", strip_priority(msg.trim_end()));
+    Ok(true)
+}
+
+/// One-shot poll with timeout for testing.
+fn poll_once_timeout(path: &Path, timeout_ms: i32) -> std::io::Result<bool> {
+    let sock = bind(path)?;
+    poll_socket_timeout(&sock, timeout_ms)
+}
+
 /// Internal: poll a specific socket path (for unit tests).
 /// Production code uses poll() which hardcodes /dev/log.
 fn poll_at(path: &Path) -> std::io::Result<()> {
@@ -270,5 +330,70 @@ mod tests {
         // poll() tries to bind /dev/log - may fail if already bound or no permission
         // Just exercise the code path, don't assert success
         let _ = poll();
+    }
+
+    // === poll_socket_timeout tests ===
+
+    #[test]
+    fn test_poll_socket_timeout_no_data() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("timeout.sock");
+        let sock = bind(&path).unwrap();
+
+        let start = std::time::Instant::now();
+        let result = poll_socket_timeout(&sock, 100).unwrap();
+        let elapsed = start.elapsed();
+
+        // Should return false (timeout) and take ~100ms
+        assert!(!result);
+        assert!(elapsed.as_millis() >= 80); // Allow some timing slack
+        assert!(elapsed.as_millis() < 200);
+    }
+
+    #[test]
+    fn test_poll_socket_timeout_with_data() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("timeout_data.sock");
+        let server = bind(&path).unwrap();
+
+        let client = UnixDatagram::unbound().unwrap();
+        client.send_to(b"<6>timeout test", &path).unwrap();
+
+        let start = std::time::Instant::now();
+        let result = poll_socket_timeout(&server, 1000).unwrap();
+        let elapsed = start.elapsed();
+
+        // Should return true (data arrived) and return quickly (not wait for timeout)
+        assert!(result);
+        assert!(elapsed.as_millis() < 100); // Data was already waiting
+    }
+
+    #[test]
+    fn test_poll_socket_timeout_negative_zero_timeout() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("zero_timeout.sock");
+        let sock = bind(&path).unwrap();
+
+        // Zero timeout should return immediately (no data)
+        let result = poll_socket_timeout(&sock, 0).unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_poll_timeout_at_custom_path() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("timeout_custom.sock");
+
+        // poll_timeout_at with custom path uses poll_once_timeout
+        let result = poll_timeout_at(&path, 10);
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // No data, should timeout
+    }
+
+    #[test]
+    fn test_poll_timeout_public_api() {
+        // Exercise the public poll_timeout() function
+        // May fail if /dev/log is already bound, that's ok
+        let _ = poll_timeout(10);
     }
 }
