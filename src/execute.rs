@@ -6,6 +6,25 @@ use std::process::{Child, Command, Stdio};
 
 use crate::kmsg::kmsg;
 
+/// Convert hardened_std::fs::File to std::process::Stdio safely.
+///
+/// **Security Design:**
+/// Uses hardened_std's safe `into_stdio()` method instead of exposing raw fds.
+/// This prevents fd leaks by keeping ownership tracking through Rust's type system.
+///
+/// **Why this is safe:**
+/// - No raw fd exposure - conversion happens inside hardened_std
+/// - Automatic cleanup - Stdio's Drop will close the fd
+/// - No manual close() needed - prevents use-after-free bugs
+/// - No double-free possible - ownership transfer is type-safe
+/// - Maintains hardened_std's security guarantees
+fn file_to_stdio(file: hardened_std::fs::File) -> Stdio {
+    // Safe conversion - hardened_std handles the fd transfer internally
+    // The fd goes: hardened_std::File -> std::fs::File -> Stdio
+    // All managed by Rust's ownership system, no manual cleanup needed
+    file.into_stdio()
+}
+
 /// Run a command and block until completion. Output goes to kmsg so it appears
 /// in dmesg/kernel log - the only reliable log destination in minimal VMs.
 /// Used for setup commands that must succeed before continuing (nvidia-smi, modprobe).
@@ -15,8 +34,12 @@ pub fn foreground(command: &str, args: &[&str]) -> Result<()> {
     let kmsg_file = kmsg().context("Failed to open kmsg device")?;
     let status = Command::new(command)
         .args(args)
-        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg_file))
+        .stdout(file_to_stdio(
+            kmsg_file
+                .try_clone()
+                .map_err(|e| anyhow!("Failed to clone kmsg file: {}", e))?,
+        ))
+        .stderr(file_to_stdio(kmsg_file))
         .status()
         .context(format!("failed to execute {command}"))?;
 
@@ -34,8 +57,12 @@ pub fn background(command: &str, args: &[&str]) -> Result<Child> {
     let kmsg_file = kmsg().context("Failed to open kmsg device")?;
     Command::new(command)
         .args(args)
-        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg_file))
+        .stdout(file_to_stdio(
+            kmsg_file
+                .try_clone()
+                .map_err(|e| anyhow!("Failed to clone kmsg file: {}", e))?,
+        ))
+        .stderr(file_to_stdio(kmsg_file))
         .spawn()
         .with_context(|| format!("Failed to start {}", command))
 }

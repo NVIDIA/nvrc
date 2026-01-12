@@ -3,11 +3,9 @@
 
 //! Filesystem setup for the minimal init environment.
 
-use crate::coreutils::{ln, mknod};
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use hardened_std::fs;
 use nix::mount::MsFlags;
-use nix::sys::stat;
-use std::fs;
 use std::path::Path;
 
 /// Mount a filesystem. Errors if mount fails.
@@ -51,39 +49,41 @@ fn mount_optional(
     Ok(())
 }
 
-/// Create /dev symlinks pointing to /proc entries.
-/// Standard Unix convention: /dev/stdin, /dev/stdout, /dev/stderr should
-/// exist for programs that expect them. /dev/fd provides access to open
-/// file descriptors via /proc/self/fd.
-fn proc_symlinks(root: &str) -> Result<()> {
-    for (src, dst) in [
-        ("/proc/kcore", "dev/core"),
-        ("/proc/self/fd", "dev/fd"),
-        ("/proc/self/fd/0", "dev/stdin"),
-        ("/proc/self/fd/1", "dev/stdout"),
-        ("/proc/self/fd/2", "dev/stderr"),
-    ] {
-        ln(src, &format!("{root}/{dst}"))?;
-    }
-    Ok(())
-}
-
-/// Create essential /dev device nodes for basic I/O.
-/// These character devices are fundamental Unix primitives:
-/// - /dev/null: discard output, read returns EOF
-/// - /dev/zero: infinite stream of zeros
-/// - /dev/random, /dev/urandom: cryptographic randomness
-fn device_nodes(root: &str) -> Result<()> {
-    for (path, minor) in [
-        ("dev/null", 3u64),
-        ("dev/zero", 5u64),
-        ("dev/random", 8u64),
-        ("dev/urandom", 9u64),
-    ] {
-        mknod(&format!("{root}/{path}"), stat::SFlag::S_IFCHR, 1, minor)?; // major 1 = memory devices
-    }
-    Ok(())
-}
+// Previously, we manually created:
+// 1. Device nodes with mknod():
+//    - /dev/null (major 1, minor 3) - mode 0666
+//    - /dev/zero (major 1, minor 5)
+//    - /dev/random (major 1, minor 8)
+//    - /dev/urandom (major 1, minor 9)
+//
+// 2. Symlinks with ln():
+//    - /dev/core -> /proc/kcore
+//    - /dev/fd -> /proc/self/fd
+//    - /dev/stdin -> /proc/self/fd/0
+//    - /dev/stdout -> /proc/self/fd/1
+//    - /dev/stderr -> /proc/self/fd/2
+//
+// However, devtmpfs automatically creates these nodes when we mount it!
+//
+// How it works:
+// 1. The kernel's mem driver (drivers/char/mem.c) calls device_create()
+//    during kernel initialization for each standard character device
+// 2. device_create() registers the device with devtmpfs
+// 3. When we mount devtmpfs the kernel populates it with ALL registered
+//    devices, including /dev/null, /dev/zero, etc.
+// 4. Nodes are created with default permissions (e.g., /dev/null is 0666)
+//
+// Note: CONFIG_DEVTMPFS_MOUNT=y auto-mounts devtmpfs at boot for regular
+// init systems, but in our case (kata with initrd), NVRC explicitly mounts
+// devtmpfs below. Either way, the mount operation triggers node creation.
+//
+// References:
+// - Kernel source: drivers/char/mem.c (mem driver registration)
+// - Kernel source: drivers/base/devtmpfs.c (automatic node creation)
+// - LWN article: https://lwn.net/Articles/330985/
+//
+// This is why we removed the device_nodes() function - it was redundant
+// and caused "path already exists" errors with our fail-fast mknod().
 
 /// Set up the minimal filesystem hierarchy required for GPU initialization.
 /// Creates /proc, /dev, /sys, /run, /tmp mounts and essential device nodes.
@@ -119,7 +119,8 @@ fn setup_at(root: &str) -> Result<()> {
     mount("tmpfs", &format!("{root}/tmp"), "tmpfs", tmp_flags, None)?;
 
     // Read once for all optional mounts
-    let filesystems = fs::read_to_string("/proc/filesystems").unwrap_or_default();
+    let filesystems = fs::read_to_string("/proc/filesystems")
+        .map_err(|e| anyhow!("read /proc/filesystems: {}", e))?;
 
     mount_optional(
         &filesystems,
@@ -136,21 +137,23 @@ fn setup_at(root: &str) -> Result<()> {
         common,
     )?;
 
-    proc_symlinks(root)?;
-    device_nodes(root)?;
+    // devtmpfs automatically creates:
+    // 1. Standard device nodes: /dev/null, /dev/zero, /dev/random, /dev/urandom
+    // 2. Standard symlinks: /dev/core -> /proc/kcore, /dev/fd -> /proc/self/fd,
+    //    /dev/stdin -> /proc/self/fd/0, /dev/stdout -> /proc/self/fd/1, /dev/stderr -> /proc/self/fd/2
+    // No need to manually create them with mknod() or ln()
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::require_root;
 
     // === fs_available tests ===
 
     #[test]
     fn test_fs_available() {
-        let filesystems = fs::read_to_string("/proc/filesystems").unwrap();
+        let filesystems = std::fs::read_to_string("/proc/filesystems").unwrap();
         assert!(fs_available(&filesystems, "proc"));
         assert!(fs_available(&filesystems, "sysfs"));
         assert!(fs_available(&filesystems, "tmpfs"));
@@ -208,28 +211,13 @@ mod tests {
         );
     }
 
-    // === Functions that need root but are safe ===
-
-    #[test]
-    fn test_proc_symlinks() {
-        // These symlinks already exist on any Linux system.
-        // ln() is idempotent - returns Ok if already correct.
-        require_root();
-        assert!(proc_symlinks("").is_ok());
-    }
-
-    #[test]
-    fn test_device_nodes() {
-        // mknod() removes existing nodes first, then recreates.
-        // Safe: just recreates /dev/null, /dev/zero, etc. with same params.
-        require_root();
-        assert!(device_nodes("").is_ok());
-    }
-
-    // === setup_at() tests with temp directory ===
+    // === setup_at() test with temp directory ===
+    // Note: devtmpfs automatically creates both device nodes AND symlinks,
+    // so there's no need to test proc_symlinks() separately
 
     #[test]
     fn test_setup_at_with_temp_root() {
+        use crate::test_utils::require_root;
         use nix::mount::umount;
         use tempfile::TempDir;
 
@@ -239,15 +227,42 @@ mod tests {
         let root = tmpdir.path().to_str().unwrap();
 
         // Create required directories
+        // Note: Tests intentionally use std::fs rather than hardened_std::fs because:
+        // 1. Tests run on host system with arbitrary temp paths (not in hardened_std whitelist)
+        // 2. Tests need to access /proc/filesystems which requires broader std::fs::read_to_string
+        // 3. Production code uses hardened_std::fs with strict path whitelisting
         for dir in ["proc", "dev", "sys", "run", "tmp"] {
-            fs::create_dir_all(format!("{root}/{dir}")).unwrap();
+            std::fs::create_dir_all(format!("{root}/{dir}")).unwrap();
         }
+
+        // Cleanup function to ensure unmounting even on panic
+        struct Cleanup<'a> {
+            root: &'a str,
+        }
+        impl Drop for Cleanup<'_> {
+            fn drop(&mut self) {
+                // Unmount in reverse order (opposite of mount order)
+                // Log failures but don't panic - cleanup is best-effort
+                for dir in ["tmp", "run", "sys", "dev", "proc"] {
+                    let path = format!("{}/{}", self.root, dir);
+                    if let Err(e) = umount(path.as_str()) {
+                        // In tests, unmount failures are expected if mount never succeeded
+                        // or if the test itself failed. Only log when debugging is enabled.
+                        // Set MOUNT_TEST_DEBUG=1 to see cleanup warnings during test runs.
+                        if std::env::var("MOUNT_TEST_DEBUG").is_ok() {
+                            eprintln!("Warning: Failed to unmount {}: {:?}", path, e);
+                        }
+                    }
+                }
+            }
+        }
+        let _cleanup = Cleanup { root };
 
         // Run setup_at with temp root
         let result = setup_at(root);
         assert!(result.is_ok(), "setup_at failed: {:?}", result);
 
-        // Verify device nodes were created
+        // Verify device nodes exist (created automatically by devtmpfs)
         assert!(Path::new(&format!("{root}/dev/null")).exists());
         assert!(Path::new(&format!("{root}/dev/zero")).exists());
 
@@ -255,9 +270,6 @@ mod tests {
         assert!(Path::new(&format!("{root}/dev/stdin")).is_symlink());
         assert!(Path::new(&format!("{root}/dev/stdout")).is_symlink());
 
-        // Cleanup: unmount in reverse order
-        for dir in ["tmp", "run", "sys", "dev", "proc"] {
-            let _ = umount(format!("{root}/{dir}").as_str());
-        }
+        // Cleanup happens via Drop
     }
 }

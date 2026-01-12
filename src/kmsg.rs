@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use anyhow::{Context, Result};
-use std::fs::{self, File, OpenOptions};
+use anyhow::{anyhow, Result};
+use hardened_std::fs::{self, File, OpenOptions};
 use std::sync::Once;
 
 static KERNLOG_INIT: Once = Once::new();
@@ -27,7 +27,7 @@ pub fn kernlog_setup() -> Result<()> {
         "/proc/sys/net/core/wmem_max",
     ] {
         fs::write(path, SOCKET_BUFFER_SIZE.as_bytes())
-            .with_context(|| format!("write {}", path))?;
+            .map_err(|e| anyhow!("write {}: {}", path, e))?;
     }
     Ok(())
 }
@@ -48,7 +48,7 @@ fn kmsg_at(path: &str) -> Result<File> {
     OpenOptions::new()
         .write(true)
         .open(path)
-        .with_context(|| format!("open {}", path))
+        .map_err(|e| anyhow!("open {}: {}", path, e))
 }
 
 #[cfg(test)]
@@ -56,7 +56,6 @@ mod tests {
     use super::*;
     use crate::test_utils::require_root;
     use serial_test::serial;
-    use std::io::Write;
     use tempfile::NamedTempFile;
 
     #[test]
@@ -79,11 +78,43 @@ mod tests {
 
     #[test]
     fn test_kmsg_at_temp_file() {
-        // Create a temp file to verify we can write to it
+        use std::os::unix::io::AsRawFd;
+
+        // Create a temp file to verify we can actually write to it
         let temp = NamedTempFile::new().unwrap();
         let path = temp.path().to_str().unwrap();
-        let mut file = kmsg_at(path).unwrap();
-        assert!(file.write_all(b"test").is_ok());
+
+        // Open via kmsg_at
+        let file = kmsg_at(path).expect("kmsg_at should succeed for temp file");
+
+        // Verify we can write to the returned File
+        // This catches issues where the file handle is invalid or closed
+        //
+        // Note: We use unsafe libc::write() instead of std::io::Write because:
+        // 1. hardened_std::fs::File doesn't implement Write trait (minimalist design)
+        // 2. This test specifically validates the raw fd is usable, not high-level APIs
+        // 3. Direct syscall testing ensures fd validity at lowest level
+        // 4. Catching fd issues that might be hidden by higher-level wrappers
+        let test_data = b"test write\n";
+        let fd = file.as_raw_fd();
+        assert!(fd >= 0, "File descriptor should be valid");
+
+        // SAFETY: Direct fd write is safe here because:
+        // 1. fd is valid (came from successful kmsg_at)
+        // 2. test_data pointer and length are valid
+        // 3. We don't use fd after this (file owns it)
+        let write_result = unsafe {
+            libc::write(
+                fd,
+                test_data.as_ptr() as *const libc::c_void,
+                test_data.len(),
+            )
+        };
+        assert_eq!(
+            write_result,
+            test_data.len() as isize,
+            "Should write full test data"
+        );
     }
 
     #[test]
@@ -123,21 +154,21 @@ mod tests {
         impl Drop for Restore {
             fn drop(&mut self) {
                 for (path, value) in &self.0 {
-                    let _ = fs::write(path, value.as_bytes());
+                    let _ = std::fs::write(path, value.as_bytes());
                 }
             }
         }
 
         let saved: Vec<_> = PATHS
             .iter()
-            .filter_map(|&p| fs::read_to_string(p).ok().map(|v| (p, v)))
+            .filter_map(|&p| std::fs::read_to_string(p).ok().map(|v| (p, v)))
             .collect();
         let _restore = Restore(saved);
 
         assert!(kernlog_setup().is_ok());
 
         for &path in &PATHS {
-            let v = fs::read_to_string(path).expect("should read sysctl");
+            let v = std::fs::read_to_string(path).expect("should read sysctl");
             assert_eq!(
                 v.trim(),
                 SOCKET_BUFFER_SIZE,
