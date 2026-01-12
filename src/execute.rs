@@ -2,18 +2,27 @@
 // Copyright (c) NVIDIA CORPORATION
 
 use anyhow::{anyhow, Context, Result};
-use std::os::fd::FromRawFd;
 use std::process::{Child, Command, Stdio};
 
 use crate::kmsg::kmsg;
 
-/// Convert hardened_std::fs::File to std::process::Stdio
+/// Convert hardened_std::fs::File to std::process::Stdio safely.
+///
+/// **Security Design:**
+/// Uses hardened_std's safe `into_stdio()` method instead of exposing raw fds.
+/// This prevents fd leaks by keeping ownership tracking through Rust's type system.
+///
+/// **Why this is safe:**
+/// - No raw fd exposure - conversion happens inside hardened_std
+/// - Automatic cleanup - Stdio's Drop will close the fd
+/// - No manual close() needed - prevents use-after-free bugs
+/// - No double-free possible - ownership transfer is type-safe
+/// - Maintains hardened_std's security guarantees
 fn file_to_stdio(file: hardened_std::fs::File) -> Stdio {
-    // SAFETY: We're transferring ownership of the fd from hardened_std::fs::File
-    // to std::fs::File, which will then be converted to Stdio
-    let fd = file.into_raw_fd();
-    let std_file = unsafe { std::fs::File::from_raw_fd(fd) };
-    Stdio::from(std_file)
+    // Safe conversion - hardened_std handles the fd transfer internally
+    // The fd goes: hardened_std::File -> std::fs::File -> Stdio
+    // All managed by Rust's ownership system, no manual cleanup needed
+    file.into_stdio()
 }
 
 /// Run a command and block until completion. Output goes to kmsg so it appears

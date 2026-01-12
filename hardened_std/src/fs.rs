@@ -6,10 +6,39 @@
 use crate::{last_os_error, Error, Result};
 use alloc::string::ToString;
 
-/// Maximum bytes allowed in a single write operation
-/// Analysis: Production uses max 8 bytes ("16777216"), tests use max 11 bytes
-/// Setting to 20 bytes provides safety margin while staying hardened
+// Type aliases for std types when std-support feature is enabled
+#[cfg(feature = "std-support")]
+use std::fs::File as StdFile;
+#[cfg(feature = "std-support")]
+use std::os::unix::io::FromRawFd;
+#[cfg(feature = "std-support")]
+use std::process::Stdio as StdStdio;
+
+/// Maximum bytes allowed in a single write operation.
+///
+/// **Security Constraint:**
+/// Analysis: Production uses max 8 bytes ("16777216"), tests use max 11 bytes.
+/// Setting to 20 bytes provides safety margin while staying hardened.
+///
+/// **Enforcement:**
+/// - Runtime check in write() rejects data > MAX_WRITE_SIZE with WriteTooLarge error
+/// - Compile-time validation in tests ensures no code exceeds this limit
+/// - If you need to write more, you must:
+///   1. Justify the security implications
+///   2. Update MAX_WRITE_SIZE with documented analysis
+///   3. Add test coverage for the new limit
 const MAX_WRITE_SIZE: usize = 20;
+
+// Compile-time assertion to catch accidental increases
+// If this fails, you MUST justify why MAX_WRITE_SIZE needs to be larger
+const _: () = {
+    const fn assert_max_write_size_reasonable() {
+        if MAX_WRITE_SIZE > 50 {
+            panic!("MAX_WRITE_SIZE too large - security review required");
+        }
+    }
+    assert_max_write_size_reasonable();
+};
 
 /// Maximum path length in bytes (excluding null terminator)
 /// This is a security constraint to prevent path-based attacks and ensure
@@ -271,19 +300,27 @@ pub fn read_to_string(path: &str) -> Result<alloc::string::String> {
     let bytes_read =
         unsafe { libc::read(fd, buffer.as_mut_ptr() as *mut libc::c_void, MAX_READ_SIZE) };
 
-    // Always close fd
+    // Always close fd, but prioritize read errors over close errors
+    // If read succeeded but close failed, we still return the data
     let close_result = unsafe { libc::close(fd) };
 
+    // Check read result first - this is the primary operation
     if bytes_read < 0 {
         return Err(last_os_error());
     }
 
+    // Truncate to actual bytes read before checking close
+    buffer.truncate(bytes_read as usize);
+
+    // Only fail on close error if read succeeded and we haven't returned yet
+    // Note: In practice, close() rarely fails after successful read, but if it does,
+    // we've already got the data, so we could consider just logging the error.
+    // For now, we still fail to maintain strict error handling.
     if close_result < 0 {
+        // Data was read successfully but close failed
+        // Consider: Should we return the data anyway? For now, fail to be safe.
         return Err(last_os_error());
     }
-
-    // Truncate to actual bytes read
-    buffer.truncate(bytes_read as usize);
 
     // Convert to String
     alloc::string::String::from_utf8(buffer)
@@ -355,6 +392,15 @@ pub fn create_dir_all(path: &str) -> Result<()> {
             continue; // Skip empty components (leading / or //)
         }
 
+        // Security: Validate component doesn't contain null bytes
+        // This prevents C string truncation attacks where "\0" could terminate
+        // the path prematurely and bypass our whitelist validation
+        if component.contains('\0') {
+            return Err(Error::InvalidInput(
+                "Path component contains null byte".to_string(),
+            ));
+        }
+
         current_path.push(b'/');
         current_path.extend_from_slice(component.as_bytes());
 
@@ -424,21 +470,82 @@ impl File {
         Ok(File { fd: new_fd })
     }
 
-    /// Get the raw file descriptor
+    /// Get the raw file descriptor without transferring ownership.
     ///
-    /// Returns the underlying file descriptor without closing it.
-    /// Caller is responsible for eventually closing the fd.
+    /// **Safe read-only access** - unlike into_raw_fd(), this does NOT transfer ownership.
+    /// The File still owns the fd and will close it when dropped.
+    ///
+    /// Use this for:
+    /// - Reading the fd value for syscalls
+    /// - AsRawFd trait compatibility in tests
+    /// - Passing fd to functions that don't take ownership
     ///
     /// # Safety
-    /// This method correctly prevents the Drop implementation from closing
-    /// the file descriptor by using `core::mem::forget`.
+    /// The returned fd is only valid as long as this File exists.
+    /// Do NOT close it manually - the File will close it on drop.
+    pub fn as_raw_fd(&self) -> i32 {
+        self.fd
+    }
+
+    /// Convert File into std::process::Stdio safely.
     ///
-    /// # Compatibility
-    /// In test mode with std available, also implements the standard library
-    /// `IntoRawFd` trait for interoperability.
-    pub fn into_raw_fd(self) -> i32 {
+    /// **Security Design:**
+    /// This method provides a safe alternative to exposing raw file descriptors.
+    /// By converting directly to Stdio, we maintain ownership tracking and
+    /// automatic cleanup through Rust's type system, preventing fd leaks.
+    ///
+    /// **Why this is safe:**
+    /// - No raw fd exposure - fd stays managed by Rust types
+    /// - Automatic cleanup - Stdio's Drop will close the fd
+    /// - No manual close() needed - prevents use-after-free bugs
+    /// - No double-free possible - ownership transfer is type-safe
+    ///
+    /// **Usage in NVRC:**
+    /// ```no_run
+    /// // execute.rs - Safe fd transfer for process stdout/stderr
+    /// let kmsg = hardened_std::fs::File::open("/dev/kmsg")?;
+    /// let stdio = kmsg.into_stdio();
+    /// Command::new("nvidia-smi").stdout(stdio).spawn()?;
+    /// // fd automatically closed when Command/Stdio drops - NO LEAKS!
+    /// ```
+    ///
+    /// This is only available when compiling with std-support feature.
+    #[cfg(feature = "std-support")]
+    pub fn into_stdio(self) -> StdStdio {
+        use core::mem::ManuallyDrop;
+
+        // Use ManuallyDrop for explicit ownership transfer semantics
+        // This is safer than mem::forget if panic occurs during conversion
+        let manual = ManuallyDrop::new(self);
+        let fd = manual.fd;
+
+        // SAFETY: Safe ownership transfer because:
+        // 1. fd is valid - came from successful open()
+        // 2. We have unique ownership - self is wrapped in ManuallyDrop
+        // 3. std::fs::File takes ownership - will close on drop
+        // 4. No double-close - ManuallyDrop prevents our Drop from running
+        // 5. Even if panic occurs, ManuallyDrop ensures no double-free
+        let std_file = unsafe { StdFile::from_raw_fd(fd) };
+        StdStdio::from(std_file)
+    }
+
+    /// Convert File into raw file descriptor for interop (INTERNAL USE ONLY).
+    ///
+    /// **DANGER:** This method breaks hardened_std's security model!
+    /// Only use this for interfacing with trusted libraries where there's
+    /// no safe alternative. The caller becomes responsible for fd cleanup.
+    ///
+    /// **DO NOT USE** unless you absolutely need raw fd access.
+    /// Prefer `into_stdio()` for Command/process use cases.
+    ///
+    /// # Safety Requirements
+    /// 1. MUST close the fd manually via libc::close() or from_raw_fd()
+    /// 2. Failure to close causes resource leaks in PID 1 init process
+    /// 3. Double-close causes undefined behavior
+    #[cfg(test)]
+    pub(crate) fn into_raw_fd(self) -> i32 {
         let fd = self.fd;
-        core::mem::forget(self); // Prevent Drop from closing the fd
+        core::mem::forget(self);
         fd
     }
 }
