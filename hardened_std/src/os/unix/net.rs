@@ -11,7 +11,7 @@
 //! This module provides Unix datagram sockets for receiving syslog messages
 //! from daemons like nvidia-persistenced, nv-hostengine, etc.
 
-use crate::{last_os_error, Error, Result};
+use crate::{last_os_error, path::Path, Error, Result};
 use core::ffi::c_int;
 
 /// Maximum path length for Unix socket addresses (from sys/un.h)
@@ -50,10 +50,14 @@ impl UnixDatagram {
     /// - `/dev/log` (production syslog)
     /// - `/tmp/*` (tests only)
     ///
+    /// If the socket file already exists, bind() will fail with EADDRINUSE.
+    /// In an ephemeral VM with fresh filesystem, this indicates an error.
+    ///
     /// # Errors
     /// - `PathNotAllowed` if path is not in whitelist
-    /// - OS errors for socket/bind failures
-    pub fn bind(path: &str) -> Result<Self> {
+    /// - OS errors for socket/bind failures (including EADDRINUSE)
+    pub fn bind<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref().as_str();
         if !is_socket_path_allowed(path) {
             return Err(Error::PathNotAllowed);
         }
@@ -71,14 +75,15 @@ impl UnixDatagram {
             return Err(last_os_error());
         }
 
-        // Build sockaddr_un
+        // Build sockaddr_un (zeroed provides null termination)
         let mut addr: libc::sockaddr_un = unsafe { core::mem::zeroed() };
         addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
 
-        // Copy path into sun_path (must be null-terminated)
+        // Copy path into sun_path using safe iteration
         let path_bytes = path.as_bytes();
-        addr.sun_path[..path_bytes.len()]
-            .copy_from_slice(unsafe { &*(path_bytes as *const [u8] as *const [i8]) });
+        for (i, &b) in path_bytes.iter().enumerate() {
+            addr.sun_path[i] = b as i8;
+        }
 
         // Bind the socket
         // SAFETY: bind() is safe with valid fd and address

@@ -35,6 +35,24 @@ impl AsRef<str> for Path {
     }
 }
 
+impl AsRef<Path> for str {
+    fn as_ref(&self) -> &Path {
+        Path::new(self)
+    }
+}
+
+impl AsRef<Path> for String {
+    fn as_ref(&self) -> &Path {
+        Path::new(self)
+    }
+}
+
+impl AsRef<Path> for Path {
+    fn as_ref(&self) -> &Path {
+        self
+    }
+}
+
 /// Owned path buffer
 pub struct PathBuf {
     #[allow(dead_code)]
