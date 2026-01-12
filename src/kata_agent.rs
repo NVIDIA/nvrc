@@ -140,17 +140,20 @@ mod tests {
     #[test]
     fn test_syslog_loop_timeout() {
         // syslog_loop with 1 second timeout runs up to 2 iterations (500ms each).
-        // Two possible outcomes:
-        // 1. poll_timeout() works: blocks up to 500ms per iteration (~1000ms total)
-        // 2. poll_timeout() fails immediately: /dev/log not bound, exits early
-        // Either way, verifies the loop terminates properly.
+        //
+        // **Why no minimum time assertion:**
+        // When /dev/log doesn't exist (common in test environments), poll_timeout()
+        // returns Err immediately on each iteration - no blocking occurs. A minimum
+        // time assertion would cause test failures in environments without /dev/log.
+        //
+        // The poll_socket_timeout tests in syslog.rs verify timeout behavior directly
+        // with controlled sockets. This test verifies syslog_loop's error handling.
         let start = std::time::Instant::now();
         let result = syslog_loop(1);
         let elapsed = start.elapsed();
 
-        // If /dev/log doesn't exist, poll_timeout fails immediately (no blocking)
-        // If it exists, each iteration blocks up to 500ms
-        // Upper bound: 2 iterations + scheduling overhead = ~1200ms max
+        // Upper bound: 2 iterations * 500ms + scheduling overhead = ~1200ms max
+        // (when /dev/log exists and poll blocks). When it doesn't, exits immediately.
         assert!(elapsed.as_millis() < 1500);
 
         // Result depends on /dev/log availability - both outcomes are valid

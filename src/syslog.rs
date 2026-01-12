@@ -64,6 +64,9 @@ pub fn poll() -> std::io::Result<()> {
 /// Poll with timeout (milliseconds). Blocks until data arrives or timeout.
 /// Returns Ok(true) if a message was processed, Ok(false) on timeout.
 /// This replaces the sleep+poll pattern, eliminating thread::sleep dependency.
+///
+/// **Timeout limits:** Values are clamped to 65535ms (~65s). Negative values
+/// block indefinitely. For production 500ms polling, this is not a concern.
 pub fn poll_timeout(timeout_ms: i32) -> std::io::Result<bool> {
     poll_timeout_at(Path::new(DEV_LOG), timeout_ms)
 }
@@ -327,5 +330,41 @@ mod tests {
         // poll() tries to bind /dev/log - may fail if already bound or no permission
         // Just exercise the code path, don't assert success
         let _ = poll();
+    }
+
+    // === poll_socket_timeout tests ===
+
+    #[test]
+    fn test_poll_socket_timeout_no_data() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("timeout.sock");
+        let sock = bind(&path).unwrap();
+
+        let start = std::time::Instant::now();
+        let result = poll_socket_timeout(&sock, 100).unwrap();
+        let elapsed = start.elapsed();
+
+        // Should return false (timeout) and take ~100ms
+        assert!(!result);
+        assert!(elapsed.as_millis() >= 80); // Allow some timing slack
+        assert!(elapsed.as_millis() < 200);
+    }
+
+    #[test]
+    fn test_poll_socket_timeout_with_data() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("timeout_data.sock");
+        let server = bind(&path).unwrap();
+
+        let client = UnixDatagram::unbound().unwrap();
+        client.send_to(b"<6>timeout test", &path).unwrap();
+
+        let start = std::time::Instant::now();
+        let result = poll_socket_timeout(&server, 1000).unwrap();
+        let elapsed = start.elapsed();
+
+        // Should return true (data arrived) and return quickly (not wait for timeout)
+        assert!(result);
+        assert!(elapsed.as_millis() < 100); // Data was already waiting
     }
 }
