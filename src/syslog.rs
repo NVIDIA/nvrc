@@ -367,4 +367,33 @@ mod tests {
         assert!(result);
         assert!(elapsed.as_millis() < 100); // Data was already waiting
     }
+
+    #[test]
+    fn test_poll_socket_timeout_negative_zero_timeout() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("zero_timeout.sock");
+        let sock = bind(&path).unwrap();
+
+        // Zero timeout should return immediately (no data)
+        let result = poll_socket_timeout(&sock, 0).unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_poll_timeout_at_custom_path() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("timeout_custom.sock");
+
+        // poll_timeout_at with custom path uses poll_once_timeout
+        let result = poll_timeout_at(&path, 10);
+        assert!(result.is_ok());
+        assert!(!result.unwrap()); // No data, should timeout
+    }
+
+    #[test]
+    fn test_poll_timeout_public_api() {
+        // Exercise the public poll_timeout() function
+        // May fail if /dev/log is already bound, that's ok
+        let _ = poll_timeout(10);
+    }
 }
