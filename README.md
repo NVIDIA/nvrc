@@ -2,11 +2,17 @@
 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/NVIDIA/nvrc/badge)](https://scorecard.dev/viewer/?uri=github.com/NVIDIA/nvrc)
 
-A minimal init system (PID 1) for ephemeral NVIDIA GPU-enabled VMs running under Kata Containers. NVRC sets up GPU drivers, configures hardware, spawns NVIDIA management daemons, and hands off to kata-agent for container orchestration.
+A minimal init system (PID 1) for ephemeral NVIDIA GPU-enabled VMs running
+under Kata Containers. NVRC sets up GPU drivers, configures hardware, spawns
+NVIDIA management daemons, and hands off to kata-agent for container
+orchestration.
 
 ## Design Philosophy
 
-**Fail Fast, Fail Hard**: NVRC is designed for ephemeral confidential VMs where any configuration failure should immediately terminate the VM. There are no recovery mechanisms—if GPU initialization fails, the VM powers off. This "panic-on-failure" approach ensures:
+**Fail Fast, Fail Hard**: NVRC is designed for ephemeral confidential VMs where
+any configuration failure should immediately terminate the VM. There are no
+recovery mechanisms—if GPU initialization fails, the VM powers off. This
+"panic-on-failure" approach ensures:
 
 - **Security**: No undefined states in confidential computing environments
 - **Simplicity**: No complex error recovery logic to audit
@@ -14,7 +20,7 @@ A minimal init system (PID 1) for ephemeral NVIDIA GPU-enabled VMs running under
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                        NVRC (PID 1)                             │
 │                                                                 │
@@ -49,7 +55,9 @@ A minimal init system (PID 1) for ephemeral NVIDIA GPU-enabled VMs running under
 
 ## Kernel Parameters
 
-NVRC is configured entirely via kernel command-line parameters (no config files). This is critical for minimal init environments where userspace configuration doesn't exist yet.
+NVRC is configured entirely via kernel command-line parameters (no config
+files). This is critical for minimal init environments where userspace
+configuration doesn't exist yet.
 
 ### Core Parameters
 
@@ -78,37 +86,44 @@ NVRC is configured entirely via kernel command-line parameters (no config files)
 ### Example Configurations
 
 **Minimal GPU setup (defaults):**
-```
+
+```text
 nvrc.mode=gpu
 ```
 
 **CPU-only mode:**
-```
+
+```text
 nvrc.mode=cpu
 ```
 
 **NVSwitch NVL4 mode (Service VM for HGX H100/H200/H800 - NVLink 4.0):**
-```
+
+```text
 nvrc.mode=nvswitch-nvl4
 ```
 
 **NVSwitch NVL5 mode (Service VM for HGX B200/B300/B100 - NVLink 5.0):**
-```
+
+```text
 nvrc.mode=nvswitch-nvl5
 ```
 
 **GPU with locked clocks for benchmarking:**
-```
+
+```text
 nvrc.mode=gpu nvrc.smi.lgc=1500 nvrc.smi.lmc=5001 nvrc.smi.pl=300
 ```
 
 **GPU with DCGM monitoring:**
-```
+
+```text
 nvrc.mode=gpu nvrc.dcgm=on nvrc.log=info
 ```
 
 **Multi-GPU with NVLink:**
-```
+
+```text
 nvrc.mode=gpu nvrc.fabricmanager=on nvrc.log=debug
 ```
 
@@ -124,7 +139,8 @@ cargo build --release --target x86_64-unknown-linux-musl
 cargo build --release --target aarch64-unknown-linux-musl
 ```
 
-Build configuration in `.cargo/config.toml` enables aggressive size optimization and static linking.
+Build configuration in `.cargo/config.toml` enables aggressive size
+optimization and static linking.
 
 ## Testing
 
@@ -147,7 +163,8 @@ cargo deny check
 
 ## Security Model
 
-NVRC operates with a defense-in-depth security model appropriate for confidential computing:
+NVRC operates with a defense-in-depth security model appropriate for
+confidential computing:
 
 1. **Minimal Attack Surface**: 9 direct dependencies, statically linked
 2. **Fail-Fast**: Panic hook powers off VM on any panic (no undefined states)
@@ -159,10 +176,13 @@ NVRC operates with a defense-in-depth security model appropriate for confidentia
 
 ### Why Panic Instead of Recover?
 
-In traditional long-running systems, recovering from errors is valuable. In ephemeral confidential VMs:
+In traditional long-running systems, recovering from errors is valuable. In
+ephemeral confidential VMs:
 
-- **VM lifetime is seconds/minutes**: Restarting is faster than debugging partial failures
-- **Confidential computing requires integrity**: Undefined states could leak secrets
+- **VM lifetime is seconds/minutes**: Restarting is faster than debugging
+  partial failures
+- **Confidential computing requires integrity**: Undefined states could leak
+  secrets
 - **Orchestrator handles retries**: Kubernetes/Kata will reschedule the pod
 - **Simpler audit surface**: No complex recovery logic to verify
 
@@ -171,6 +191,7 @@ In traditional long-running systems, recovering from errors is valuable. In ephe
 ### VM powers off immediately
 
 Check kernel logs for panic messages. Common causes:
+
 - Missing NVIDIA drivers in container image
 - Invalid kernel parameters (check `/proc/cmdline`)
 - Daemon startup failures (check logs with `nvrc.log=debug`)

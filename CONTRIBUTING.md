@@ -12,7 +12,7 @@ to pass it on as an open-source patch.
 The rules are pretty simple, and sign-off means that you certify the DCO below
 (from [developercertificate.org](http://developercertificate.org/)):
 
-```
+```text
 Developer Certificate of Origin
 Version 1.1
 
@@ -53,7 +53,9 @@ By making a contribution to this project, I certify that:
 
 To sign off, you just add the following line to every git commit message:
 
-    Signed-off-by: Joe Smith <joe.smith@email.com>
+```text
+Signed-off-by: Joe Smith <joe.smith@email.com>
+```
 
 You must use your real name (sorry, no pseudonyms or anonymous contributions).
 
@@ -109,12 +111,14 @@ choice here.
 ### Architecture Quick Reference
 
 **Initialization Flow**:
-```
+
+```text
 mount → logging → parse kernel params → mode dispatch → daemon spawn →
 kata-agent fork → syslog poll
 ```
 
 **Operation Modes**:
+
 - `gpu` (default): Full GPU initialization with drivers and daemons
 - `cpu`: Skip GPU setup, jump to kata-agent
 - `nvswitch-nvl4`: NVSwitch mode for H100/H200/H800
