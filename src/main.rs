@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-mod coreutils;
 mod daemon;
 mod execute;
 mod kata_agent;

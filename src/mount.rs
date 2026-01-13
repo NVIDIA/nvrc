@@ -3,10 +3,8 @@
 
 //! Filesystem setup for the minimal init environment.
 
-use crate::coreutils::{ln, mknod};
 use anyhow::{Context, Result};
 use nix::mount::MsFlags;
-use nix::sys::stat;
 use std::fs;
 use std::path::Path;
 
@@ -51,42 +49,11 @@ fn mount_optional(
     Ok(())
 }
 
-/// Create /dev symlinks pointing to /proc entries.
-/// Standard Unix convention: /dev/stdin, /dev/stdout, /dev/stderr should
-/// exist for programs that expect them. /dev/fd provides access to open
-/// file descriptors via /proc/self/fd.
-fn proc_symlinks(root: &str) -> Result<()> {
-    for (src, dst) in [
-        ("/proc/kcore", "dev/core"),
-        ("/proc/self/fd", "dev/fd"),
-        ("/proc/self/fd/0", "dev/stdin"),
-        ("/proc/self/fd/1", "dev/stdout"),
-        ("/proc/self/fd/2", "dev/stderr"),
-    ] {
-        ln(src, &format!("{root}/{dst}"))?;
-    }
-    Ok(())
-}
-
-/// Create essential /dev device nodes for basic I/O.
-/// These character devices are fundamental Unix primitives:
-/// - /dev/null: discard output, read returns EOF
-/// - /dev/zero: infinite stream of zeros
-/// - /dev/random, /dev/urandom: cryptographic randomness
-fn device_nodes(root: &str) -> Result<()> {
-    for (path, minor) in [
-        ("dev/null", 3u64),
-        ("dev/zero", 5u64),
-        ("dev/random", 8u64),
-        ("dev/urandom", 9u64),
-    ] {
-        mknod(&format!("{root}/{path}"), stat::SFlag::S_IFCHR, 1, minor)?; // major 1 = memory devices
-    }
-    Ok(())
-}
-
 /// Set up the minimal filesystem hierarchy required for GPU initialization.
-/// Creates /proc, /dev, /sys, /run, /tmp mounts and essential device nodes.
+/// Creates /proc, /dev, /sys, /run, /tmp mounts.
+/// devtmpfs automatically creates standard device nodes; symlinks
+/// (/dev/stdin, /dev/stdout, /dev/stderr, /dev/fd, /dev/core) are
+/// created later by kata-agent.
 pub fn setup() -> Result<()> {
     setup_at("")
 }
@@ -97,6 +64,8 @@ fn setup_at(root: &str) -> Result<()> {
 
     mount("proc", &format!("{root}/proc"), "proc", common, None)?;
 
+    // devtmpfs automatically creates /dev/null, /dev/zero, /dev/random, /dev/urandom
+    // Symlinks (/dev/stdin, /dev/stdout, /dev/stderr, /dev/fd, /dev/core) are created by kata-agent
     let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
     mount(
         "dev",
@@ -136,8 +105,6 @@ fn setup_at(root: &str) -> Result<()> {
         common,
     )?;
 
-    proc_symlinks(root)?;
-    device_nodes(root)?;
     Ok(())
 }
 
@@ -208,24 +175,6 @@ mod tests {
         );
     }
 
-    // === Functions that need root but are safe ===
-
-    #[test]
-    fn test_proc_symlinks() {
-        // These symlinks already exist on any Linux system.
-        // ln() is idempotent - returns Ok if already correct.
-        require_root();
-        assert!(proc_symlinks("").is_ok());
-    }
-
-    #[test]
-    fn test_device_nodes() {
-        // mknod() removes existing nodes first, then recreates.
-        // Safe: just recreates /dev/null, /dev/zero, etc. with same params.
-        require_root();
-        assert!(device_nodes("").is_ok());
-    }
-
     // === setup_at() tests with temp directory ===
 
     #[test]
@@ -247,13 +196,11 @@ mod tests {
         let result = setup_at(root);
         assert!(result.is_ok(), "setup_at failed: {:?}", result);
 
-        // Verify device nodes were created
+        // devtmpfs creates these automatically
         assert!(Path::new(&format!("{root}/dev/null")).exists());
         assert!(Path::new(&format!("{root}/dev/zero")).exists());
-
-        // Verify symlinks were created
-        assert!(Path::new(&format!("{root}/dev/stdin")).is_symlink());
-        assert!(Path::new(&format!("{root}/dev/stdout")).is_symlink());
+        assert!(Path::new(&format!("{root}/dev/random")).exists());
+        assert!(Path::new(&format!("{root}/dev/urandom")).exists());
 
         // Cleanup: unmount in reverse order
         for dir in ["tmp", "run", "sys", "dev", "proc"] {

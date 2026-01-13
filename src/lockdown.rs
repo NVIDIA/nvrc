@@ -71,6 +71,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Permanently disables module loading until reboot - run with --include-ignored on CI
     fn test_disable_modules_loading() {
         require_root();
 
@@ -91,6 +92,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // Installs real power_off hook - run with --include-ignored on CI
     fn test_set_panic_hook() {
         // Installs the real hook (with power_off) - just don't trigger it!
         let _ = set_panic_hook();

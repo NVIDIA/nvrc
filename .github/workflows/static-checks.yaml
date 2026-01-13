@@ -51,7 +51,7 @@ jobs:
         with:
           toolchain: stable
 
-      - run: sudo -E env "PATH=$PATH" cargo test --all-features
+      - run: sudo -E env "PATH=$PATH" cargo test --all-features -- --include-ignored
 
   # Check code formatting against Rust style guidelines
   formatting:
