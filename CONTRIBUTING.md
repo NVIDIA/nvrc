@@ -12,7 +12,7 @@ to pass it on as an open-source patch.
 The rules are pretty simple, and sign-off means that you certify the DCO below
 (from [developercertificate.org](http://developercertificate.org/)):
 
-```
+```text
 Developer Certificate of Origin
 Version 1.1
 
@@ -53,9 +53,97 @@ By making a contribution to this project, I certify that:
 
 To sign off, you just add the following line to every git commit message:
 
-    Signed-off-by: Joe Smith <joe.smith@email.com>
+```text
+Signed-off-by: Joe Smith <joe.smith@email.com>
+```
 
 You must use your real name (sorry, no pseudonyms or anonymous contributions).
 
 If you set your `user.name` and `user.email` using git config, you can sign
 your commit automatically with `git commit -s`.
+
+## For AI Assistants (Claude Code, Cursor, GitHub Copilot, etc.)
+
+If you're an AI coding assistant helping with this project, here's critical
+context to avoid mistakes and understand the codebase architecture.
+
+### Project Overview
+
+NVRC is a minimal init system (PID 1) for ephemeral NVIDIA GPU-enabled VMs
+running under Kata Containers in confidential computing environments. It sets
+up GPU drivers, spawns management daemons, and hands off to kata-agent.
+
+**Fail-Fast Philosophy**: This project intentionally panics and powers off the
+VM on any error. Do NOT add error recovery, try/catch, or fallback logic.
+Panics prevent undefined states in confidential VMs and are the correct design
+choice here.
+
+### Critical Warnings
+
+1. **NEVER run `cargo test --lib`** - This specific test command can reboot
+   the system. Use `cargo test` without the `--lib` flag.
+
+2. **Testing Constraints**:
+   - Many tests require root privileges (`sudo`)
+   - Some tests require actual GPU hardware
+   - Tests marked with `#[serial]` need exclusive hardware access
+   - Check test names - they often indicate requirements (e.g.,
+     `test_requires_root`)
+
+3. **Fail-Fast is Intentional**:
+   - DO NOT add error recovery mechanisms
+   - Panics are designed to power off the VM safely
+   - This prevents undefined states in confidential computing
+   - The orchestrator (Kubernetes/Kata) handles retries
+
+4. **Security Implications**:
+   - Runs as PID 1 in confidential VMs
+   - Changes can affect VM security posture
+   - Minimal dependencies (9 direct deps) are critical
+   - Must maintain static linking (musl target)
+   - Read-only root filesystem after init
+
+5. **Dependency Constraints**:
+   - Keep dependencies minimal
+   - All deps must be musl-compatible (static linking requirement)
+   - Check `.cargo/config.toml` for build requirements
+
+### Architecture Quick Reference
+
+**Initialization Flow**:
+
+```text
+mount → logging → parse kernel params → mode dispatch → daemon spawn →
+kata-agent fork → syslog poll
+```
+
+**Operation Modes**:
+
+- `gpu` (default): Full GPU initialization with drivers and daemons
+- `cpu`: Skip GPU setup, jump to kata-agent
+- `nvswitch-nvl4`: NVSwitch mode for H100/H200/H800
+- `nvswitch-nvl5`: NVSwitch mode for B200/B300/B100
+
+**Configuration**: Via kernel parameters only (no config files) - see
+`/proc/cmdline`
+
+### Code Patterns to Follow
+
+- **Use `must!` macro**: For init-critical operations that should panic on
+  failure
+- **Logging**: All output goes to kmsg via `kernlog` crate
+- **Command execution**:
+  - `foreground()` for synchronous commands
+  - `background()` for daemons
+- **Unsafe code**: Requires comprehensive `SAFETY:` comments explaining why
+  it's safe
+- **Testing**: Use `#[serial]` attribute for tests requiring exclusive
+  hardware access
+
+### Before Making Changes
+
+1. Read [README.md](README.md) for full context on the fail-fast philosophy
+2. Understand the security model (see README Security Model section)
+3. Check if changes affect static linking requirements
+4. Consider confidential computing implications
+5. Verify changes don't add unnecessary dependencies
