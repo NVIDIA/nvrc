@@ -186,11 +186,12 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Create GitHub Release and upload all assets
+      - name: Create draft GitHub Release and upload tarballs
         uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
           name: Release ${{ needs.preflight.outputs.tag }}
+          draft: true
           files: |
             dist/NVRC-x86_64-unknown-linux-musl.tar.xz
             dist/NVRC-x86_64-unknown-linux-musl.tar.xz.sig
@@ -259,10 +260,11 @@ jobs:
         with:
           name: NVRC-${{ matrix.target }}.intoto.jsonl
           path: prov
-      - name: Upload provenance to Release
+      - name: Upload provenance to draft Release
         uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
+          draft: true
           files: prov/NVRC-${{ matrix.target }}.intoto.jsonl
 
   release-notes:
@@ -273,14 +275,66 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           fetch-depth: 1
-      - name: Update Release body from repo file
+      - name: Update draft Release body from repo file
         uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
+          draft: true
           body_path: VERIFY.md
 
+  publish-release:
+    needs: [preflight, release-notes]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify draft release has all required assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.preflight.outputs.tag }}"
+
+          # Get list of assets in the draft release
+          ASSETS=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq '.assets[].name' | sort)
+
+          # Define expected assets
+          EXPECTED=(
+            "NVRC-x86_64-unknown-linux-musl.tar.xz"
+            "NVRC-x86_64-unknown-linux-musl.tar.xz.sig"
+            "NVRC-x86_64-unknown-linux-musl.tar.xz.cert"
+            "NVRC-x86_64-unknown-linux-musl.tar.xz.bundle.json"
+            "NVRC-x86_64-unknown-linux-musl.intoto.jsonl"
+            "NVRC-aarch64-unknown-linux-musl.tar.xz"
+            "NVRC-aarch64-unknown-linux-musl.tar.xz.sig"
+            "NVRC-aarch64-unknown-linux-musl.tar.xz.cert"
+            "NVRC-aarch64-unknown-linux-musl.tar.xz.bundle.json"
+            "NVRC-aarch64-unknown-linux-musl.intoto.jsonl"
+          )
+
+          MISSING=()
+          for asset in "${EXPECTED[@]}"; do
+            if ! echo "$ASSETS" | grep -qx "$asset"; then
+              MISSING+=("$asset")
+            fi
+          done
+
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "ERROR: Draft release is missing required assets:" >&2
+            printf '  - %s\n' "${MISSING[@]}" >&2
+            exit 1
+          fi
+
+          echo "All ${#EXPECTED[@]} required assets present in draft release"
+
+      - name: Publish draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ needs.preflight.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false
+
   verify-signatures:
-    needs: [preflight, provenance-publish, create-release]
+    needs: [preflight, publish-release]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
