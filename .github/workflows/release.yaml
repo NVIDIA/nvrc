@@ -175,16 +175,31 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-      - name: Create or update GitHub Release
+  create-release:
+    needs: [preflight, build-and-release]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download all dist artifacts
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release and upload all assets
         uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2
         with:
           tag_name: ${{ needs.preflight.outputs.tag }}
           name: Release ${{ needs.preflight.outputs.tag }}
           files: |
-            dist/NVRC-${{ matrix.target }}.tar.xz
-            dist/NVRC-${{ matrix.target }}.tar.xz.sig
-            dist/NVRC-${{ matrix.target }}.tar.xz.cert
-            dist/NVRC-${{ matrix.target }}.tar.xz.bundle.json
+            dist/NVRC-x86_64-unknown-linux-musl.tar.xz
+            dist/NVRC-x86_64-unknown-linux-musl.tar.xz.sig
+            dist/NVRC-x86_64-unknown-linux-musl.tar.xz.cert
+            dist/NVRC-x86_64-unknown-linux-musl.tar.xz.bundle.json
+            dist/NVRC-aarch64-unknown-linux-musl.tar.xz
+            dist/NVRC-aarch64-unknown-linux-musl.tar.xz.sig
+            dist/NVRC-aarch64-unknown-linux-musl.tar.xz.cert
+            dist/NVRC-aarch64-unknown-linux-musl.tar.xz.bundle.json
 
   provenance-hash-all:
     needs: build-and-release
@@ -231,7 +246,7 @@ jobs:
       upload-assets: false
 
   provenance-publish:
-    needs: [preflight, provenance, build-and-release]
+    needs: [preflight, provenance, create-release]
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -251,7 +266,7 @@ jobs:
           files: prov/NVRC-${{ matrix.target }}.intoto.jsonl
 
   release-notes:
-    needs: [preflight, provenance-publish, build-and-release]
+    needs: [preflight, provenance-publish, create-release]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repo (for VERIFY.md)
@@ -265,7 +280,7 @@ jobs:
           body_path: VERIFY.md
 
   verify-signatures:
-    needs: [preflight, provenance-publish, build-and-release]
+    needs: [preflight, provenance-publish, create-release]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
