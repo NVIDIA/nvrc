@@ -3,7 +3,6 @@
 
 //! NVRC configuration state and daemon lifecycle management.
 
-use anyhow::{anyhow, Result};
 use std::process::Child;
 
 /// Central configuration state for the NVIDIA Runtime Container init.
@@ -43,21 +42,21 @@ impl NVRC {
     /// Check all background daemons haven't failed.
     /// Exit status 0 is OK (daemon may fork and parent exits successfully).
     /// Non-zero exit means the daemon crashed—fail init before kata-agent starts.
-    pub fn check_daemons(&mut self) -> Result<()> {
+    pub fn check_daemons(&mut self) {
         for (name, child) in &mut self.children {
             if let Ok(Some(status)) = child.try_wait() {
                 if !status.success() {
-                    return Err(anyhow!("{} exited with status: {}", name, status));
+                    panic!("{} exited with status: {}", name, status);
                 }
             }
         }
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic;
     use std::process::Command;
 
     #[test]
@@ -85,7 +84,7 @@ mod tests {
         let child = Command::new("/bin/true").spawn().unwrap();
         nvrc.track_daemon("good-daemon", child);
         std::thread::sleep(std::time::Duration::from_millis(50));
-        assert!(nvrc.check_daemons().is_ok());
+        nvrc.check_daemons();
     }
 
     #[test]
@@ -95,9 +94,10 @@ mod tests {
         let child = Command::new("/bin/false").spawn().unwrap();
         nvrc.track_daemon("bad-daemon", child);
         std::thread::sleep(std::time::Duration::from_millis(50));
-        let result = nvrc.check_daemons();
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            nvrc.check_daemons();
+        }));
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("bad-daemon"));
     }
 
     #[test]
@@ -107,7 +107,7 @@ mod tests {
         let child = Command::new("/bin/sleep").arg("1").spawn().unwrap();
         nvrc.track_daemon("slow-daemon", child);
         // Check immediately while still running
-        assert!(nvrc.check_daemons().is_ok());
+        nvrc.check_daemons();
         // Clean up: kill the child to avoid orphaned process
         if let Some((_, ref mut child)) = nvrc.children.last_mut() {
             let _ = child.kill();
@@ -121,6 +121,6 @@ mod tests {
         nvrc.track_daemon("d1", Command::new("/bin/true").spawn().unwrap());
         nvrc.track_daemon("d2", Command::new("/bin/true").spawn().unwrap());
         std::thread::sleep(std::time::Duration::from_millis(50));
-        assert!(nvrc.check_daemons().is_ok());
+        nvrc.check_daemons();
     }
 }

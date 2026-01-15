@@ -57,8 +57,9 @@ fn poll_socket(sock: &UnixDatagram) -> std::io::Result<Option<String>> {
 /// Lazily initializes /dev/log on first call.
 /// Drains one message per call—rate-limited to prevent DoS by syslog flooding.
 /// Caller loops at ~2 msg/sec (500ms sleep between calls).
-pub fn poll() -> std::io::Result<()> {
-    poll_at(Path::new(DEV_LOG))
+pub fn poll() {
+    use crate::macros::ResultExt;
+    poll_at(Path::new(DEV_LOG)).or_panic("syslog poll");
 }
 
 /// Internal: poll a specific socket path (for unit tests).
@@ -267,8 +268,9 @@ mod tests {
 
     #[test]
     fn test_poll_dev_log() {
-        // poll() tries to bind /dev/log - may fail if already bound or no permission
+        use std::panic;
+        // poll() tries to bind /dev/log - may panic if already bound or no permission
         // Just exercise the code path, don't assert success
-        let _ = poll();
+        let _ = panic::catch_unwind(poll);
     }
 }

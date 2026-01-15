@@ -7,7 +7,6 @@ mod kata_agent;
 mod kernel_params;
 mod kmsg;
 mod lockdown;
-#[macro_use]
 mod macros;
 mod modprobe;
 mod mount;
@@ -15,6 +14,8 @@ mod nvrc;
 mod smi;
 mod syslog;
 mod toolkit;
+
+pub use macros::ResultExt;
 
 #[cfg(test)]
 mod test_utils;
@@ -34,21 +35,21 @@ type ModeFn = fn(&mut NVRC);
 /// VMs with GPU passthrough need driver setup, clock tuning,
 /// and monitoring daemons before workloads can use the GPU.
 fn mode_gpu(init: &mut NVRC) {
-    must!(modprobe::load("nvidia"));
-    must!(modprobe::load("nvidia-uvm"));
+    modprobe::load("nvidia");
+    modprobe::load("nvidia-uvm");
 
-    must!(init.nvidia_smi_lmc());
-    must!(init.nvidia_smi_lgc());
-    must!(init.nvidia_smi_pl());
+    init.nvidia_smi_lmc();
+    init.nvidia_smi_lgc();
+    init.nvidia_smi_pl();
 
-    must!(init.nvidia_persistenced());
+    init.nvidia_persistenced();
 
-    must!(init.nv_hostengine());
-    must!(init.dcgm_exporter());
-    must!(init.nv_fabricmanager());
-    must!(nvidia_ctk_cdi());
-    must!(init.nvidia_smi_srs());
-    must!(init.check_daemons());
+    init.nv_hostengine();
+    init.dcgm_exporter();
+    init.nv_fabricmanager();
+    nvidia_ctk_cdi();
+    init.nvidia_smi_srs();
+    init.check_daemons();
 }
 
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
@@ -59,9 +60,9 @@ fn mode_nvswitch_nvl4(init: &mut NVRC) {
     // Override kernel parameter: always enable fabricmanager for nvswitch mode
     init.fabricmanager_enabled = Some(true);
 
-    must!(modprobe::load("nvidia"));
-    must!(init.nv_fabricmanager());
-    must!(init.check_daemons());
+    modprobe::load("nvidia");
+    init.nv_fabricmanager();
+    init.check_daemons();
 }
 
 /// NVSwitch NVL5 mode for HGX B200/B300/B100 systems (fourth-gen NVSwitch).
@@ -75,9 +76,9 @@ fn mode_nvswitch_nvl5(init: &mut NVRC) {
     init.fabricmanager_enabled = Some(true);
 
     // Load InfiniBand user MAD module for CX7 bridge device access
-    must!(modprobe::load("ib_umad"));
-    must!(init.nv_fabricmanager());
-    must!(init.check_daemons());
+    modprobe::load("ib_umad");
+    init.nv_fabricmanager();
+    init.check_daemons();
 }
 
 fn main() {
@@ -89,13 +90,13 @@ fn main() {
         ("nvswitch-nvl5", mode_nvswitch_nvl5 as ModeFn),
     ]);
 
-    must!(lockdown::set_panic_hook());
+    lockdown::set_panic_hook();
     let mut init = NVRC::default();
-    must!(mount::setup());
-    must!(kmsg::kernlog_setup());
-    must!(syslog::poll());
-    must!(mount::readonly("/"));
-    must!(init.process_kernel_params(None));
+    mount::setup();
+    kmsg::kernlog_setup();
+    syslog::poll();
+    mount::readonly("/");
+    init.process_kernel_params(None);
 
     // Kernel param nvrc.mode selects runtime behavior; GPU is the safe default
     // since most users expect full GPU functionality.
@@ -103,6 +104,6 @@ fn main() {
     let setup = modes.get(mode).copied().unwrap_or(mode_gpu);
     setup(&mut init);
 
-    must!(lockdown::disable_modules_loading());
-    must!(kata_agent::fork_agent(POLL_FOREVER));
+    lockdown::disable_modules_loading();
+    kata_agent::fork_agent(POLL_FOREVER);
 }
