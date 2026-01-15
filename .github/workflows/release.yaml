@@ -342,7 +342,7 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
-      - name: Install Rekor CLI and jq
+      - name: Install Rekor CLI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -350,16 +350,9 @@ jobs:
 
           ASSET=rekor-cli-linux-amd64
           gh release download --repo sigstore/rekor --pattern "${ASSET}" --dir . --clobber
-          if gh release download --repo sigstore/rekor --pattern "${ASSET}-keyless.pem" --pattern "${ASSET}-keyless.sig" --dir . --clobber; then
-            CERT="${ASSET}-keyless.pem"; SIG="${ASSET}-keyless.sig"
-          else
-            gh release download --repo sigstore/rekor --pattern "${ASSET}_cert.pem" --dir . --clobber
-            gh release download --repo sigstore/rekor --pattern "${ASSET}_signature.sig" --dir . --clobber
-            CERT="${ASSET}_cert.pem"; SIG="${ASSET}_signature.sig"
-          fi
+          gh release download --repo sigstore/rekor --pattern "${ASSET}-keyless.sigstore.json" --dir . --clobber
           cosign verify-blob \
-            --certificate "$CERT" \
-            --signature   "$SIG" \
+            --bundle "${ASSET}-keyless.sigstore.json" \
             --certificate-identity "keyless@projectsigstore.iam.gserviceaccount.com" \
             --certificate-oidc-issuer "https://accounts.google.com" \
             "${ASSET}"
