@@ -183,27 +183,64 @@ WF_FILE="release.yaml"              # workflow filename under .github/workflows/
 WF_REF="refs/heads/main"            # release branch
 WF_REPO="$REPO"                     # e.g., NVIDIA/nvrc
 
-# Tarball (same flags also apply to binary/SBOM verifies)
+# Tarball (online via Rekor)
 cosign verify-blob \
   --rekor-url https://rekor.sigstore.dev \
+  --certificate "NVRC-${TARGET}.tar.xz.cert" \
+  --signature "NVRC-${TARGET}.tar.xz.sig" \
   --certificate-identity "https://github.com/$WF_REPO/.github/workflows/$WF_FILE@$WF_REF" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --certificate-github-workflow-repository "$WF_REPO" \
   --certificate-github-workflow-ref "$WF_REF" \
   "NVRC-${TARGET}.tar.xz"
 
-# Binary
+# Binary (online via Rekor)
 cosign verify-blob \
   --rekor-url https://rekor.sigstore.dev \
+  --certificate "NVRC-${TARGET}.cert" \
+  --signature "NVRC-${TARGET}.sig" \
   --certificate-identity "https://github.com/$WF_REPO/.github/workflows/$WF_FILE@$WF_REF" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --certificate-github-workflow-repository "$WF_REPO" \
   --certificate-github-workflow-ref "$WF_REF" \
   "NVRC-${TARGET}"
 
-# SBOM
+# SBOM (online via Rekor)
 cosign verify-blob \
   --rekor-url https://rekor.sigstore.dev \
+  --certificate "sbom-NVRC-${TARGET}.spdx.json.cert" \
+  --signature "sbom-NVRC-${TARGET}.spdx.json.sig" \
+  --certificate-identity "https://github.com/$WF_REPO/.github/workflows/$WF_FILE@$WF_REF" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --certificate-github-workflow-repository "$WF_REPO" \
+  --certificate-github-workflow-ref "$WF_REF" \
+  "sbom-NVRC-${TARGET}.spdx.json"
+```
+
+### (Optional) Offline verification with strict pinning
+
+```bash
+# Tarball (offline)
+cosign verify-blob \
+  --bundle "NVRC-${TARGET}.tar.xz.bundle.json" \
+  --certificate-identity "https://github.com/$WF_REPO/.github/workflows/$WF_FILE@$WF_REF" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --certificate-github-workflow-repository "$WF_REPO" \
+  --certificate-github-workflow-ref "$WF_REF" \
+  "NVRC-${TARGET}.tar.xz"
+
+# Binary (offline)
+cosign verify-blob \
+  --bundle "NVRC-${TARGET}.bundle.json" \
+  --certificate-identity "https://github.com/$WF_REPO/.github/workflows/$WF_FILE@$WF_REF" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --certificate-github-workflow-repository "$WF_REPO" \
+  --certificate-github-workflow-ref "$WF_REF" \
+  "NVRC-${TARGET}"
+
+# SBOM (offline)
+cosign verify-blob \
+  --bundle "sbom-NVRC-${TARGET}.spdx.json.bundle.json" \
   --certificate-identity "https://github.com/$WF_REPO/.github/workflows/$WF_FILE@$WF_REF" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --certificate-github-workflow-repository "$WF_REPO" \
