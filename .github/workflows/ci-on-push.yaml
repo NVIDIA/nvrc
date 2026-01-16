@@ -1,4 +1,4 @@
-name: NVRC CI
+name: NVRC E2E
 on:
   pull_request_target:
     branches:
@@ -22,8 +22,10 @@ concurrency:
 
 jobs:
   # Detect if only docs changed - skip CI if so
+  # Only run if ok-to-test label present (security gate for self-hosted runner)
   changes:
     name: Detect changes
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') }}
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
@@ -48,7 +50,7 @@ jobs:
               - 'Cargo.lock'
               - '.cargo/**'
 
-  nvrc-ci-on-push:
+  ci:
     needs: changes
     # Only run on self-hosted runner if: 1) ok-to-test label present (security), 2) code changed (efficiency)
     if: ${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') && needs.changes.outputs.code == 'true' }}
@@ -63,3 +65,24 @@ jobs:
       pr-number: ${{ github.event.pull_request.number }}
       tag: ${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
       target-branch: ${{ github.event.pull_request.base.ref }}
+
+  # Gate job for branch protection - set "CI Complete" as required status check
+  # Passes when: CI succeeded OR no code changes (docs-only PR)
+  ci-complete:
+    name: CI Complete
+    needs: [changes, ci]
+    if: always() && contains(github.event.pull_request.labels.*.name, 'ok-to-test')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CI result
+        run: |
+          if [[ "${{ needs.changes.outputs.code }}" != "true" ]]; then
+            echo "✓ No code changes - CI skipped"
+            exit 0
+          fi
+          if [[ "${{ needs.ci.result }}" == "success" ]]; then
+            echo "✓ CI passed"
+            exit 0
+          fi
+          echo "✗ CI failed: ${{ needs.ci.result }}"
+          exit 1
