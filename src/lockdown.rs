@@ -6,7 +6,7 @@
 //! In production, panic triggers VM power-off. For tests, the shutdown
 //! action is configurable via `set_panic_hook_with()`.
 
-use anyhow::{Context, Result};
+use crate::macros::ResultExt;
 use nix::sys::reboot::{reboot, RebootMode};
 use nix::unistd::sync;
 use std::fs;
@@ -22,20 +22,19 @@ fn power_off() {
 /// with potential data exposure. Power-off ensures clean termination—the host
 /// hypervisor will see the VM exit and can handle cleanup appropriately.
 /// sync() flushes pending writes before power-off to preserve any logs.
-pub fn set_panic_hook() -> Result<()> {
+pub fn set_panic_hook() {
     set_panic_hook_with(power_off)
 }
 
 /// Internal: panic handler with configurable shutdown (for unit tests).
 /// Production uses power_off(); tests inject a no-op to avoid rebooting.
-fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) -> Result<()> {
+fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) {
     panic::set_hook(Box::new(move |panic_info| {
         // fd 1,2 are always available from the kernel
         eprintln!("panic: {panic_info}");
         sync();
         shutdown();
     }));
-    Ok(())
 }
 
 /// Permanently disable kernel module loading for this boot.
@@ -43,9 +42,9 @@ fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) -> Result<(
 /// module insertion—a security hardening measure for confidential VMs
 /// that blocks potential kernel-level attacks via malicious modules.
 /// This is a one-way operation: once set, it cannot be undone without reboot.
-pub fn disable_modules_loading() -> Result<()> {
+pub fn disable_modules_loading() {
     const PATH: &str = "/proc/sys/kernel/modules_disabled";
-    fs::write(PATH, b"1\n").with_context(|| format!("disable module loading: {}", PATH))
+    fs::write(PATH, b"1\n").or_panic(format_args!("disable module loading {PATH}"));
 }
 
 #[cfg(test)]
@@ -61,7 +60,7 @@ mod tests {
         let called_clone = called.clone();
 
         // Install hook with test closure
-        let _ = set_panic_hook_with(move || {
+        set_panic_hook_with(move || {
             called_clone.store(true, Ordering::SeqCst);
         });
 
@@ -77,8 +76,7 @@ mod tests {
 
         // This permanently disables module loading until reboot.
         // Only run on dedicated test runners!
-        let result = disable_modules_loading();
-        assert!(result.is_ok());
+        disable_modules_loading();
 
         // Verify it was set
         let content = fs::read_to_string("/proc/sys/kernel/modules_disabled").unwrap();
@@ -95,7 +93,7 @@ mod tests {
     #[ignore] // Installs real power_off hook - run with --include-ignored on CI
     fn test_set_panic_hook() {
         // Installs the real hook (with power_off) - just don't trigger it!
-        let _ = set_panic_hook();
+        set_panic_hook();
         // If we got here, the hook was installed successfully
     }
 }

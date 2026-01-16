@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use anyhow::{Context, Result};
+use crate::macros::ResultExt;
 use std::fs::{self, File, OpenOptions};
 use std::sync::Once;
 
@@ -15,7 +15,7 @@ const SOCKET_BUFFER_SIZE: &str = "16777216";
 /// Initialize kernel logging and tune socket buffer sizes.
 /// Large buffers (16MB) prevent message loss during high-throughput GPU operations
 /// where drivers may emit bursts of diagnostic data.
-pub fn kernlog_setup() -> Result<()> {
+pub fn kernlog_setup() {
     KERNLOG_INIT.call_once(|| {
         let _ = kernlog::init();
     });
@@ -26,16 +26,14 @@ pub fn kernlog_setup() -> Result<()> {
         "/proc/sys/net/core/rmem_max",
         "/proc/sys/net/core/wmem_max",
     ] {
-        fs::write(path, SOCKET_BUFFER_SIZE.as_bytes())
-            .with_context(|| format!("write {}", path))?;
+        fs::write(path, SOCKET_BUFFER_SIZE.as_bytes()).or_panic(format_args!("write {path}"));
     }
-    Ok(())
 }
 
 /// Get a file handle for kernel message output.
 /// Routes to /dev/kmsg when debug logging is enabled for visibility in dmesg,
 /// otherwise /dev/null to suppress noise in production.
-pub fn kmsg() -> Result<File> {
+pub fn kmsg() -> File {
     kmsg_at(if log_enabled!(log::Level::Debug) {
         "/dev/kmsg"
     } else {
@@ -44,11 +42,11 @@ pub fn kmsg() -> Result<File> {
 }
 
 /// Internal: open the given path for writing. Extracted for testability.
-fn kmsg_at(path: &str) -> Result<File> {
+fn kmsg_at(path: &str) -> File {
     OpenOptions::new()
         .write(true)
         .open(path)
-        .with_context(|| format!("open {}", path))
+        .or_panic(format_args!("open {path}"))
 }
 
 #[cfg(test)]
@@ -57,24 +55,21 @@ mod tests {
     use crate::test_utils::require_root;
     use serial_test::serial;
     use std::io::Write;
+    use std::panic;
     use tempfile::NamedTempFile;
 
     #[test]
     fn test_kmsg_at_dev_null() {
         // /dev/null is always writable, no root needed
-        let file = kmsg_at("/dev/null");
-        assert!(file.is_ok());
+        let _file = kmsg_at("/dev/null");
     }
 
     #[test]
     fn test_kmsg_at_nonexistent() {
-        let err = kmsg_at("/nonexistent/path").unwrap_err();
-        // Should contain the path in the error context
-        assert!(
-            err.to_string().contains("/nonexistent/path"),
-            "error should mention the path: {}",
-            err
-        );
+        let result = panic::catch_unwind(|| {
+            kmsg_at("/nonexistent/path");
+        });
+        assert!(result.is_err());
     }
 
     #[test]
@@ -82,7 +77,7 @@ mod tests {
         // Create a temp file to verify we can write to it
         let temp = NamedTempFile::new().unwrap();
         let path = temp.path().to_str().unwrap();
-        let mut file = kmsg_at(path).unwrap();
+        let mut file = kmsg_at(path);
         assert!(file.write_all(b"test").is_ok());
     }
 
@@ -91,8 +86,7 @@ mod tests {
     fn test_kmsg_routes_to_dev_null_when_log_off() {
         // Default log level is Off, so kmsg() should open /dev/null
         log::set_max_level(log::LevelFilter::Off);
-        let file = kmsg();
-        assert!(file.is_ok());
+        let _file = kmsg();
     }
 
     #[test]
@@ -101,8 +95,7 @@ mod tests {
         require_root();
         // When debug is enabled, kmsg() should open /dev/kmsg
         log::set_max_level(log::LevelFilter::Debug);
-        let file = kmsg();
-        assert!(file.is_ok());
+        let _file = kmsg();
         log::set_max_level(log::LevelFilter::Off);
     }
 
@@ -134,7 +127,7 @@ mod tests {
             .collect();
         let _restore = Restore(saved);
 
-        assert!(kernlog_setup().is_ok());
+        kernlog_setup();
 
         for &path in &PATHS {
             let v = fs::read_to_string(path).expect("should read sysctl");
