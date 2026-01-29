@@ -25,8 +25,10 @@ pub struct NVRC {
     pub uvm_persistence_mode: Option<bool>,
     /// Enable DCGM exporter for GPU metrics
     pub dcgm_enabled: Option<bool>,
-    /// Enable Fabric Manager for NVLink topologies
-    pub fabricmanager_enabled: Option<bool>,
+    /// Fabric Manager mode: 0=bare metal, 1=servicevm
+    pub fabric_mode: Option<u8>,
+    /// Fabric Manager rail policy: "greedy" (default) or "symmetric"
+    pub rail_policy: Option<String>,
     /// Tracked background daemons for health monitoring
     children: Vec<(String, Child)>,
 }

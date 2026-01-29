@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
+mod config;
 mod daemon;
 mod execute;
 mod kata_agent;
@@ -55,10 +56,9 @@ fn mode_gpu(init: &mut NVRC) {
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
 /// Service VM mode for NVLink 4.0 topologies in shared virtualization.
 /// Loads NVIDIA driver and starts fabric manager. GPUs are assigned to service VM.
-/// Automatically enables fabricmanager regardless of kernel parameters.
 fn mode_nvswitch_nvl4(init: &mut NVRC) {
-    // Override kernel parameter: always enable fabricmanager for nvswitch mode
-    init.fabricmanager_enabled = Some(true);
+    // Service VM mode requires FABRIC_MODE=1 (shared nvswitch)
+    init.fabric_mode = Some(1);
 
     modprobe::load("nvidia");
     init.nv_fabricmanager();
@@ -72,8 +72,8 @@ fn mode_nvswitch_nvl4(init: &mut NVRC) {
 /// FM automatically starts NVLSM (NVLink Subnet Manager) internally.
 /// Requires kernel 5.17+ and /dev/infiniband/umadX devices.
 fn mode_nvswitch_nvl5(init: &mut NVRC) {
-    // Override kernel parameter: always enable fabricmanager for nvswitch mode
-    init.fabricmanager_enabled = Some(true);
+    // Service VM mode requires FABRIC_MODE=1 (shared nvswitch)
+    init.fabric_mode = Some(1);
 
     // Load InfiniBand user MAD module for CX7 bridge device access
     modprobe::load("ib_umad");
@@ -95,7 +95,6 @@ fn main() {
     mount::setup();
     kmsg::kernlog_setup();
     syslog::poll();
-    mount::readonly("/");
     init.process_kernel_params(None);
 
     // Kernel param nvrc.mode selects runtime behavior; GPU is the safe default
@@ -104,6 +103,7 @@ fn main() {
     let setup = modes.get(mode).copied().unwrap_or(mode_gpu);
     setup(&mut init);
 
+    mount::readonly("/");
     lockdown::disable_modules_loading();
     kata_agent::fork_agent(POLL_FOREVER);
 }

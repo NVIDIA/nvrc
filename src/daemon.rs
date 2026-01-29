@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
+use crate::config::update_config_file;
 use crate::execute::background;
 use crate::macros::ResultExt;
 use crate::nvrc::NVRC;
@@ -83,15 +84,36 @@ impl NVRC {
     /// NVSwitch fabric manager is only needed for multi-GPU NVLink topologies.
     /// Disabled by default since most VMs have single GPUs.
     pub fn nv_fabricmanager(&mut self) {
+        self.configure_fabricmanager("/usr/share/nvidia/nvswitch/fabricmanager.cfg");
         self.spawn_fabricmanager("/bin/nv-fabricmanager")
     }
 
     fn spawn_fabricmanager(&mut self, bin: &str) {
-        if !self.fabricmanager_enabled.unwrap_or(false) {
+        if self.fabric_mode.is_none() {
             return;
         }
         let child = background(bin, fabricmanager_args());
         self.track_daemon("nv-fabricmanager", child);
+    }
+
+    /// Write FABRIC_MODE, FABRIC_MODE_RESTART, and PARTITION_RAIL_POLICY to fabricmanager.cfg.
+    /// ServiceVM (mode 1) requires FABRIC_MODE_RESTART=1 for resiliency.
+    fn configure_fabricmanager(&self, cfg_path: &str) {
+        let Some(mode) = self.fabric_mode else {
+            return;
+        };
+
+        let mode_str = mode.to_string();
+        let restart = if mode == 1 { "1" } else { "0" };
+        let policy = self.rail_policy.as_deref().unwrap_or("greedy");
+
+        let updates = &[
+            ("FABRIC_MODE", mode_str.as_str()),
+            ("FABRIC_MODE_RESTART", restart),
+            ("PARTITION_RAIL_POLICY", policy),
+        ];
+
+        update_config_file(cfg_path, updates);
     }
 }
 
@@ -206,8 +228,23 @@ mod tests {
     #[test]
     fn test_spawn_fabricmanager_success() {
         let mut nvrc = NVRC::default();
-        nvrc.fabricmanager_enabled = Some(true);
+        nvrc.fabric_mode = Some(1);
         nvrc.spawn_fabricmanager("/bin/true");
+    }
+
+    #[test]
+    fn test_spawn_nvlsm_success() {
+        let mut nvrc = NVRC::default();
+        nvrc.port_guid = Some("0xdeadbeef".to_string());
+        nvrc.spawn_nvlsm("/bin/true");
+        nvrc.health_checks();
+    }
+
+    #[test]
+    fn test_spawn_nvlsm_skipped_without_guid() {
+        let mut nvrc = NVRC::default();
+        // port_guid is None, should be a no-op
+        nvrc.spawn_nvlsm("/bin/true");
     }
 
     #[test]
@@ -228,5 +265,162 @@ mod tests {
     fn test_check_daemons_empty() {
         let mut nvrc = NVRC::default();
         nvrc.check_daemons();
+    }
+
+    // === Fabricmanager configuration tests ===
+
+    #[test]
+    fn test_configure_fabricmanager_mode_0_bare_metal() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+        fs::write(path, "").unwrap();
+
+        let mut nvrc = NVRC::default();
+        nvrc.fabric_mode = Some(0);
+        nvrc.configure_fabricmanager(path);
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("FABRIC_MODE=0"));
+        assert!(content.contains("FABRIC_MODE_RESTART=0"));
+    }
+
+    #[test]
+    fn test_configure_fabricmanager_mode_1_servicevm() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+        fs::write(path, "").unwrap();
+
+        let mut nvrc = NVRC::default();
+        nvrc.fabric_mode = Some(1);
+        nvrc.configure_fabricmanager(path);
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("FABRIC_MODE=1"));
+        assert!(content.contains("FABRIC_MODE_RESTART=1"));
+    }
+
+    #[test]
+    fn test_configure_fabricmanager_updates_existing() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+        fs::write(path, "FABRIC_MODE=0\nFABRIC_MODE_RESTART=0\n").unwrap();
+
+        let mut nvrc = NVRC::default();
+        nvrc.fabric_mode = Some(1);
+        nvrc.configure_fabricmanager(path);
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("FABRIC_MODE=1"));
+        assert!(content.contains("FABRIC_MODE_RESTART=1"));
+        // Should not have old values
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|l| l.starts_with("FABRIC_MODE="))
+                .count(),
+            1
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|l| l.starts_with("FABRIC_MODE_RESTART="))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_configure_fabricmanager_preserves_other_config() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+        fs::write(path, "# Comment\nOTHER_SETTING=value\nFABRIC_MODE=0\n").unwrap();
+
+        let mut nvrc = NVRC::default();
+        nvrc.fabric_mode = Some(1);
+        nvrc.configure_fabricmanager(path);
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("# Comment"));
+        assert!(content.contains("OTHER_SETTING=value"));
+        assert!(content.contains("FABRIC_MODE=1"));
+    }
+
+    #[test]
+    fn test_configure_fabricmanager_no_fabric_mode() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+        fs::write(path, "ORIGINAL=content\n").unwrap();
+
+        let nvrc = NVRC::default();
+        // fabric_mode is None
+        nvrc.configure_fabricmanager(path);
+
+        // File should be unchanged
+        let content = fs::read_to_string(path).unwrap();
+        assert_eq!(content, "ORIGINAL=content\n");
+    }
+
+    #[test]
+    fn test_configure_fabricmanager_default_rail_policy() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+        fs::write(path, "").unwrap();
+
+        let mut nvrc = NVRC::default();
+        nvrc.fabric_mode = Some(1);
+        // rail_policy is None, should default to greedy
+        nvrc.configure_fabricmanager(path);
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("PARTITION_RAIL_POLICY=greedy"));
+    }
+
+    #[test]
+    fn test_configure_fabricmanager_symmetric_rail_policy() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+        fs::write(path, "").unwrap();
+
+        let mut nvrc = NVRC::default();
+        nvrc.fabric_mode = Some(1);
+        nvrc.rail_policy = Some("symmetric".to_owned());
+        nvrc.configure_fabricmanager(path);
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("PARTITION_RAIL_POLICY=symmetric"));
+    }
+
+    #[test]
+    fn test_configure_fabricmanager_all_settings() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+        fs::write(path, "").unwrap();
+
+        let mut nvrc = NVRC::default();
+        nvrc.fabric_mode = Some(1);
+        nvrc.rail_policy = Some("symmetric".to_owned());
+        nvrc.configure_fabricmanager(path);
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("FABRIC_MODE=1"));
+        assert!(content.contains("FABRIC_MODE_RESTART=1"));
+        assert!(content.contains("PARTITION_RAIL_POLICY=symmetric"));
     }
 }
