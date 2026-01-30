@@ -4,6 +4,7 @@
 mod config;
 mod daemon;
 mod execute;
+mod infiniband;
 mod kata_agent;
 mod kernel_params;
 mod kmsg;
@@ -65,18 +66,22 @@ fn mode_nvswitch_nvl4(init: &mut NVRC) {
     init.check_daemons();
 }
 
-/// NVSwitch NVL5 mode for HGX B200/B300/B100 systems (fourth-gen NVSwitch).
-/// Service VM mode for NVLink 5.0 topologies with CX7 bridge devices.
-/// Does NOT load nvidia driver (GPUs not attached to service VM).
-/// Loads ib_umad for InfiniBand MAD access to CX7 bridges.
-/// FM automatically starts NVLSM (NVLink Subnet Manager) internally.
-/// Requires kernel 5.17+ and /dev/infiniband/umadX devices.
+/// HGX Bx00 systems use CX7 bridges for NVLink management instead of direct GPU access.
+/// GPUs are passed to tenant VMs; only the CX7 IB devices are visible here.
 fn mode_nvswitch_nvl5(init: &mut NVRC) {
-    // Service VM mode requires FABRIC_MODE=1 (shared nvswitch)
     init.fabric_mode = Some(1);
 
-    // Load InfiniBand user MAD module for CX7 bridge device access
+    // CX7 bridges expose management interface via InfiniBand MAD protocol
     modprobe::load("ib_umad");
+
+    // CX7 port GUID identifies which bridge to use for fabric management
+    init.port_guid = Some(
+        infiniband::detect_port_guid()
+            .expect("nvswitch-nvl5 requires SW_MNG IB device with valid port GUID"),
+    );
+
+    // NVLSM must initialize the NVLink subnet before FM can manage the fabric
+    init.nv_nvlsm();
     init.nv_fabricmanager();
     init.check_daemons();
 }

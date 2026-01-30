@@ -29,11 +29,8 @@ fn dcgm_exporter_args() -> &'static [&'static str] {
     &["-k", "-f", "/etc/dcgm-exporter/default-counters.csv"]
 }
 
-/// Fabricmanager needs explicit config path because it doesn't search standard
-/// locations when running as a subprocess of init.
-fn fabricmanager_args() -> &'static [&'static str] {
-    &["-c", "/usr/share/nvidia/nvswitch/fabricmanager.cfg"]
-}
+const FM_CONFIG: &str = "/usr/share/nvidia/nvswitch/fabricmanager.cfg";
+const NVLSM_CONFIG: &str = "/usr/share/nvidia/nvlsm/nvlsm.conf";
 
 /// Configurable path parameters allow testing with /bin/true instead of real
 /// NVIDIA binaries that don't exist in the test environment.
@@ -84,7 +81,7 @@ impl NVRC {
     /// NVSwitch fabric manager is only needed for multi-GPU NVLink topologies.
     /// Disabled by default since most VMs have single GPUs.
     pub fn nv_fabricmanager(&mut self) {
-        self.configure_fabricmanager("/usr/share/nvidia/nvswitch/fabricmanager.cfg");
+        self.configure_fabricmanager(FM_CONFIG);
         self.spawn_fabricmanager("/bin/nv-fabricmanager")
     }
 
@@ -92,8 +89,30 @@ impl NVRC {
         if self.fabric_mode.is_none() {
             return;
         }
-        let child = background(bin, fabricmanager_args());
+        let mut args = vec!["-c", FM_CONFIG];
+        let guid_owned: String;
+        if let Some(ref guid) = self.port_guid {
+            guid_owned = guid.clone();
+            args.push("-g");
+            args.push(&guid_owned);
+        }
+        let child = background(bin, &args);
         self.track_daemon("nv-fabricmanager", child);
+    }
+
+    /// CX7 bridges require NVLSM to manage NVLink subnet before FM can initialize the fabric.
+    pub fn nv_nvlsm(&mut self) {
+        self.spawn_nvlsm("/opt/nvidia/nvlsm/sbin/nvlsm")
+    }
+
+    fn spawn_nvlsm(&mut self, bin: &str) {
+        let Some(ref guid) = self.port_guid else {
+            return;
+        };
+        let guid_owned = guid.clone();
+        let args = vec!["-F", NVLSM_CONFIG, "-g", &guid_owned];
+        let child = background(bin, &args);
+        self.track_daemon("nvlsm", child);
     }
 
     /// Write FABRIC_MODE, FABRIC_MODE_RESTART, and PARTITION_RAIL_POLICY to fabricmanager.cfg.
@@ -151,15 +170,6 @@ mod tests {
         assert_eq!(
             args,
             &["-k", "-f", "/etc/dcgm-exporter/default-counters.csv"]
-        );
-    }
-
-    #[test]
-    fn test_fabricmanager_args() {
-        let args = fabricmanager_args();
-        assert_eq!(
-            args,
-            &["-c", "/usr/share/nvidia/nvswitch/fabricmanager.cfg"]
         );
     }
 
@@ -230,6 +240,15 @@ mod tests {
         let mut nvrc = NVRC::default();
         nvrc.fabric_mode = Some(1);
         nvrc.spawn_fabricmanager("/bin/true");
+    }
+
+    #[test]
+    fn test_spawn_fabricmanager_with_port_guid() {
+        let mut nvrc = NVRC::default();
+        nvrc.fabric_mode = Some(1);
+        nvrc.port_guid = Some("0xdeadbeef".to_string());
+        nvrc.spawn_fabricmanager("/bin/true");
+        nvrc.health_checks();
     }
 
     #[test]

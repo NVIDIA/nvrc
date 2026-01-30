@@ -29,6 +29,8 @@ pub struct NVRC {
     pub fabric_mode: Option<u8>,
     /// Fabric Manager rail policy: "greedy" (default) or "symmetric"
     pub rail_policy: Option<String>,
+    /// Port GUID for NVL5+ systems (0x-prefixed hex string)
+    pub port_guid: Option<String>,
     /// Tracked background daemons for health monitoring
     children: Vec<(String, Child)>,
 }
