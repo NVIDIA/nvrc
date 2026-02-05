@@ -180,7 +180,7 @@ mod tests {
         // DCGM disabled by default - should be a no-op, no daemon spawned
         let mut nvrc = NVRC::default();
         nvrc.nv_hostengine();
-        nvrc.check_daemons();
+        nvrc.health_checks();
     }
 
     #[test]
@@ -207,7 +207,7 @@ mod tests {
         assert!(run_dir.exists());
 
         // Daemon should be tracked and exit cleanly
-        nvrc.check_daemons();
+        nvrc.health_checks();
     }
 
     #[test]
@@ -225,7 +225,7 @@ mod tests {
         let mut nvrc = NVRC::default();
         nvrc.dcgm_enabled = Some(true);
         nvrc.spawn_hostengine("/bin/true");
-        nvrc.check_daemons();
+        nvrc.health_checks();
     }
 
     #[test]
@@ -281,9 +281,9 @@ mod tests {
     }
 
     #[test]
-    fn test_check_daemons_empty() {
+    fn test_health_checks_empty() {
         let mut nvrc = NVRC::default();
-        nvrc.check_daemons();
+        nvrc.health_checks();
     }
 
     // === Fabricmanager configuration tests ===

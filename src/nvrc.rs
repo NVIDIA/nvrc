@@ -46,7 +46,7 @@ impl NVRC {
     /// Check all background daemons haven't failed.
     /// Exit status 0 is OK (daemon may fork and parent exits successfully).
     /// Non-zero exit means the daemon crashed—fail init before kata-agent starts.
-    pub fn check_daemons(&mut self) {
+    pub fn health_checks(&mut self) {
         for (name, child) in &mut self.children {
             if let Ok(Some(status)) = child.try_wait() {
                 if !status.success() {
@@ -82,36 +82,36 @@ mod tests {
     }
 
     #[test]
-    fn test_check_daemons_success() {
+    fn test_health_checks_success() {
         let mut nvrc = NVRC::default();
         // /bin/true exits with 0
         let child = Command::new("/bin/true").spawn().unwrap();
         nvrc.track_daemon("good-daemon", child);
         std::thread::sleep(std::time::Duration::from_millis(50));
-        nvrc.check_daemons();
+        nvrc.health_checks();
     }
 
     #[test]
-    fn test_check_daemons_failure() {
+    fn test_health_checks_failure() {
         let mut nvrc = NVRC::default();
         // /bin/false exits with 1
         let child = Command::new("/bin/false").spawn().unwrap();
         nvrc.track_daemon("bad-daemon", child);
         std::thread::sleep(std::time::Duration::from_millis(50));
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            nvrc.check_daemons();
+            nvrc.health_checks();
         }));
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_check_daemons_still_running() {
+    fn test_health_checks_still_running() {
         let mut nvrc = NVRC::default();
         // sleep 1 will still be running when we check immediately
         let child = Command::new("/bin/sleep").arg("1").spawn().unwrap();
         nvrc.track_daemon("slow-daemon", child);
         // Check immediately while still running
-        nvrc.check_daemons();
+        nvrc.health_checks();
         // Clean up: kill the child to avoid orphaned process
         if let Some((_, ref mut child)) = nvrc.children.last_mut() {
             let _ = child.kill();
@@ -120,11 +120,11 @@ mod tests {
     }
 
     #[test]
-    fn test_check_daemons_multiple() {
+    fn test_health_checks_multiple() {
         let mut nvrc = NVRC::default();
         nvrc.track_daemon("d1", Command::new("/bin/true").spawn().unwrap());
         nvrc.track_daemon("d2", Command::new("/bin/true").spawn().unwrap());
         std::thread::sleep(std::time::Duration::from_millis(50));
-        nvrc.check_daemons();
+        nvrc.health_checks();
     }
 }

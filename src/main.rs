@@ -51,7 +51,7 @@ fn mode_gpu(init: &mut NVRC) {
     init.nv_fabricmanager();
     nvidia_ctk_cdi();
     init.nvidia_smi_srs();
-    init.check_daemons();
+    init.health_checks();
 }
 
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
@@ -63,7 +63,7 @@ fn mode_nvswitch_nvl4(init: &mut NVRC) {
 
     modprobe::load("nvidia");
     init.nv_fabricmanager();
-    init.check_daemons();
+    init.health_checks();
 }
 
 /// HGX Bx00 systems use CX7 bridges for NVLink management instead of direct GPU access.
@@ -82,8 +82,9 @@ fn mode_nvswitch_nvl5(init: &mut NVRC) {
 
     // NVLSM must initialize the NVLink subnet before FM can manage the fabric
     init.nv_nvlsm();
+    init.health_checks();
     init.nv_fabricmanager();
-    init.check_daemons();
+    init.health_checks();
 }
 
 fn main() {
