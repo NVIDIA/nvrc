@@ -28,28 +28,28 @@ recovery mechanisms—if GPU initialization fails, the VM powers off. This
 │  2. Mount filesystems (/proc, /dev, /sys, /dev/shm)           │
 │  3. Initialize kernel message logging                          │
 │  4. Start syslog daemon                                        │
-│  5. Remount / as read-only (security hardening)                │
-│  6. Parse kernel parameters (/proc/cmdline)                    │
+│  5. Parse kernel parameters (/proc/cmdline)                    │
 │                                                                │
 │  ┌──────────────────────────────────────────────────────────┐ │
 │  │            Mode Selection (nvrc.mode)                    │ │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │ │
 │  │  │GPU (default)│  │  CPU Mode   │  │NVSwitch-NVL4│ ... │ │
 │  │  │• nvidia.ko  │  │• Skip GPU   │  │(H100/H200)  │     │ │
-│  │  │• nvidia-uvm │  │• exec agent │  │• nvidia.ko  │     │ │
+│  │  │• nvidia-uvm │  │             │  │• nvidia.ko  │     │ │
 │  │  │• Lock clocks│  │             │  │• fabric-mgr │     │ │
-│  │  │• Lock memory│  │             │  │• exec agent │     │ │
+│  │  │• Lock memory│  │             │  │• Health chk │     │ │
 │  │  │• Power limit│  │             │  │             │     │ │
 │  │  │• Daemons    │  │             │  │             │     │ │
 │  │  │• CDI spec   │  │             │  │             │     │ │
 │  │  │• SRS config │  │             │  │             │     │ │
+│  │  │• Health chk │  │             │  │             │     │ │
 │  │  └─────────────┘  └─────────────┘  └─────────────┘     │ │
 │  └──────────────────────────────────────────────────────────┘ │
 │                                                                │
-│  7. Check daemon health (fail if any crashed)                  │
-│  8. Disable kernel module loading (lockdown)                   │
-│  9. Fork kata-agent (handoff control)                          │
-│ 10. Poll syslog forever (keep PID 1 alive)                     │
+│  6. Remount / as read-only (security hardening)                │
+│  7. Disable kernel module loading (lockdown)                   │
+│  8. Fork kata-agent (handoff control)                          │
+│  9. Poll syslog forever (keep PID 1 alive)                     │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -77,12 +77,12 @@ configuration doesn't exist yet.
 
 ### Daemon Control
 
-| Parameter                   | Values                                  | Default  | Description                                                                                           |
-| --------------------------- | --------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------- |
-| `nvrc.uvm.persistence.mode` | `on/off`, `true/false`, `1/0`, `yes/no` | `true`   | UVM persistence mode keeps unified memory state across CUDA context teardowns.                       |
-| `nvrc.dcgm`                 | `on/off`, `true/false`, `1/0`, `yes/no` | `false`  | Enable DCGM (Data Center GPU Manager) for telemetry and health monitoring.                           |
-| `nvrc.fm.mode`              | `0`, `1`                                | -        | Fabric Manager mode: 0=bare metal, 1=servicevm (shared nvswitch). Auto-set in nvswitch modes.        |
-| `nvrc.fm.rail.policy`       | `greedy`, `symmetric`                   | `greedy` | Partition rail policy. Symmetric required for Confidential Computing on Blackwell.                   |
+| Parameter                   | Values                                  | Default  | Description                                                                                        |
+| --------------------------- | --------------------------------------- | -------- | -------------------------------------------------------------------------------------------------- |
+| `nvrc.uvm.persistence.mode` | `on/off`, `true/false`, `1/0`, `yes/no` | `true`   | UVM persistence mode keeps unified memory state across CUDA context teardowns.                     |
+| `nvrc.dcgm`                 | `on/off`, `true/false`, `1/0`, `yes/no` | `false`  | Enable DCGM (Data Center GPU Manager) for telemetry and health monitoring.                         |
+| `nvrc.fm.mode`              | `0`, `1`                                | -        | Fabric Manager mode: 0=bare metal, 1=servicevm (shared nvswitch). Auto-set in nvswitch modes.      |
+| `nvrc.fm.rail.policy`       | `greedy`, `symmetric`                   | `greedy` | Partition rail policy. Symmetric required for Confidential Computing on Blackwell.                 |
 
 ### Example Configurations
 
