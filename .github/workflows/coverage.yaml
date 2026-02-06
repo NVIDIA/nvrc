@@ -62,8 +62,9 @@ jobs:
       # Run as root: some tests require privileged operations (modprobe, /proc writes).
       # The #[cfg(coverage)] paths in require_root() panic if not run as root,
       # ensuring coverage accurately reflects execution with proper permissions.
+      # --test-threads=1 forces serial execution to avoid /dev/log socket conflicts.
       - name: Generate coverage
-        run: sudo -E env "PATH=$PATH" cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info -- --include-ignored
+        run: sudo -E env "PATH=$PATH" cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info -- --include-ignored --test-threads=1
 
       - name: Upload coverage to Coveralls
         uses: coverallsapp/github-action@cfd0633edbd2411b532b808ba7a8b5e04f76d2c8 # v2.3.4
