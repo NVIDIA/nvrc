@@ -30,7 +30,25 @@ fn require_root_impl(is_root: bool) {
 
     #[cfg(not(coverage))]
     {
-        let args: Vec<String> = env::args().collect();
+        let mut args: Vec<String> = env::args().collect();
+
+        // Add --test-threads=1 to force serial execution when running under sudo
+        // This prevents multiple root-requiring tests from interfering with each other
+        let has_test_threads = args.iter().any(|arg| arg.starts_with("--test-threads"));
+        if !has_test_threads {
+            args.push("--test-threads=1".to_string());
+        }
+
+        // If a test filter is present but --exact is not, add it to prevent
+        // matching multiple tests when re-running with sudo
+        let has_exact = args.iter().any(|arg| arg == "--exact");
+        // A filter is any non-flag argument (doesn't start with -)
+        let has_filter = args.iter().skip(1).any(|arg| !arg.starts_with('-'));
+
+        if has_filter && !has_exact {
+            args.push("--exact".to_string());
+        }
+
         match Command::new("sudo").args(&args).status() {
             Ok(status) => std::process::exit(status.code().unwrap_or(1)),
             Err(e) => panic!("failed to run sudo: {}", e),

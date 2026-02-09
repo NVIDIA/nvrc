@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
+mod config;
 mod daemon;
 mod execute;
+mod infiniband;
 mod kata_agent;
 mod kernel_params;
 mod kmsg;
@@ -49,36 +51,40 @@ fn mode_gpu(init: &mut NVRC) {
     init.nv_fabricmanager();
     nvidia_ctk_cdi();
     init.nvidia_smi_srs();
-    init.check_daemons();
+    init.health_checks();
 }
 
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
 /// Service VM mode for NVLink 4.0 topologies in shared virtualization.
 /// Loads NVIDIA driver and starts fabric manager. GPUs are assigned to service VM.
-/// Automatically enables fabricmanager regardless of kernel parameters.
 fn mode_nvswitch_nvl4(init: &mut NVRC) {
-    // Override kernel parameter: always enable fabricmanager for nvswitch mode
-    init.fabricmanager_enabled = Some(true);
+    // Service VM mode requires FABRIC_MODE=1 (shared nvswitch)
+    init.fabric_mode = Some(1);
 
     modprobe::load("nvidia");
     init.nv_fabricmanager();
-    init.check_daemons();
+    init.health_checks();
 }
 
-/// NVSwitch NVL5 mode for HGX B200/B300/B100 systems (fourth-gen NVSwitch).
-/// Service VM mode for NVLink 5.0 topologies with CX7 bridge devices.
-/// Does NOT load nvidia driver (GPUs not attached to service VM).
-/// Loads ib_umad for InfiniBand MAD access to CX7 bridges.
-/// FM automatically starts NVLSM (NVLink Subnet Manager) internally.
-/// Requires kernel 5.17+ and /dev/infiniband/umadX devices.
+/// HGX Bx00 systems use CX7 bridges for NVLink management instead of direct GPU access.
+/// GPUs are passed to tenant VMs; only the CX7 IB devices are visible here.
 fn mode_nvswitch_nvl5(init: &mut NVRC) {
-    // Override kernel parameter: always enable fabricmanager for nvswitch mode
-    init.fabricmanager_enabled = Some(true);
+    init.fabric_mode = Some(1);
 
-    // Load InfiniBand user MAD module for CX7 bridge device access
+    // CX7 bridges expose management interface via InfiniBand MAD protocol
     modprobe::load("ib_umad");
+
+    // CX7 port GUID identifies which bridge to use for fabric management
+    init.port_guid = Some(
+        infiniband::detect_port_guid()
+            .expect("nvswitch-nvl5 requires SW_MNG IB device with valid port GUID"),
+    );
+
+    // NVLSM must initialize the NVLink subnet before FM can manage the fabric
+    init.nv_nvlsm();
+    init.health_checks();
     init.nv_fabricmanager();
-    init.check_daemons();
+    init.health_checks();
 }
 
 fn main() {
@@ -95,7 +101,6 @@ fn main() {
     mount::setup();
     kmsg::kernlog_setup();
     syslog::poll();
-    mount::readonly("/");
     init.process_kernel_params(None);
 
     // Kernel param nvrc.mode selects runtime behavior; GPU is the safe default
@@ -104,6 +109,7 @@ fn main() {
     let setup = modes.get(mode).copied().unwrap_or(mode_gpu);
     setup(&mut init);
 
+    mount::readonly("/");
     lockdown::disable_modules_loading();
     kata_agent::fork_agent(POLL_FOREVER);
 }

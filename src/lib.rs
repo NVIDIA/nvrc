@@ -6,6 +6,7 @@
 #![allow(non_snake_case)]
 //! The main binary uses these modules internally.
 
+pub mod config;
 pub mod daemon;
 pub mod execute;
 pub mod kata_agent;
