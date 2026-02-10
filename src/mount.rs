@@ -86,9 +86,9 @@ fn setup_at(root: &str) {
     );
     mount_optional(
         &filesystems,
-        "efivarfs",
-        &format!("{root}/sys/firmware/efi/efivars"),
-        "efivarfs",
+        "configfs",
+        &format!("{root}/sys/kernel/config"),
+        "configfs",
         common,
     );
 }
@@ -128,6 +128,54 @@ mod tests {
             "tmpfs",
             MsFlags::empty(),
         );
+    }
+
+    #[test]
+    fn test_mount_optional_fs_not_available() {
+        use tempfile::TempDir;
+
+        let tmpdir = TempDir::new().unwrap();
+        let target = tmpdir.path().join("mount_point");
+        fs::create_dir_all(&target).unwrap();
+
+        // Simulate configfs not being in /proc/filesystems
+        let filesystems = "nodev tmpfs\nnodev proc\n";
+        mount_optional(
+            filesystems,
+            "configfs",
+            target.to_str().unwrap(),
+            "configfs",
+            MsFlags::empty(),
+        );
+    }
+
+    #[test]
+    fn test_mount_optional_success() {
+        use nix::mount::umount;
+        use tempfile::TempDir;
+
+        require_root();
+
+        let tmpdir = TempDir::new().unwrap();
+        let target = tmpdir.path().join("tmpfs_mount");
+        fs::create_dir_all(&target).unwrap();
+
+        // Use tmpfs since it's guaranteed to be available on all Linux systems
+        let filesystems = fs::read_to_string("/proc/filesystems").unwrap();
+        mount_optional(
+            &filesystems,
+            "tmpfs",
+            target.to_str().unwrap(),
+            "tmpfs",
+            MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
+        );
+
+        // Mount succeeds, so we can write to it
+        let test_file = target.join("test.txt");
+        fs::write(&test_file, "test").unwrap();
+        assert!(test_file.exists());
+
+        let _ = umount(target.to_str().unwrap());
     }
 
     // === Error path tests ===
@@ -170,22 +218,47 @@ mod tests {
         let tmpdir = TempDir::new().unwrap();
         let root = tmpdir.path().to_str().unwrap();
 
-        // Create required directories
-        for dir in ["proc", "dev", "sys", "run", "tmp"] {
+        for dir in [
+            "proc",
+            "dev",
+            "sys",
+            "run",
+            "tmp",
+            "sys/kernel/security",
+            "sys/kernel/config",
+        ] {
             fs::create_dir_all(format!("{root}/{dir}")).unwrap();
         }
 
-        // Run setup_at with temp root
         setup_at(root);
 
-        // devtmpfs creates these automatically
+        // devtmpfs auto-creates device nodes to avoid manual mknod calls
         assert!(Path::new(&format!("{root}/dev/null")).exists());
         assert!(Path::new(&format!("{root}/dev/zero")).exists());
         assert!(Path::new(&format!("{root}/dev/random")).exists());
         assert!(Path::new(&format!("{root}/dev/urandom")).exists());
 
-        // Cleanup: unmount in reverse order
-        for dir in ["tmp", "run", "sys", "dev", "proc"] {
+        // Optional mounts only succeed if kernel supports them
+        let filesystems = fs::read_to_string("/proc/filesystems").unwrap();
+        if fs_available(&filesystems, "configfs") {
+            let configfs_path = format!("{root}/sys/kernel/config");
+            assert!(Path::new(&configfs_path).exists());
+        }
+        if fs_available(&filesystems, "securityfs") {
+            let securityfs_path = format!("{root}/sys/kernel/security");
+            assert!(Path::new(&securityfs_path).exists());
+        }
+
+        // Unmount nested mounts first to avoid EBUSY
+        for dir in [
+            "sys/kernel/config",
+            "sys/kernel/security",
+            "tmp",
+            "run",
+            "sys",
+            "dev",
+            "proc",
+        ] {
             let _ = umount(format!("{root}/{dir}").as_str());
         }
     }
