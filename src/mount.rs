@@ -98,6 +98,18 @@ mod tests {
     use super::*;
     use crate::test_utils::require_root;
 
+    /// Check if a path is an active mountpoint by parsing /proc/self/mountinfo.
+    fn is_mountpoint(path: &str) -> bool {
+        let mountinfo = fs::read_to_string("/proc/self/mountinfo").unwrap();
+        let canonical = fs::canonicalize(path).unwrap();
+        let canonical = canonical.to_str().unwrap();
+        mountinfo.lines().any(|line| {
+            // mountinfo format: fields[4] is the mount point
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            fields.len() > 4 && fields[4] == canonical
+        })
+    }
+
     // === fs_available tests ===
 
     #[test]
@@ -170,10 +182,7 @@ mod tests {
             MsFlags::MS_NOSUID | MsFlags::MS_NODEV,
         );
 
-        // Mount succeeds, so we can write to it
-        let test_file = target.join("test.txt");
-        fs::write(&test_file, "test").unwrap();
-        assert!(test_file.exists());
+        assert!(is_mountpoint(target.to_str().unwrap()));
 
         let _ = umount(target.to_str().unwrap());
     }
@@ -242,11 +251,11 @@ mod tests {
         let filesystems = fs::read_to_string("/proc/filesystems").unwrap();
         if fs_available(&filesystems, "configfs") {
             let configfs_path = format!("{root}/sys/kernel/config");
-            assert!(Path::new(&configfs_path).exists());
+            assert!(is_mountpoint(&configfs_path));
         }
         if fs_available(&filesystems, "securityfs") {
             let securityfs_path = format!("{root}/sys/kernel/security");
-            assert!(Path::new(&securityfs_path).exists());
+            assert!(is_mountpoint(&securityfs_path));
         }
 
         // Unmount nested mounts first to avoid EBUSY
