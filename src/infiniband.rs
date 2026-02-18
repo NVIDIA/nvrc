@@ -18,21 +18,25 @@ pub fn detect_port_guid() -> Option<String> {
 }
 
 fn detect_port_guid_from(ib_class_path: &str) -> Option<String> {
+    if !Path::new(ib_class_path).is_dir() {
+        panic!("{ib_class_path} not found — mlx5_ib module not loaded");
+    }
+
     let mut entries: Vec<_> = fs::read_dir(ib_class_path)
         .or_panic(format_args!("read {ib_class_path}"))
         .flatten()
         .collect();
+
+    if entries.is_empty() {
+        panic!("{ib_class_path} is empty — mlx5_ib loaded but no IB devices registered");
+    }
+
     // Deterministic selection: mlx5_0 before mlx5_1, so first valid SW_MNG device wins.
     entries.sort_by_key(|e| e.file_name());
 
     for entry in entries {
         let device_name = entry.file_name().to_string_lossy().to_string();
         let device_path = entry.path();
-
-        if !is_sw_mng_device(&device_path.join("device/vpd")) {
-            continue;
-        }
-        debug!("{}: SW_MNG device", device_name);
 
         if !is_sm_enabled(&device_path.join("ports/1/cap_mask")) {
             debug!("{}: SM disabled, skipping", device_name);
@@ -46,13 +50,6 @@ fn detect_port_guid_from(ib_class_path: &str) -> Option<String> {
     }
 
     None
-}
-
-/// SW_MNG in VPD identifies CX7 bridges vs regular IB HCAs.
-fn is_sw_mng_device(vpd_path: &Path) -> bool {
-    fs::read(vpd_path)
-        .map(|data| data.windows(6).any(|w| w == b"SW_MNG"))
-        .unwrap_or(false)
 }
 
 /// NVLSM cannot manage a port with SM disabled.
@@ -84,22 +81,13 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    fn create_ib_device(
-        tmpdir: &TempDir,
-        name: &str,
-        vpd_content: &[u8],
-        cap_mask: &str,
-        gid: &str,
-    ) {
+    fn create_ib_device(tmpdir: &TempDir, name: &str, cap_mask: &str, gid: &str) {
         let dev_path = tmpdir.path().join(name);
-        let vpd_path = dev_path.join("device/vpd");
         let cap_path = dev_path.join("ports/1/cap_mask");
         let gid_path = dev_path.join("ports/1/gids/0");
 
-        fs::create_dir_all(vpd_path.parent().unwrap()).unwrap();
         fs::create_dir_all(gid_path.parent().unwrap()).unwrap();
 
-        fs::write(&vpd_path, vpd_content).unwrap();
         fs::write(&cap_path, cap_mask).unwrap();
         fs::write(&gid_path, gid).unwrap();
     }
@@ -110,7 +98,6 @@ mod tests {
         create_ib_device(
             &tmpdir,
             "mlx5_0",
-            b"some data SW_MNG more data",
             "0x00000200\n", // bit 10 unset, SM enabled
             "fe80:0000:0000:0000:0002:c903:0029:7de1\n",
         );
@@ -120,27 +107,11 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_port_guid_no_sw_mng() {
-        let tmpdir = TempDir::new().unwrap();
-        create_ib_device(
-            &tmpdir,
-            "mlx5_0",
-            b"some other data", // no SW_MNG
-            "0x00000200\n",
-            "fe80:0000:0000:0000:0002:c903:0029:7de1\n",
-        );
-
-        let guid = detect_port_guid_from(tmpdir.path().to_str().unwrap());
-        assert!(guid.is_none());
-    }
-
-    #[test]
     fn test_detect_port_guid_sm_disabled() {
         let tmpdir = TempDir::new().unwrap();
         create_ib_device(
             &tmpdir,
             "mlx5_0",
-            b"SW_MNG",
             "0x00000400\n", // bit 10 set, SM disabled
             "fe80:0000:0000:0000:0002:c903:0029:7de1\n",
         );
@@ -150,23 +121,21 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_port_guid_multiple_devices_first_valid() {
+    fn test_detect_port_guid_skips_sm_disabled() {
         let tmpdir = TempDir::new().unwrap();
 
-        // First device: no SW_MNG
+        // First device: SM disabled
         create_ib_device(
             &tmpdir,
             "mlx5_0",
-            b"no marker",
-            "0x00000200\n",
+            "0x00000400\n",
             "fe80:0000:0000:0000:aaaa:bbbb:cccc:dddd\n",
         );
 
-        // Second device: valid
+        // Second device: SM enabled
         create_ib_device(
             &tmpdir,
             "mlx5_1",
-            b"SW_MNG",
             "0x00000200\n",
             "fe80:0000:0000:0000:1111:2222:3333:4444\n",
         );
@@ -176,42 +145,16 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "is empty")]
     fn test_detect_port_guid_empty_dir() {
         let tmpdir = TempDir::new().unwrap();
-        let guid = detect_port_guid_from(tmpdir.path().to_str().unwrap());
-        assert!(guid.is_none());
+        detect_port_guid_from(tmpdir.path().to_str().unwrap());
     }
 
     #[test]
-    #[should_panic(expected = "read /nonexistent/path")]
+    #[should_panic(expected = "/nonexistent/path not found")]
     fn test_detect_port_guid_nonexistent_dir() {
         detect_port_guid_from("/nonexistent/path");
-    }
-
-    #[test]
-    fn test_is_sw_mng_device_found() {
-        let tmpdir = TempDir::new().unwrap();
-        let vpd_path = tmpdir.path().join("vpd");
-        fs::write(&vpd_path, b"some data SW_MNG more data").unwrap();
-
-        assert!(is_sw_mng_device(&vpd_path));
-    }
-
-    #[test]
-    fn test_is_sw_mng_device_not_found() {
-        let tmpdir = TempDir::new().unwrap();
-        let vpd_path = tmpdir.path().join("vpd");
-        fs::write(&vpd_path, b"some other data").unwrap();
-
-        assert!(!is_sw_mng_device(&vpd_path));
-    }
-
-    #[test]
-    fn test_is_sw_mng_device_no_file() {
-        let tmpdir = TempDir::new().unwrap();
-        let vpd_path = tmpdir.path().join("nonexistent");
-
-        assert!(!is_sw_mng_device(&vpd_path));
     }
 
     #[test]
