@@ -6,6 +6,7 @@ use crate::execute::background;
 use crate::macros::ResultExt;
 use crate::nvrc::NVRC;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 
 /// UVM persistence mode keeps unified memory mappings alive between kernel launches,
 /// avoiding expensive page migrations. Enabled by default for ML workloads.
@@ -30,6 +31,7 @@ fn dcgm_exporter_args() -> &'static [&'static str] {
 }
 
 const FM_CONFIG: &str = "/usr/share/nvidia/nvswitch/fabricmanager.cfg";
+const FM_RUNTIME_CONFIG: &str = "/run/fabricmanager.cfg";
 const NVLSM_CONFIG: &str = "/usr/share/nvidia/nvlsm/nvlsm.conf";
 
 /// Configurable path parameters allow testing with /bin/true instead of real
@@ -80,16 +82,17 @@ impl NVRC {
 
     /// NVSwitch fabric manager is only needed for multi-GPU NVLink topologies.
     /// Disabled by default since most VMs have single GPUs.
-    pub fn nv_fabricmanager(&mut self) {
-        self.configure_fabricmanager(FM_CONFIG);
+    pub fn nv_fabricmanager(&mut self, mode: &str, nvswitch: &str) {
+        fs::copy(FM_CONFIG, FM_RUNTIME_CONFIG)
+            .or_panic(format_args!("copy {FM_CONFIG} to {FM_RUNTIME_CONFIG}"));
+        self.configure_fabricmanager(FM_RUNTIME_CONFIG, mode, nvswitch);
+        fs::set_permissions(FM_RUNTIME_CONFIG, fs::Permissions::from_mode(0o400))
+            .or_panic(format_args!("set permissions {FM_RUNTIME_CONFIG}"));
         self.spawn_fabricmanager("/bin/nv-fabricmanager")
     }
 
     fn spawn_fabricmanager(&mut self, bin: &str) {
-        if self.fabric_mode.is_none() {
-            return;
-        }
-        let mut args = vec!["-c", FM_CONFIG];
+        let mut args = vec!["-c", FM_RUNTIME_CONFIG];
         let guid_owned: String;
         if let Some(ref guid) = self.port_guid {
             guid_owned = guid.clone();
@@ -115,22 +118,26 @@ impl NVRC {
         self.track_daemon("nvlsm", child);
     }
 
-    /// Write FABRIC_MODE, FABRIC_MODE_RESTART, and PARTITION_RAIL_POLICY to fabricmanager.cfg.
-    /// ServiceVM (mode 1) requires FABRIC_MODE_RESTART=1 for resiliency.
-    fn configure_fabricmanager(&self, cfg_path: &str) {
-        let Some(mode) = self.fabric_mode else {
-            return;
+    /// Write FABRIC_MODE and PARTITION_RAIL_POLICY to fabricmanager.cfg.
+    /// FABRIC_MODE is derived from the detected mode:
+    ///   "gpu" (bare metal with NVSwitches) -> FABRIC_MODE=0
+    ///   "servicevm-nvl4" / "servicevm-nvl5" (service VM) -> FABRIC_MODE=1
+    /// PARTITION_RAIL_POLICY is derived from the NVSwitch generation:
+    ///   "nvl4" -> greedy (maximize bandwidth)
+    ///   "nvl5" -> symmetric (required for Confidential Computing on Blackwell)
+    /// FABRIC_MODE_RESTART is not set — FM runs in a container so pod
+    /// restart handles failure recovery.
+    fn configure_fabricmanager(&self, cfg_path: &str, mode: &str, nvswitch: &str) {
+        let fm = match mode {
+            "gpu" => "0",
+            "servicevm-nvl4" | "servicevm-nvl5" => "1",
+            _ => return,
         };
-
-        let mode_str = mode.to_string();
-        let restart = if mode == 1 { "1" } else { "0" };
-        let policy = self.rail_policy.as_deref().unwrap_or("greedy");
-
-        let updates = &[
-            ("FABRIC_MODE", mode_str.as_str()),
-            ("FABRIC_MODE_RESTART", restart),
-            ("PARTITION_RAIL_POLICY", policy),
-        ];
+        let policy = match nvswitch {
+            "nvl5" => "symmetric",
+            _ => "greedy",
+        };
+        let updates = &[("FABRIC_MODE", fm), ("PARTITION_RAIL_POLICY", policy)];
 
         update_config_file(cfg_path, updates);
     }
@@ -190,9 +197,20 @@ mod tests {
     }
 
     #[test]
-    fn test_nv_fabricmanager_skipped_by_default() {
+    fn test_nv_fabricmanager_gpu_mode() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let cfg = tmpfile.path().to_str().unwrap();
+        fs::write(cfg, "FABRIC_MODE=0\n").unwrap();
+
         let mut nvrc = NVRC::default();
-        nvrc.nv_fabricmanager();
+        nvrc.configure_fabricmanager(cfg, "gpu", "nvl4");
+        nvrc.spawn_fabricmanager("/bin/true");
+
+        let content = fs::read_to_string(cfg).unwrap();
+        assert!(content.contains("FABRIC_MODE=0"));
+        nvrc.health_checks();
     }
 
     #[test]
@@ -238,14 +256,12 @@ mod tests {
     #[test]
     fn test_spawn_fabricmanager_success() {
         let mut nvrc = NVRC::default();
-        nvrc.fabric_mode = Some(1);
         nvrc.spawn_fabricmanager("/bin/true");
     }
 
     #[test]
     fn test_spawn_fabricmanager_with_port_guid() {
         let mut nvrc = NVRC::default();
-        nvrc.fabric_mode = Some(1);
         nvrc.port_guid = Some("0xdeadbeef".to_string());
         nvrc.spawn_fabricmanager("/bin/true");
         nvrc.health_checks();
@@ -289,37 +305,48 @@ mod tests {
     // === Fabricmanager configuration tests ===
 
     #[test]
-    fn test_configure_fabricmanager_mode_0_bare_metal() {
+    fn test_configure_fabricmanager_bare_metal() {
         use tempfile::NamedTempFile;
 
         let tmpfile = NamedTempFile::new().unwrap();
         let path = tmpfile.path().to_str().unwrap();
         fs::write(path, "").unwrap();
 
-        let mut nvrc = NVRC::default();
-        nvrc.fabric_mode = Some(0);
-        nvrc.configure_fabricmanager(path);
+        let nvrc = NVRC::default();
+        nvrc.configure_fabricmanager(path, "gpu", "nvl4");
 
         let content = fs::read_to_string(path).unwrap();
         assert!(content.contains("FABRIC_MODE=0"));
-        assert!(content.contains("FABRIC_MODE_RESTART=0"));
     }
 
     #[test]
-    fn test_configure_fabricmanager_mode_1_servicevm() {
+    fn test_configure_fabricmanager_servicevm_nvl4() {
         use tempfile::NamedTempFile;
 
         let tmpfile = NamedTempFile::new().unwrap();
         let path = tmpfile.path().to_str().unwrap();
         fs::write(path, "").unwrap();
 
-        let mut nvrc = NVRC::default();
-        nvrc.fabric_mode = Some(1);
-        nvrc.configure_fabricmanager(path);
+        let nvrc = NVRC::default();
+        nvrc.configure_fabricmanager(path, "servicevm-nvl4", "nvl4");
 
         let content = fs::read_to_string(path).unwrap();
         assert!(content.contains("FABRIC_MODE=1"));
-        assert!(content.contains("FABRIC_MODE_RESTART=1"));
+    }
+
+    #[test]
+    fn test_configure_fabricmanager_servicevm_nvl5() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+        fs::write(path, "").unwrap();
+
+        let nvrc = NVRC::default();
+        nvrc.configure_fabricmanager(path, "servicevm-nvl5", "nvl5");
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("FABRIC_MODE=1"));
     }
 
     #[test]
@@ -328,28 +355,18 @@ mod tests {
 
         let tmpfile = NamedTempFile::new().unwrap();
         let path = tmpfile.path().to_str().unwrap();
-        fs::write(path, "FABRIC_MODE=0\nFABRIC_MODE_RESTART=0\n").unwrap();
+        fs::write(path, "FABRIC_MODE=0\n").unwrap();
 
-        let mut nvrc = NVRC::default();
-        nvrc.fabric_mode = Some(1);
-        nvrc.configure_fabricmanager(path);
+        let nvrc = NVRC::default();
+        nvrc.configure_fabricmanager(path, "servicevm-nvl4", "nvl4");
 
         let content = fs::read_to_string(path).unwrap();
         assert!(content.contains("FABRIC_MODE=1"));
-        assert!(content.contains("FABRIC_MODE_RESTART=1"));
-        // Should not have old values
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(
             lines
                 .iter()
                 .filter(|l| l.starts_with("FABRIC_MODE="))
-                .count(),
-            1
-        );
-        assert_eq!(
-            lines
-                .iter()
-                .filter(|l| l.starts_with("FABRIC_MODE_RESTART="))
                 .count(),
             1
         );
@@ -363,9 +380,8 @@ mod tests {
         let path = tmpfile.path().to_str().unwrap();
         fs::write(path, "# Comment\nOTHER_SETTING=value\nFABRIC_MODE=0\n").unwrap();
 
-        let mut nvrc = NVRC::default();
-        nvrc.fabric_mode = Some(1);
-        nvrc.configure_fabricmanager(path);
+        let nvrc = NVRC::default();
+        nvrc.configure_fabricmanager(path, "servicevm-nvl4", "nvl4");
 
         let content = fs::read_to_string(path).unwrap();
         assert!(content.contains("# Comment"));
@@ -374,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn test_configure_fabricmanager_no_fabric_mode() {
+    fn test_configure_fabricmanager_cpu_mode_skipped() {
         use tempfile::NamedTempFile;
 
         let tmpfile = NamedTempFile::new().unwrap();
@@ -382,45 +398,55 @@ mod tests {
         fs::write(path, "ORIGINAL=content\n").unwrap();
 
         let nvrc = NVRC::default();
-        // fabric_mode is None
-        nvrc.configure_fabricmanager(path);
+        nvrc.configure_fabricmanager(path, "cpu", "");
 
-        // File should be unchanged
         let content = fs::read_to_string(path).unwrap();
         assert_eq!(content, "ORIGINAL=content\n");
     }
 
     #[test]
-    fn test_configure_fabricmanager_default_rail_policy() {
+    fn test_configure_fabricmanager_nvl4_greedy_rail_policy() {
         use tempfile::NamedTempFile;
 
         let tmpfile = NamedTempFile::new().unwrap();
         let path = tmpfile.path().to_str().unwrap();
         fs::write(path, "").unwrap();
 
-        let mut nvrc = NVRC::default();
-        nvrc.fabric_mode = Some(1);
-        // rail_policy is None, should default to greedy
-        nvrc.configure_fabricmanager(path);
+        let nvrc = NVRC::default();
+        nvrc.configure_fabricmanager(path, "servicevm-nvl4", "nvl4");
 
         let content = fs::read_to_string(path).unwrap();
         assert!(content.contains("PARTITION_RAIL_POLICY=greedy"));
     }
 
     #[test]
-    fn test_configure_fabricmanager_symmetric_rail_policy() {
+    fn test_configure_fabricmanager_nvl5_symmetric_rail_policy() {
         use tempfile::NamedTempFile;
 
         let tmpfile = NamedTempFile::new().unwrap();
         let path = tmpfile.path().to_str().unwrap();
         fs::write(path, "").unwrap();
 
-        let mut nvrc = NVRC::default();
-        nvrc.fabric_mode = Some(1);
-        nvrc.rail_policy = Some("symmetric".to_owned());
-        nvrc.configure_fabricmanager(path);
+        let nvrc = NVRC::default();
+        nvrc.configure_fabricmanager(path, "servicevm-nvl5", "nvl5");
 
         let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("PARTITION_RAIL_POLICY=symmetric"));
+    }
+
+    #[test]
+    fn test_configure_fabricmanager_gpu_nvl5_symmetric_rail_policy() {
+        use tempfile::NamedTempFile;
+
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+        fs::write(path, "").unwrap();
+
+        let nvrc = NVRC::default();
+        nvrc.configure_fabricmanager(path, "gpu", "nvl5");
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("FABRIC_MODE=0"));
         assert!(content.contains("PARTITION_RAIL_POLICY=symmetric"));
     }
 
@@ -432,14 +458,11 @@ mod tests {
         let path = tmpfile.path().to_str().unwrap();
         fs::write(path, "").unwrap();
 
-        let mut nvrc = NVRC::default();
-        nvrc.fabric_mode = Some(1);
-        nvrc.rail_policy = Some("symmetric".to_owned());
-        nvrc.configure_fabricmanager(path);
+        let nvrc = NVRC::default();
+        nvrc.configure_fabricmanager(path, "servicevm-nvl5", "nvl5");
 
         let content = fs::read_to_string(path).unwrap();
         assert!(content.contains("FABRIC_MODE=1"));
-        assert!(content.contains("FABRIC_MODE_RESTART=1"));
         assert!(content.contains("PARTITION_RAIL_POLICY=symmetric"));
     }
 }
