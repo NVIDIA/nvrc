@@ -25,7 +25,7 @@ recovery mechanisms—if GPU initialization fails, the VM powers off. This
 │                        NVRC (PID 1)                            │
 │                                                                │
 │  1. Set panic hook (power off VM on panic)                    │
-│  2. Mount filesystems (/proc, /dev, /sys, /dev/shm)           │
+│  2. Mount filesystems (/proc, /dev, /sys, /run, /tmp)          │
 │  3. Initialize kernel message logging                          │
 │  4. Start syslog daemon                                        │
 │  5. Parse kernel parameters (/proc/cmdline)                    │
@@ -154,7 +154,6 @@ cargo llvm-cov --all-features --workspace
 
 # Fuzzing
 cargo +nightly fuzz run kernel_params
-cargo +nightly fuzz run mount_parsing
 
 # Static analysis
 cargo clippy --all-features -- -D warnings
@@ -167,7 +166,7 @@ cargo deny check
 NVRC operates with a defense-in-depth security model appropriate for
 confidential computing:
 
-1. **Minimal Attack Surface**: 9 direct dependencies, statically linked
+1. **Minimal Attack Surface**: 7 direct dependencies, statically linked
 2. **Fail-Fast**: Panic hook powers off VM on any panic (no undefined states)
 3. **Read-Only Root**: Filesystem becomes read-only after initialization
 4. **Module Lockdown**: Kernel module loading disabled after GPU setup
