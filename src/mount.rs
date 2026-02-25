@@ -50,18 +50,6 @@ fn setup_at(root: &str) {
     let common = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
 
     mount("proc", &format!("{root}/proc"), "proc", common, None);
-
-    // devtmpfs automatically creates /dev/null, /dev/zero, /dev/random, /dev/urandom
-    // Symlinks (/dev/stdin, /dev/stdout, /dev/stderr, /dev/fd, /dev/core) are created by kata-agent
-    let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
-    mount(
-        "dev",
-        &format!("{root}/dev"),
-        "devtmpfs",
-        dev_flags,
-        Some("mode=0755"),
-    );
-
     mount("sysfs", &format!("{root}/sys"), "sysfs", common, None);
     mount(
         "run",
@@ -239,9 +227,18 @@ mod tests {
             fs::create_dir_all(format!("{root}/{dir}")).unwrap();
         }
 
+        // Kernel mounts devtmpfs on /dev before init runs; simulate that here
+        mount(
+            "devtmpfs",
+            &format!("{root}/dev"),
+            "devtmpfs",
+            MsFlags::MS_NOSUID | MsFlags::MS_RELATIME,
+            None,
+        );
+
         setup_at(root);
 
-        // devtmpfs auto-creates device nodes to avoid manual mknod calls
+        // devtmpfs auto-creates device nodes
         assert!(Path::new(&format!("{root}/dev/null")).exists());
         assert!(Path::new(&format!("{root}/dev/zero")).exists());
         assert!(Path::new(&format!("{root}/dev/random")).exists());

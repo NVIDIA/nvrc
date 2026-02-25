@@ -128,7 +128,10 @@ impl NVRC {
     /// PARTITION_RAIL_POLICY: "greedy" (NVL4) or "symmetric" (NVL5, required for CC on Blackwell)
     fn configure_fabricmanager(&self, cfg_path: &str, fabric_mode: u8, rail_policy: &str) {
         let fm = &fabric_mode.to_string();
-        let updates = &[("FABRIC_MODE", fm.as_str()), ("PARTITION_RAIL_POLICY", rail_policy)];
+        let updates = &[
+            ("FABRIC_MODE", fm.as_str()),
+            ("PARTITION_RAIL_POLICY", rail_policy),
+        ];
         update_config_file(cfg_path, updates);
     }
 }

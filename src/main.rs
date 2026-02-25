@@ -27,9 +27,9 @@ mod test_utils;
 extern crate log;
 extern crate kernlog;
 
+use daemon::FABRIC_MODE_FULL;
+use daemon::FABRIC_MODE_SHARED;
 use kata_agent::SYSLOG_POLL_FOREVER as POLL_FOREVER;
-use daemon::FABRIC_MODE_FULL as FABRIC_MODE_FULL;
-use daemon::FABRIC_MODE_SHARED as FABRIC_MODE_SHARED;
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
 
