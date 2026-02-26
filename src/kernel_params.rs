@@ -28,12 +28,10 @@ impl NVRC {
 
         for (k, v) in content.split_whitespace().filter_map(|p| p.split_once('=')) {
             match k {
-                "nvrc.mode" => nvrc_mode(v, self),
                 "nvrc.log" => nvrc_log(v, self),
                 "nvrc.uvm.persistence.mode" => uvm_persistenced_mode(v, self),
                 "nvrc.dcgm" => nvrc_dcgm(v, self),
-                "nvrc.fm.mode" => nvrc_fm_mode(v, self),
-                "nvrc.fm.rail.policy" => nvrc_fm_rail_policy(v, self),
+
                 "nvrc.smi.srs" => nvidia_smi_srs(v, self),
                 "nvrc.smi.lgc" => nvidia_smi_lgc(v, self),
                 "nvrc.smi.lmc" => nvidia_smi_lmc(v, self),
@@ -44,44 +42,12 @@ impl NVRC {
     }
 }
 
-/// Operation mode: "gpu" (default) or "cpu" (skip GPU management).
-/// Use nvrc.mode=cpu for CPU-only workloads that don't need GPU initialization.
-fn nvrc_mode(value: &str, ctx: &mut NVRC) {
-    ctx.mode = Some(value.to_lowercase());
-    debug!("nvrc.mode: {}", value);
-}
-
 /// DCGM (Data Center GPU Manager) provides telemetry and health monitoring.
 /// Off by default—only enable when observability infrastructure expects it.
 fn nvrc_dcgm(value: &str, ctx: &mut NVRC) {
     let dcgm = parse_boolean(value);
     ctx.dcgm_enabled = Some(dcgm);
     debug!("nvrc.dcgm: {dcgm}");
-}
-
-/// Fabric Manager mode: 0=bare metal, 1=servicevm (shared nvswitch).
-/// ServiceVM mode enables FABRIC_MODE_RESTART for resiliency.
-fn nvrc_fm_mode(value: &str, ctx: &mut NVRC) {
-    let mode: u8 = value.parse().expect("nvrc.fm.mode: must be 0 or 1");
-    if mode > 1 {
-        panic!("nvrc.fm.mode: invalid mode {}, must be 0 or 1", mode);
-    }
-    ctx.fabric_mode = Some(mode);
-    debug!("nvrc.fm.mode: {mode}");
-}
-
-/// Partition rail policy: greedy maximizes bandwidth, symmetric ensures isolation.
-/// Symmetric required for Confidential Computing on Blackwell.
-fn nvrc_fm_rail_policy(value: &str, ctx: &mut NVRC) {
-    let policy = value.to_lowercase();
-    if policy != "greedy" && policy != "symmetric" {
-        panic!(
-            "nvrc.fm.rail.policy: invalid policy '{}', must be 'greedy' or 'symmetric'",
-            value
-        );
-    }
-    ctx.rail_policy = Some(policy);
-    debug!("nvrc.fm.rail.policy: {}", ctx.rail_policy.as_ref().unwrap());
 }
 
 /// Control log verbosity at runtime. Defaults to off to minimize noise.
@@ -271,57 +237,6 @@ mod tests {
     }
 
     #[test]
-    fn test_nvrc_fm_mode() {
-        let mut c = NVRC::default();
-
-        nvrc_fm_mode("0", &mut c);
-        assert_eq!(c.fabric_mode, Some(0));
-
-        nvrc_fm_mode("1", &mut c);
-        assert_eq!(c.fabric_mode, Some(1));
-
-        // Invalid mode should panic
-        let result = panic::catch_unwind(|| {
-            nvrc_fm_mode("2", &mut NVRC::default());
-        });
-        assert!(result.is_err());
-
-        let result = panic::catch_unwind(|| {
-            nvrc_fm_mode("3", &mut NVRC::default());
-        });
-        assert!(result.is_err());
-
-        let result = panic::catch_unwind(|| {
-            nvrc_fm_mode("invalid", &mut NVRC::default());
-        });
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_nvrc_fm_rail_policy() {
-        let mut c = NVRC::default();
-
-        nvrc_fm_rail_policy("greedy", &mut c);
-        assert_eq!(c.rail_policy, Some("greedy".to_owned()));
-
-        nvrc_fm_rail_policy("symmetric", &mut c);
-        assert_eq!(c.rail_policy, Some("symmetric".to_owned()));
-
-        // Case insensitive
-        nvrc_fm_rail_policy("GREEDY", &mut c);
-        assert_eq!(c.rail_policy, Some("greedy".to_owned()));
-
-        nvrc_fm_rail_policy("Symmetric", &mut c);
-        assert_eq!(c.rail_policy, Some("symmetric".to_owned()));
-
-        // Invalid policy should panic
-        let result = panic::catch_unwind(|| {
-            nvrc_fm_rail_policy("invalid", &mut NVRC::default());
-        });
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_nvidia_smi_srs() {
         let mut c = NVRC::default();
 
@@ -448,76 +363,12 @@ mod tests {
     }
 
     #[test]
-    fn test_process_kernel_params_with_fm_mode_and_uvm() {
+    fn test_process_kernel_params_with_uvm_and_srs() {
         let mut c = NVRC::default();
 
-        c.process_kernel_params(Some(
-            "nvrc.fm.mode=1 nvrc.uvm.persistence.mode=true nvrc.smi.srs=enabled",
-        ));
+        c.process_kernel_params(Some("nvrc.uvm.persistence.mode=true nvrc.smi.srs=enabled"));
 
-        assert_eq!(c.fabric_mode, Some(1));
         assert_eq!(c.uvm_persistence_mode, Some(true));
         assert_eq!(c.nvidia_smi_srs, Some("enabled".to_owned()));
-    }
-
-    #[test]
-    fn test_nvrc_mode() {
-        let mut c = NVRC::default();
-
-        nvrc_mode("cpu", &mut c);
-        assert_eq!(c.mode, Some("cpu".to_owned()));
-
-        nvrc_mode("GPU", &mut c);
-        assert_eq!(c.mode, Some("gpu".to_owned())); // normalized to lowercase
-
-        nvrc_mode("nvswitch-nvl4", &mut c);
-        assert_eq!(c.mode, Some("nvswitch-nvl4".to_owned()));
-
-        nvrc_mode("NVSWITCH-NVL4", &mut c);
-        assert_eq!(c.mode, Some("nvswitch-nvl4".to_owned())); // normalized to lowercase
-
-        nvrc_mode("nvswitch-nvl5", &mut c);
-        assert_eq!(c.mode, Some("nvswitch-nvl5".to_owned()));
-
-        nvrc_mode("NVSWITCH-NVL5", &mut c);
-        assert_eq!(c.mode, Some("nvswitch-nvl5".to_owned())); // normalized to lowercase
-    }
-
-    #[test]
-    fn test_process_kernel_params_with_mode() {
-        let mut c = NVRC::default();
-
-        c.process_kernel_params(Some("nvrc.mode=cpu nvrc.dcgm=on"));
-
-        assert_eq!(c.mode, Some("cpu".to_owned()));
-        assert_eq!(c.dcgm_enabled, Some(true));
-    }
-
-    #[test]
-    fn test_process_kernel_params_nvswitch_nvl4_mode() {
-        let mut c = NVRC::default();
-
-        c.process_kernel_params(Some("nvrc.mode=nvswitch-nvl4"));
-
-        assert_eq!(c.mode, Some("nvswitch-nvl4".to_owned()));
-    }
-
-    #[test]
-    fn test_process_kernel_params_nvswitch_nvl5_mode() {
-        let mut c = NVRC::default();
-
-        c.process_kernel_params(Some("nvrc.mode=nvswitch-nvl5"));
-
-        assert_eq!(c.mode, Some("nvswitch-nvl5".to_owned()));
-    }
-
-    #[test]
-    fn test_process_kernel_params_with_rail_policy() {
-        let mut c = NVRC::default();
-
-        c.process_kernel_params(Some("nvrc.fm.mode=1 nvrc.fm.rail.policy=symmetric"));
-
-        assert_eq!(c.fabric_mode, Some(1));
-        assert_eq!(c.rail_policy, Some("symmetric".to_owned()));
     }
 }

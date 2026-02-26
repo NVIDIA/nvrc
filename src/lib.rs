@@ -15,6 +15,7 @@ pub mod kmsg;
 pub mod lockdown;
 #[macro_use]
 pub mod macros;
+pub mod mode;
 pub mod modprobe;
 pub mod mount;
 pub mod nvrc;

@@ -14,15 +14,6 @@ fn mount(source: &str, target: &str, fstype: &str, flags: MsFlags, data: Option<
         .or_panic(format_args!("mount {source} on {target}"));
 }
 
-/// Remount a filesystem as read-only.
-/// Security hardening: prevents writes to the root filesystem after init,
-/// reducing attack surface in the confidential VM.
-pub fn readonly(target: &str) {
-    let flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY | MsFlags::MS_REMOUNT;
-    nix::mount::mount(None::<&str>, target, None::<&str>, flags, None::<&str>)
-        .or_panic(format_args!("remount {target} readonly"));
-}
-
 /// Check if a filesystem type is available in the kernel.
 fn fs_available(filesystems: &str, fstype: &str) -> bool {
     filesystems.lines().any(|line| line.contains(fstype))
@@ -50,18 +41,6 @@ fn setup_at(root: &str) {
     let common = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
 
     mount("proc", &format!("{root}/proc"), "proc", common, None);
-
-    // devtmpfs automatically creates /dev/null, /dev/zero, /dev/random, /dev/urandom
-    // Symlinks (/dev/stdin, /dev/stdout, /dev/stderr, /dev/fd, /dev/core) are created by kata-agent
-    let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
-    mount(
-        "dev",
-        &format!("{root}/dev"),
-        "devtmpfs",
-        dev_flags,
-        Some("mode=0755"),
-    );
-
     mount("sysfs", &format!("{root}/sys"), "sysfs", common, None);
     mount(
         "run",
@@ -205,16 +184,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_readonly_fails_nonexistent() {
-        use std::panic;
-
-        let result = panic::catch_unwind(|| {
-            readonly("/nonexistent/path");
-        });
-        assert!(result.is_err());
-    }
-
     // === setup_at() tests with temp directory ===
 
     #[test]
@@ -239,9 +208,18 @@ mod tests {
             fs::create_dir_all(format!("{root}/{dir}")).unwrap();
         }
 
+        // Kernel mounts devtmpfs on /dev before init runs; simulate that here
+        mount(
+            "devtmpfs",
+            &format!("{root}/dev"),
+            "devtmpfs",
+            MsFlags::MS_NOSUID | MsFlags::MS_RELATIME,
+            None,
+        );
+
         setup_at(root);
 
-        // devtmpfs auto-creates device nodes to avoid manual mknod calls
+        // devtmpfs auto-creates device nodes
         assert!(Path::new(&format!("{root}/dev/null")).exists());
         assert!(Path::new(&format!("{root}/dev/zero")).exists());
         assert!(Path::new(&format!("{root}/dev/random")).exists());
