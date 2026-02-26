@@ -110,7 +110,6 @@ fn main() {
         unknown => panic!("unknown mode: {unknown}"),
     }
 
-    mount::readonly("/");
     lockdown::disable_modules_loading();
     kata_agent::fork_agent(POLL_FOREVER);
 }

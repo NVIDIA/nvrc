@@ -14,15 +14,6 @@ fn mount(source: &str, target: &str, fstype: &str, flags: MsFlags, data: Option<
         .or_panic(format_args!("mount {source} on {target}"));
 }
 
-/// Remount a filesystem as read-only.
-/// Security hardening: prevents writes to the root filesystem after init,
-/// reducing attack surface in the confidential VM.
-pub fn readonly(target: &str) {
-    let flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_RDONLY | MsFlags::MS_REMOUNT;
-    nix::mount::mount(None::<&str>, target, None::<&str>, flags, None::<&str>)
-        .or_panic(format_args!("remount {target} readonly"));
-}
-
 /// Check if a filesystem type is available in the kernel.
 fn fs_available(filesystems: &str, fstype: &str) -> bool {
     filesystems.lines().any(|line| line.contains(fstype))
@@ -189,16 +180,6 @@ mod tests {
                 MsFlags::empty(),
                 None,
             );
-        });
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_readonly_fails_nonexistent() {
-        use std::panic;
-
-        let result = panic::catch_unwind(|| {
-            readonly("/nonexistent/path");
         });
         assert!(result.is_err());
     }
