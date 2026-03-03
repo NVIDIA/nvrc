@@ -34,7 +34,6 @@ use kata_agent::SYSLOG_POLL_FOREVER as POLL_FOREVER;
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
 
-
 /// VMs with GPU passthrough need driver setup, clock tuning,
 /// and monitoring daemons before workloads can use the GPU.
 /// On bare metal HGX systems (GPUs + NVSwitches), also starts
@@ -47,15 +46,11 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     init.nvidia_smi_lgc();
     init.nvidia_smi_pl();
 
-    nvswitch.inspect(|&nv| {
-        let policy = match nv {
-            "nvl5" => "symmetric",
-            _ => "greedy",
-        };
-        init.nv_fabricmanager(FABRIC_MODE_FULL, policy);
-    });
-
-    init.health_checks();
+    match nvswitch {
+        Some("nvl4") => mode_nvl4(init, FABRIC_MODE_FULL),
+        Some("nvl5") => mode_nvl5(init, FABRIC_MODE_FULL),
+        _ => {}
+    }
 
     init.nvidia_persistenced();
 
@@ -68,15 +63,15 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
 /// Service VM mode for NVLink 4.0 topologies in shared virtualization.
 /// Loads NVIDIA driver and starts fabric manager. GPUs are assigned to service VM.
-fn mode_servicevm_nvl4(init: &mut NVRC) {
+fn mode_nvl4(init: &mut NVRC, fabric_mode: u8) {
     modprobe::load("nvidia");
-    init.nv_fabricmanager(FABRIC_MODE_SHARED, "greedy");
+    init.nv_fabricmanager(fabric_mode, "greedy");
     init.health_checks();
 }
 
 /// HGX Bx00 systems use CX7 bridges for NVLink management instead of direct GPU access.
 /// GPUs are passed to tenant VMs; only the CX7 IB devices are visible here.
-fn mode_servicevm_nvl5(init: &mut NVRC) {
+fn mode_nvl5(init: &mut NVRC, fabric_mode: u8) {
     // ib_umad exposes /dev/umad* for InfiniBand MAD protocol access;
     // mlx5_ib creates /sys/class/infiniband/mlx5_* entries for the CX7 bridges.
     modprobe::load("ib_umad");
@@ -85,13 +80,13 @@ fn mode_servicevm_nvl5(init: &mut NVRC) {
     // CX7 port GUID identifies which bridge to use for fabric management
     init.port_guid = Some(
         infiniband::detect_port_guid()
-            .expect("servicevm-nvl5 requires SW_MNG IB device with valid port GUID"),
+            .expect("nvl5 requires SW_MNG IB device with valid port GUID"),
     );
 
     // NVLSM must initialize the NVLink subnet before FM can manage the fabric
     init.nv_nvlsm();
     init.health_checks();
-    init.nv_fabricmanager(FABRIC_MODE_SHARED, "symmetric");
+    init.nv_fabricmanager(fabric_mode, "symmetric");
     init.health_checks();
 }
 
@@ -108,8 +103,8 @@ fn main() {
     match detected.mode {
         "cpu" => info!("executing cpu mode"),
         "gpu" => mode_gpu(&mut init, detected.nvswitch),
-        "servicevm-nvl4" => mode_servicevm_nvl4(&mut init),
-        "servicevm-nvl5" => mode_servicevm_nvl5(&mut init),
+        "servicevm-nvl4" => mode_nvl4(&mut init, FABRIC_MODE_SHARED),
+        "servicevm-nvl5" => mode_nvl5(&mut init, FABRIC_MODE_SHARED),
         unknown => panic!("unknown mode: {unknown}"),
     }
 

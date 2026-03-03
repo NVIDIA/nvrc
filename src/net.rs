@@ -18,10 +18,8 @@ nix::ioctl_write_ptr_bad!(siocsifflags, libc::SIOCSIFFLAGS, libc::ifreq);
 
 /// Bring up the loopback interface (`lo`).
 pub fn loopback_up() {
-    let fd = Errno::result(unsafe {
-        libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0)
-    })
-    .or_panic(format_args!("socket for loopback ioctl"));
+    let fd = Errno::result(unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) })
+        .or_panic(format_args!("socket for loopback ioctl"));
 
     let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
     ifr.ifr_name[..LOOPBACK.len()].copy_from_slice(&LOOPBACK);
@@ -61,10 +59,8 @@ mod tests {
         require_root();
         loopback_up();
 
-        let fd = Errno::result(unsafe {
-            libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0)
-        })
-        .expect("socket");
+        let fd = Errno::result(unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) })
+            .expect("socket");
 
         let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
         ifr.ifr_name[..LOOPBACK.len()].copy_from_slice(&LOOPBACK);
@@ -90,17 +86,18 @@ mod tests {
     fn test_siocgifflags_invalid_interface() {
         require_root();
 
-        let fd = Errno::result(unsafe {
-            libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0)
-        })
-        .expect("socket");
+        let fd = Errno::result(unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) })
+            .expect("socket");
 
         let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
         let bad: [i8; 3] = [b'x' as i8, b'x' as i8, 0];
         ifr.ifr_name[..3].copy_from_slice(&bad);
 
         let result = unsafe { siocgifflags(fd, &mut ifr) };
-        assert!(result.is_err(), "SIOCGIFFLAGS should fail for nonexistent interface");
+        assert!(
+            result.is_err(),
+            "SIOCGIFFLAGS should fail for nonexistent interface"
+        );
 
         let _ = unsafe { libc::close(fd) };
     }

@@ -46,7 +46,8 @@ impl NVRC {
     /// reducing cold-start latency. UVM persistence mode enables unified memory
     /// optimizations. Enabled by default since most workloads benefit from it.
     pub fn nvidia_persistenced(&mut self) {
-        self.spawn_persistenced("/var/run/nvidia-persistenced", "/bin/nvidia-persistenced")
+        self.spawn_persistenced("/var/run/nvidia-persistenced", "/bin/nvidia-persistenced");
+        self.wait_for_ready("Local RPC services initialized", 120);
     }
 
     fn spawn_persistenced(&mut self, run_dir: &str, bin: &str) {
@@ -93,7 +94,8 @@ impl NVRC {
         self.configure_fabricmanager(FM_RUNTIME_CONFIG, fabric_mode, rail_policy);
         fs::set_permissions(FM_RUNTIME_CONFIG, fs::Permissions::from_mode(0o400))
             .or_panic(format_args!("set permissions {FM_RUNTIME_CONFIG}"));
-        self.spawn_fabricmanager("/bin/nv-fabricmanager")
+        self.spawn_fabricmanager("/bin/nv-fabricmanager");
+        self.wait_for_ready("FM starting NvLink Inband", 120);
     }
 
     fn spawn_fabricmanager(&mut self, bin: &str) {
