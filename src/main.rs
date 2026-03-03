@@ -13,6 +13,7 @@ mod macros;
 mod mode;
 mod modprobe;
 mod mount;
+mod net;
 mod nvrc;
 mod smi;
 mod syslog;
@@ -33,6 +34,7 @@ use kata_agent::SYSLOG_POLL_FOREVER as POLL_FOREVER;
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
 
+
 /// VMs with GPU passthrough need driver setup, clock tuning,
 /// and monitoring daemons before workloads can use the GPU.
 /// On bare metal HGX systems (GPUs + NVSwitches), also starts
@@ -45,13 +47,6 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     init.nvidia_smi_lgc();
     init.nvidia_smi_pl();
 
-    init.nvidia_persistenced();
-
-    init.nv_hostengine();
-    init.dcgm_exporter();
-    nvidia_ctk_cdi();
-    init.nvidia_smi_srs();
-
     nvswitch.inspect(|&nv| {
         let policy = match nv {
             "nvl5" => "symmetric",
@@ -61,6 +56,13 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     });
 
     init.health_checks();
+
+    init.nvidia_persistenced();
+
+    init.nv_hostengine();
+    init.dcgm_exporter();
+    nvidia_ctk_cdi();
+    init.nvidia_smi_srs();
 }
 
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
@@ -97,6 +99,7 @@ fn main() {
     lockdown::set_panic_hook();
     let mut init = NVRC::default();
     mount::setup();
+    net::loopback_up();
     kmsg::kernlog_setup();
     syslog::poll();
     init.process_kernel_params(None);
