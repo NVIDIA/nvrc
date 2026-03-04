@@ -10,8 +10,10 @@ mod kernel_params;
 mod kmsg;
 mod lockdown;
 mod macros;
+mod mode;
 mod modprobe;
 mod mount;
+mod net;
 mod nvrc;
 mod smi;
 mod syslog;
@@ -26,17 +28,17 @@ mod test_utils;
 extern crate log;
 extern crate kernlog;
 
-use std::collections::HashMap;
-
+use daemon::FABRIC_MODE_FULL;
+use daemon::FABRIC_MODE_SHARED;
 use kata_agent::SYSLOG_POLL_FOREVER as POLL_FOREVER;
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
 
-type ModeFn = fn(&mut NVRC);
-
 /// VMs with GPU passthrough need driver setup, clock tuning,
 /// and monitoring daemons before workloads can use the GPU.
-fn mode_gpu(init: &mut NVRC) {
+/// On bare metal HGX systems (GPUs + NVSwitches), also starts
+/// the fabric manager via the appropriate NVSwitch mode.
+fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     modprobe::load("nvidia");
     modprobe::load("nvidia-uvm");
 
@@ -44,11 +46,16 @@ fn mode_gpu(init: &mut NVRC) {
     init.nvidia_smi_lgc();
     init.nvidia_smi_pl();
 
+    match nvswitch {
+        Some("nvl4") => mode_nvl4(init, FABRIC_MODE_FULL),
+        Some("nvl5") => mode_nvl5(init, FABRIC_MODE_FULL),
+        _ => {}
+    }
+
     init.nvidia_persistenced();
 
     init.nv_hostengine();
     init.dcgm_exporter();
-    init.nv_fabricmanager();
     nvidia_ctk_cdi();
     init.nvidia_smi_srs();
     init.health_checks();
@@ -57,59 +64,51 @@ fn mode_gpu(init: &mut NVRC) {
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
 /// Service VM mode for NVLink 4.0 topologies in shared virtualization.
 /// Loads NVIDIA driver and starts fabric manager. GPUs are assigned to service VM.
-fn mode_nvswitch_nvl4(init: &mut NVRC) {
-    // Service VM mode requires FABRIC_MODE=1 (shared nvswitch)
-    init.fabric_mode = Some(1);
-
+fn mode_nvl4(init: &mut NVRC, fabric_mode: u8) {
     modprobe::load("nvidia");
-    init.nv_fabricmanager();
+    init.nv_fabricmanager(fabric_mode, "greedy");
     init.health_checks();
 }
 
 /// HGX Bx00 systems use CX7 bridges for NVLink management instead of direct GPU access.
 /// GPUs are passed to tenant VMs; only the CX7 IB devices are visible here.
-fn mode_nvswitch_nvl5(init: &mut NVRC) {
-    init.fabric_mode = Some(1);
-
-    // CX7 bridges expose management interface via InfiniBand MAD protocol
+fn mode_nvl5(init: &mut NVRC, fabric_mode: u8) {
+    // ib_umad exposes /dev/umad* for InfiniBand MAD protocol access;
+    // mlx5_ib creates /sys/class/infiniband/mlx5_* entries for the CX7 bridges.
     modprobe::load("ib_umad");
+    modprobe::load("mlx5_ib");
 
     // CX7 port GUID identifies which bridge to use for fabric management
     init.port_guid = Some(
         infiniband::detect_port_guid()
-            .expect("nvswitch-nvl5 requires SW_MNG IB device with valid port GUID"),
+            .expect("nvl5 requires SW_MNG IB device with valid port GUID"),
     );
 
     // NVLSM must initialize the NVLink subnet before FM can manage the fabric
     init.nv_nvlsm();
     init.health_checks();
-    init.nv_fabricmanager();
+    init.nv_fabricmanager(fabric_mode, "symmetric");
     init.health_checks();
 }
 
 fn main() {
-    // Dispatch table allows adding new modes without touching control flow.
-    let modes: HashMap<&str, ModeFn> = HashMap::from([
-        ("gpu", mode_gpu as ModeFn),
-        ("cpu", (|_| {}) as ModeFn),
-        ("nvswitch-nvl4", mode_nvswitch_nvl4 as ModeFn),
-        ("nvswitch-nvl5", mode_nvswitch_nvl5 as ModeFn),
-    ]);
-
     lockdown::set_panic_hook();
     let mut init = NVRC::default();
     mount::setup();
+    net::loopback_up();
     kmsg::kernlog_setup();
     syslog::poll();
     init.process_kernel_params(None);
 
-    // Kernel param nvrc.mode selects runtime behavior; GPU is the safe default
-    // since most users expect full GPU functionality.
-    let mode = init.mode.as_deref().unwrap_or("gpu");
-    let setup = modes.get(mode).copied().unwrap_or(mode_gpu);
-    setup(&mut init);
+    let detected = mode::detect();
+    match detected.mode {
+        "cpu" => info!("executing cpu mode"),
+        "gpu" => mode_gpu(&mut init, detected.nvswitch),
+        "servicevm-nvl4" => mode_nvl4(&mut init, FABRIC_MODE_SHARED),
+        "servicevm-nvl5" => mode_nvl5(&mut init, FABRIC_MODE_SHARED),
+        unknown => panic!("unknown mode: {unknown}"),
+    }
 
-    mount::readonly("/");
     lockdown::disable_modules_loading();
     kata_agent::fork_agent(POLL_FOREVER);
 }

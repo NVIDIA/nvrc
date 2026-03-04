@@ -11,8 +11,6 @@ use std::process::Child;
 #[derive(Default)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
-    /// Operation mode: "gpu" (default) or "cpu" (skip GPU management)
-    pub mode: Option<String>,
     /// Set/unset ready state
     pub nvidia_smi_srs: Option<String>,
     /// Lock GPU clocks to specific frequency
@@ -25,10 +23,7 @@ pub struct NVRC {
     pub uvm_persistence_mode: Option<bool>,
     /// Enable DCGM exporter for GPU metrics
     pub dcgm_enabled: Option<bool>,
-    /// Fabric Manager mode: 0=bare metal, 1=servicevm
-    pub fabric_mode: Option<u8>,
-    /// Fabric Manager rail policy: "greedy" (default) or "symmetric"
-    pub rail_policy: Option<String>,
+
     /// Port GUID for NVL5+ systems (0x-prefixed hex string)
     pub port_guid: Option<String>,
     /// Tracked background daemons for health monitoring
@@ -66,7 +61,6 @@ mod tests {
     #[test]
     fn test_default() {
         let nvrc = NVRC::default();
-        assert!(nvrc.mode.is_none());
         assert!(nvrc.nvidia_smi_srs.is_none());
         assert!(nvrc.nvidia_smi_lgc.is_none());
         assert!(nvrc.children.is_empty());
