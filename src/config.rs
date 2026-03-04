@@ -172,4 +172,18 @@ mod tests {
     fn test_update_config_file_nonexistent_file() {
         update_config_file("/nonexistent/path/file.cfg", &[("KEY", "value")]);
     }
+
+    #[test]
+    fn test_update_config_file_value_contains_equals() {
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+
+        // Values with '=' in them (e.g. base64 encoded) should be preserved
+        fs::write(path, "TOKEN=abc=def==\n").unwrap();
+
+        update_config_file(path, &[("TOKEN", "xyz=123==")]);
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("TOKEN=xyz=123=="));
+    }
 }
