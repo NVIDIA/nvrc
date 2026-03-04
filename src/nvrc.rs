@@ -38,11 +38,6 @@ impl NVRC {
         self.children.push((name.into(), child));
     }
 
-    /// Block until `marker` appears in /dev/kmsg or `timeout_secs` expires.
-    pub fn wait_for_ready(&self, marker: &str, timeout_secs: u32) {
-        crate::kmsg::wait_for_marker("/dev/kmsg", marker, timeout_secs);
-    }
-
     /// Check all background daemons haven't failed.
     /// Exit status 0 is OK (daemon may fork and parent exits successfully).
     /// Non-zero exit means the daemon crashed—fail init before kata-agent starts.

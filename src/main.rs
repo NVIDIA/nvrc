@@ -58,6 +58,7 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     init.dcgm_exporter();
     nvidia_ctk_cdi();
     init.nvidia_smi_srs();
+    init.health_checks();
 }
 
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).

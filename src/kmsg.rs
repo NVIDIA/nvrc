@@ -44,36 +44,44 @@ pub fn kmsg() -> File {
     })
 }
 
-/// Block until `marker` appears in kmsg or `timeout_secs` expires.
-/// Opens the file, seeks to end to skip history, then reads new entries.
-/// Drains syslog on each iteration so messages stay visible during the wait.
-pub fn wait_for_marker(path: &str, marker: &str, timeout_secs: u32) {
+/// Open a kmsg file for reading. For /dev/kmsg, seeks to end to skip boot
+/// history. Call *before* spawning a daemon to avoid missing its marker.
+pub fn open_kmsg(path: &str) -> BufReader<File> {
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NONBLOCK)
         .open(path)
         .or_panic(format_args!("open {path}"));
-    // SAFETY: lseek on a valid fd with SEEK_END is well-defined for /dev/kmsg
-    unsafe { libc::lseek(std::os::fd::AsRawFd::as_raw_fd(&file), 0, libc::SEEK_END) };
 
+    // Skip boot history on /dev/kmsg; regular files read from the start.
+    // SAFETY: lseek on a valid fd with SEEK_END is well-defined for /dev/kmsg
+    if path == "/dev/kmsg" {
+        let ret = unsafe { libc::lseek(std::os::fd::AsRawFd::as_raw_fd(&file), 0, libc::SEEK_END) };
+        assert!(ret >= 0, "lseek SEEK_END failed on {path}");
+    }
+
+    BufReader::new(file)
+}
+
+/// Block until `marker` appears in `reader` or `timeout_secs` expires.
+/// Best-effort syslog drain keeps messages visible during the wait.
+pub fn wait_for_marker(reader: &mut BufReader<File>, marker: &str, timeout_secs: u32) {
     let deadline = Instant::now() + Duration::from_secs(timeout_secs as u64);
-    let mut reader = BufReader::new(file);
     let mut line = String::new();
 
     loop {
-        crate::syslog::poll();
+        crate::syslog::try_poll();
         if Instant::now() > deadline {
             panic!("timeout waiting for: {marker}");
         }
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => std::thread::sleep(Duration::from_millis(500)),
-            Ok(_) => {
-                if line.contains(marker) {
-                    info!("{marker}");
-                    return;
-                }
+            Ok(_) if line.contains(marker) => {
+                info!("{marker}");
+                return;
             }
+            Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(500));
             }
@@ -192,7 +200,11 @@ mod tests {
         writeln!(tmp, "more noise").unwrap();
         tmp.flush().unwrap();
 
-        wait_for_marker(tmp.path().to_str().unwrap(), "FM starting NvLink Inband", 5);
+        wait_for_marker(
+            &mut open_kmsg(tmp.path().to_str().unwrap()),
+            "FM starting NvLink Inband",
+            5,
+        );
     }
 
     #[test]
@@ -203,7 +215,11 @@ mod tests {
         writeln!(tmp, "FM starting NvLink Inband").unwrap();
         tmp.flush().unwrap();
 
-        wait_for_marker(tmp.path().to_str().unwrap(), "FM starting NvLink Inband", 5);
+        wait_for_marker(
+            &mut open_kmsg(tmp.path().to_str().unwrap()),
+            "FM starting NvLink Inband",
+            5,
+        );
     }
 
     #[test]
@@ -213,7 +229,11 @@ mod tests {
         tmp.flush().unwrap();
 
         let result = panic::catch_unwind(|| {
-            wait_for_marker(tmp.path().to_str().unwrap(), "FM starting NvLink Inband", 1);
+            wait_for_marker(
+                &mut open_kmsg(tmp.path().to_str().unwrap()),
+                "FM starting NvLink Inband",
+                1,
+            );
         });
         assert!(result.is_err());
     }
@@ -223,7 +243,11 @@ mod tests {
         let tmp = NamedTempFile::new().unwrap();
 
         let result = panic::catch_unwind(|| {
-            wait_for_marker(tmp.path().to_str().unwrap(), "FM starting NvLink Inband", 1);
+            wait_for_marker(
+                &mut open_kmsg(tmp.path().to_str().unwrap()),
+                "FM starting NvLink Inband",
+                1,
+            );
         });
         assert!(result.is_err());
     }
@@ -231,7 +255,7 @@ mod tests {
     #[test]
     fn test_wait_for_marker_nonexistent_file_panics() {
         let result = panic::catch_unwind(|| {
-            wait_for_marker("/nonexistent/path", "marker", 1);
+            wait_for_marker(&mut open_kmsg("/nonexistent/path"), "marker", 1);
         });
         assert!(result.is_err());
     }
@@ -245,17 +269,24 @@ mod tests {
 
         // Marker spans two lines — should not match
         let result = panic::catch_unwind(|| {
-            wait_for_marker(tmp.path().to_str().unwrap(), "FM starting NvLink Inband", 1);
+            wait_for_marker(
+                &mut open_kmsg(tmp.path().to_str().unwrap()),
+                "FM starting NvLink Inband",
+                1,
+            );
         });
         assert!(result.is_err());
     }
 
     #[test]
+    #[serial]
     fn test_wait_for_marker_on_dev_kmsg() {
         require_root();
 
+        // Open reader *before* writing the marker — same pattern as production.
+        let mut reader = open_kmsg("/dev/kmsg");
         let marker = "NVRC_TEST_MARKER_12345";
         fs::write("/dev/kmsg", format!("{marker}\n")).expect("write /dev/kmsg");
-        wait_for_marker("/dev/kmsg", marker, 5);
+        wait_for_marker(&mut reader, marker, 5);
     }
 }

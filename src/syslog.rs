@@ -62,6 +62,12 @@ pub fn poll() {
     poll_at(Path::new(DEV_LOG)).or_panic("syslog poll");
 }
 
+/// Best-effort syslog drain. Silently ignores errors (e.g. socket not bound yet).
+/// Used by wait_for_marker where syslog drain is nice-to-have, not critical.
+pub fn try_poll() {
+    let _ = poll_at(Path::new(DEV_LOG));
+}
+
 /// Internal: poll a specific socket path (for unit tests).
 /// Production code uses poll() which hardcodes /dev/log.
 fn poll_at(path: &Path) -> std::io::Result<()> {

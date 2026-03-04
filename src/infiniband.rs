@@ -3,6 +3,8 @@
 
 //! HGX Bx00 uses CX7 bridges instead of direct GPU access for NVLink management.
 //! The port GUID from these bridges is required to initialize NVLSM and FM.
+//! SW_MNG filtering happens at the PCI VPD level in `mode.rs`; this module
+//! selects the first SM-enabled IB port GUID from the already-filtered devices.
 
 use crate::macros::ResultExt;
 use log::debug;
@@ -31,7 +33,7 @@ fn detect_port_guid_from(ib_class_path: &str) -> Option<String> {
         panic!("{ib_class_path} is empty — mlx5_ib loaded but no IB devices registered");
     }
 
-    // Deterministic selection: mlx5_0 before mlx5_1, so first valid SW_MNG device wins.
+    // Deterministic selection: mlx5_0 before mlx5_1, so first SM-enabled device wins.
     entries.sort_by_key(|e| e.file_name());
 
     for entry in entries {

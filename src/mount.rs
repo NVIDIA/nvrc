@@ -28,8 +28,8 @@ fn mount_optional(filesystems: &str, source: &str, target: &str, fstype: &str, f
 }
 
 /// Set up the minimal filesystem hierarchy required for GPU initialization.
-/// Creates /proc, /dev, /sys, /run, /tmp mounts.
-/// devtmpfs automatically creates standard device nodes; symlinks
+/// Creates /proc, /sys, /run, /tmp mounts.
+/// The kernel mounts devtmpfs on /dev before init runs; symlinks
 /// (/dev/stdin, /dev/stdout, /dev/stderr, /dev/fd, /dev/core) are
 /// created later by kata-agent.
 pub fn setup() {
