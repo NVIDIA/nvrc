@@ -11,7 +11,7 @@
 use crate::macros::ResultExt;
 use nix::errno::Errno;
 
-const LOOPBACK: [i8; 3] = [b'l' as i8, b'o' as i8, 0];
+const LOOPBACK: [libc::c_char; 3] = [b'l' as libc::c_char, b'o' as libc::c_char, 0];
 
 nix::ioctl_read_bad!(siocgifflags, libc::SIOCGIFFLAGS, libc::ifreq);
 nix::ioctl_write_ptr_bad!(siocsifflags, libc::SIOCSIFFLAGS, libc::ifreq);
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn test_loopback_const() {
-        assert_eq!(LOOPBACK, [b'l' as i8, b'o' as i8, 0]);
+        assert_eq!(LOOPBACK, [b'l' as libc::c_char, b'o' as libc::c_char, 0]);
         assert_eq!(LOOPBACK.len(), 3);
     }
 
@@ -90,7 +90,7 @@ mod tests {
             .expect("socket");
 
         let mut ifr: libc::ifreq = unsafe { std::mem::zeroed() };
-        let bad: [i8; 3] = [b'x' as i8, b'x' as i8, 0];
+        let bad: [libc::c_char; 3] = [b'x' as libc::c_char, b'x' as libc::c_char, 0];
         ifr.ifr_name[..3].copy_from_slice(&bad);
 
         let result = unsafe { siocgifflags(fd, &mut ifr) };
