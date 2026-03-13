@@ -42,10 +42,6 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     modprobe::load("nvidia");
     modprobe::load("nvidia-uvm");
 
-    init.nvidia_smi_lmc();
-    init.nvidia_smi_lgc();
-    init.nvidia_smi_pl();
-
     match nvswitch {
         Some("nvl4") => mode_nvl4(init, FABRIC_MODE_FULL),
         Some("nvl5") => mode_nvl5(init, FABRIC_MODE_FULL),
@@ -53,6 +49,10 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     }
 
     init.nvidia_persistenced();
+
+    init.nvidia_smi_lmc();
+    init.nvidia_smi_lgc();
+    init.nvidia_smi_pl();
 
     init.nv_hostengine();
     init.dcgm_exporter();
