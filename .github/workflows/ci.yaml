@@ -38,11 +38,11 @@ jobs:
       - name: Build NVRC
         run: |
           cargo build --release --target=aarch64-unknown-linux-musl
-          sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC "$ROOTFS_DIR/bin/NVRC-aarch64-unknown-linux-musl"
+          sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC "$ROOTFS_IMAGE_DIR/bin/NVRC-aarch64-unknown-linux-musl"
       - name: Create Image with NVRC
         run: |
           cd "${IMAGE_BUILDER_DIR}"
-          script -fec "sudo -E AGENT_INIT=no USE_DOCKER=true ./image_builder.sh \"${ROOTFS_DIR}\""
+          script -fec "sudo -E AGENT_INIT=no USE_DOCKER=true ./image_builder.sh \"${ROOTFS_IMAGE_DIR}\""
       # TODO: why does nerdctl fail here
       - name: Run nerdctl and verify nvidia-smi execution
         run: |
