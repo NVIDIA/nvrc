@@ -19,8 +19,8 @@ on:
 permissions:
   contents: read
 env:
-  ROOTFS_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-initrd-nvidia-gpu/builddir/initrd-image/ubuntu_rootfs
-  INITRD_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/initrd-builder
+  ROOTFS_IMAGE_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-image-nvidia-gpu/builddir/rootfs-image/ubuntu_rootfs
+  IMAGE_BUILDER_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/image-builder
 jobs:
   build-asset:
     runs-on: g5g.metal
@@ -38,16 +38,15 @@ jobs:
       - name: Build NVRC
         run: |
           cargo build --release --target=aarch64-unknown-linux-musl
-          sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC "$ROOTFS_DIR/bin/NVRC"
-      - name: Create initrd
+          sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC "$ROOTFS_DIR/bin/NVRC-aarch64-unknown-linux-musl"
+      - name: Create Image with NVRC
         run: |
-          cd "${INITRD_DIR}"
-          script -fec "sudo -E AGENT_INIT=no USE_DOCKER=true ./initrd_builder.sh \"${ROOTFS_DIR}\""
+          cd "${IMAGE_BUILDER_DIR}"
+          script -fec "sudo -E AGENT_INIT=no USE_DOCKER=true ./image_builder.sh \"${ROOTFS_DIR}\""
       # TODO: why does nerdctl fail here
       - name: Run nerdctl and verify nvidia-smi execution
         run: |
-          image=ubuntu
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm "$image" nvidia-smi; dmesg 2>&1) || true
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- nvidia-smi && date && dmesg 2>&1) || true
           echo "$output"
 
           # Check if nvidia-smi actually executed and produced meaningful output
@@ -59,4 +58,3 @@ jobs:
             echo "nvidia-smi did not execute properly or produced unexpected output"
             exit 1
           fi
-
