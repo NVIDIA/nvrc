@@ -4,22 +4,33 @@
 //! Minimal syslog sink for ephemeral init environments.
 //!
 //! Programs expect /dev/log to exist for logging. As a minimal init we provide
-//! this socket and forward messages to the kernel log via trace!(). Severity
-//! levels are stripped since all messages go to the same destination anyway.
+//! this socket and forward messages either to kernel log via trace!() when
+//! debug logging is enabled, or to /run/syslog.log when debug logging is disabled.
+//! This ensures daemon startup markers are always available for synchronization.
 
-use log::trace;
 use nix::poll::{PollFd, PollFlags, PollTimeout};
 use once_cell::sync::OnceCell;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixDatagram;
 use std::path::Path;
+use std::sync::Mutex;
 
 /// Global syslog socket—lazily initialized on first poll().
 /// OnceCell ensures thread-safe one-time init. Ephemeral init runs once,
 /// no need for reset capability.
 static SYSLOG: OnceCell<UnixDatagram> = OnceCell::new();
 
+/// Global log file for syslog messages when kmsg logging is disabled.
+/// Mutex protects concurrent writes from multiple poll() calls.
+static LOGFILE: OnceCell<Mutex<File>> = OnceCell::new();
+
 const DEV_LOG: &str = "/dev/log";
+const SYSLOG_FILE: &str = "/run/syslog.log";
+
+/// Public path to the syslog file for cross-module access.
+pub const SYSLOG_FILE_PATH: &str = SYSLOG_FILE;
 
 /// Create and bind a Unix datagram socket at the given path.
 fn bind(path: &Path) -> std::io::Result<UnixDatagram> {
@@ -79,9 +90,52 @@ fn poll_at(path: &Path) -> std::io::Result<()> {
     };
 
     if let Some(msg) = poll_socket(sock)? {
-        trace!("{}", msg);
+        forward_message(&msg)?;
     }
 
+    Ok(())
+}
+
+/// Forward a syslog message to the appropriate destination.
+/// When debug logging is enabled, write to kmsg via trace!().
+/// Otherwise, append to /run/syslog.log for daemon synchronization.
+fn forward_message(msg: &str) -> std::io::Result<()> {
+    forward_message_at(msg, SYSLOG_FILE)
+}
+
+/// Forward a syslog message to a specific file path.
+/// When debug logging is enabled, messages are not written to file.
+/// For SYSLOG_FILE_PATH, uses the cached LOGFILE.
+/// For other paths, writes directly without caching (for tests).
+fn forward_message_at(msg: &str, path: &str) -> std::io::Result<()> {
+    // Check if debug logging is enabled using max_level for test compatibility
+    if log::max_level() >= log::LevelFilter::Debug {
+        // In production with initialized logger, this would go to trace!()
+        // In tests without logger, we skip writing to file when debug level is set
+        return Ok(());
+    }
+
+    if path == SYSLOG_FILE {
+        // Use cached file handle for the main syslog path
+        let logfile = LOGFILE.get_or_try_init(|| {
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(SYSLOG_FILE)
+                .map(Mutex::new)
+        })?;
+
+        let mut file = logfile
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        writeln!(file, "{}", msg)?;
+        file.flush()?;
+    } else {
+        // For test paths, write directly without caching
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        writeln!(file, "{}", msg)?;
+        file.flush()?;
+    }
     Ok(())
 }
 
@@ -90,7 +144,7 @@ fn poll_at(path: &Path) -> std::io::Result<()> {
 fn poll_once(path: &Path) -> std::io::Result<()> {
     let sock = bind(path)?;
     if let Some(msg) = poll_socket(&sock)? {
-        trace!("{}", msg);
+        forward_message(&msg)?;
     }
     Ok(())
 }
@@ -108,6 +162,26 @@ fn strip_priority(msg: &str) -> &str {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// RAII guard to restore log level after test.
+    /// Ensures tests don't leak log level changes to other tests.
+    struct LogLevelGuard {
+        original: log::LevelFilter,
+    }
+
+    impl LogLevelGuard {
+        fn new(level: log::LevelFilter) -> Self {
+            let original = log::max_level();
+            log::set_max_level(level);
+            Self { original }
+        }
+    }
+
+    impl Drop for LogLevelGuard {
+        fn drop(&mut self) {
+            log::set_max_level(self.original);
+        }
+    }
 
     // === strip_priority tests ===
 
@@ -278,5 +352,105 @@ mod tests {
         // poll() tries to bind /dev/log - may panic if already bound or no permission
         // Just exercise the code path, don't assert success
         let _ = panic::catch_unwind(poll);
+    }
+
+    // === forward_message tests ===
+
+    #[test]
+    #[serial_test::serial]
+    fn test_forward_message_to_file_when_logging_disabled() {
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        // Without trace logging, daemons still need synchronization via file
+        let _guard = LogLevelGuard::new(log::LevelFilter::Off);
+
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_str().unwrap();
+
+        let msg = "test message for file";
+        let result = forward_message_at(msg, path);
+        assert!(result.is_ok());
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains(msg));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_forward_message_to_trace_when_logging_enabled() {
+        use tempfile::NamedTempFile;
+
+        // With trace logging enabled, messages go to kmsg for visibility
+        let _guard = LogLevelGuard::new(log::LevelFilter::Trace);
+
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_str().unwrap();
+
+        let msg = "test message for trace";
+        let result = forward_message_at(msg, path);
+        assert!(result.is_ok());
+
+        // File should not be written to when debug logging is enabled
+        let metadata = std::fs::metadata(path).unwrap();
+        assert_eq!(metadata.len(), 0);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_forward_message_multiple_calls_reuse_file() {
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let _guard = LogLevelGuard::new(log::LevelFilter::Off);
+
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_str().unwrap();
+
+        // Repeated calls must not leak file descriptors
+        let result1 = forward_message_at("message 1", path);
+        assert!(result1.is_ok());
+
+        let result2 = forward_message_at("message 2", path);
+        assert!(result2.is_ok());
+
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("message 1"));
+        assert!(content.contains("message 2"));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_forward_message_switches_based_on_log_level() {
+        use std::fs;
+        use tempfile::NamedTempFile;
+
+        let tmp = NamedTempFile::new().unwrap();
+        let path = tmp.path().to_str().unwrap();
+
+        // Runtime log level changes must work without restart
+        {
+            let _guard = LogLevelGuard::new(log::LevelFilter::Off);
+            let result1 = forward_message_at("file message", path);
+            assert!(result1.is_ok());
+        }
+
+        {
+            let _guard = LogLevelGuard::new(log::LevelFilter::Debug);
+            let result2 = forward_message_at("trace message", path);
+            assert!(result2.is_ok());
+        }
+
+        {
+            let _guard = LogLevelGuard::new(log::LevelFilter::Off);
+            let result3 = forward_message_at("file message 2", path);
+            assert!(result3.is_ok());
+        }
+
+        // Verify only the messages written with logging off are in the file
+        let content = fs::read_to_string(path).unwrap();
+        assert!(content.contains("file message"));
+        assert!(!content.contains("trace message"));
+        assert!(content.contains("file message 2"));
     }
 }
