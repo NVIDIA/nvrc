@@ -20,37 +20,46 @@ recovery mechanisms—if GPU initialization fails, the VM powers off. This
 
 ## Architecture
 
-```text
-┌────────────────────────────────────────────────────────────────┐
-│                        NVRC (PID 1)                            │
-│                                                                │
-│  1. Set panic hook (power off VM on panic)                    │
-│  2. Mount filesystems (/proc, /dev, /sys, /run, /tmp)          │
-│  3. Initialize kernel message logging                          │
-│  4. Start syslog daemon                                        │
-│  5. Parse kernel parameters (/proc/cmdline)                    │
-│                                                                │
-│  ┌──────────────────────────────────────────────────────────┐ │
-│  │            Mode Selection (nvrc.mode)                    │ │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │ │
-│  │  │GPU (default)│  │  CPU Mode   │  │NVSwitch-NVL4│ ... │ │
-│  │  │• nvidia.ko  │  │• Skip GPU   │  │(H100/H200)  │     │ │
-│  │  │• nvidia-uvm │  │             │  │• nvidia.ko  │     │ │
-│  │  │• Lock clocks│  │             │  │• fabric-mgr │     │ │
-│  │  │• Lock memory│  │             │  │• Health chk │     │ │
-│  │  │• Power limit│  │             │  │             │     │ │
-│  │  │• Daemons    │  │             │  │             │     │ │
-│  │  │• CDI spec   │  │             │  │             │     │ │
-│  │  │• SRS config │  │             │  │             │     │ │
-│  │  │• Health chk │  │             │  │             │     │ │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘     │ │
-│  └──────────────────────────────────────────────────────────┘ │
-│                                                                │
-│  6. Remount / as read-only (security hardening)                │
-│  7. Disable kernel module loading (lockdown)                   │
-│  8. Fork kata-agent (handoff control)                          │
-│  9. Poll syslog forever (keep PID 1 alive)                     │
-└────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Start([NVRC starts as PID 1]) --> PanicHook[Set panic hook<br/>power off VM on panic]
+    PanicHook --> MountFS[Mount filesystems<br/>/proc /dev /sys /run /tmp]
+    MountFS --> LoopbackUp[Bring up loopback interface]
+    LoopbackUp --> InitKernlog[Initialize kernel logging]
+    InitKernlog --> PollSyslogOnce[Poll syslog once]
+    PollSyslogOnce --> ParseKernel[Parse kernel parameters<br/>/proc/cmdline]
+    
+    ParseKernel --> DetectMode[Detect mode]
+    DetectMode --> ModeSelect{Mode?}
+    
+    ModeSelect -->|gpu default| GPUMode[GPU Mode]
+    ModeSelect -->|cpu| CPUMode[CPU Mode]
+    ModeSelect -->|servicevm-nvl4| NVL4Mode[ServiceVM NVL4<br/>H100/H200/H800]
+    ModeSelect -->|servicevm-nvl5| NVL5Mode[ServiceVM NVL5<br/>B100/B200/B300]
+    
+    GPUMode --> GPUSteps[• Load nvidia.ko nvidia-uvm<br/>• Start nvidia-persistenced<br/>• nvidia-smi: lmc lgc pl srs<br/>• nv-hostengine dcgm-exporter<br/>• Generate CDI spec<br/>• Health checks]
+    
+    CPUMode --> CPUSteps[• Skip GPU initialization]
+    
+    NVL4Mode --> NVL4Steps[• Load nvidia.ko<br/>• Start fabric-mgr greedy<br/>• Health checks]
+    
+    NVL5Mode --> NVL5Steps[• Load ib_umad mlx5_ib<br/>• Detect CX7 port GUID<br/>• Start nvlsm<br/>• Start fabric-mgr symmetric<br/>• Health checks]
+    
+    GPUSteps --> Lockdown
+    CPUSteps --> Lockdown
+    NVL4Steps --> Lockdown
+    NVL5Steps --> Lockdown
+    
+    Lockdown[Disable kernel module loading<br/>security lockdown]
+    Lockdown --> ForkAgent[Fork kata-agent<br/>handoff control to guest agent]
+    ForkAgent --> PollSyslog[Poll syslog forever<br/>keep PID 1 alive]
+    
+    style Start fill:#e1f5ff
+    style PollSyslog fill:#e1f5ff
+    style GPUMode fill:#c8e6c9
+    style CPUMode fill:#fff9c4
+    style NVL4Mode fill:#ffccbc
+    style NVL5Mode fill:#ffccbc
 ```
 
 ## Kernel Parameters
