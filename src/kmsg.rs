@@ -55,12 +55,28 @@ pub fn open_kmsg(path: &str) -> BufReader<File> {
         path
     };
 
+    // Try read-only first; if missing, create with secure perms then reopen
     let file = OpenOptions::new()
         .read(true)
-        .write(true) // Needed for create()
-        .create(true)
         .custom_flags(libc::O_NONBLOCK)
         .open(log_path)
+        .or_else(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                // Create with restrictive permissions
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(log_path)?;
+                // Reopen read-only
+                OpenOptions::new()
+                    .read(true)
+                    .custom_flags(libc::O_NONBLOCK)
+                    .open(log_path)
+            } else {
+                Err(e)
+            }
+        })
         .or_panic(format_args!("open {log_path}"));
 
     BufReader::new(file)
@@ -285,7 +301,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_wait_for_marker_on_dev_kmsg() {
-        use std::io::Write;
         require_root();
 
         // Clear any previous test data to avoid false positives
