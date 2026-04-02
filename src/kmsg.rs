@@ -22,8 +22,7 @@ pub fn kernlog_setup() {
     KERNLOG_INIT.call_once(|| {
         let _ = kernlog::init();
     });
-    // Log level will be set by kernel params processing (nvrc.log=...)
-    // Default is Off, but don't override here since params are processed after this
+    log::set_max_level(log::LevelFilter::Off);
     for path in [
         "/proc/sys/net/core/rmem_default",
         "/proc/sys/net/core/wmem_default",
