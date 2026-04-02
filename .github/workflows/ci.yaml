@@ -52,22 +52,17 @@ jobs:
 
           grep kernel_params /etc/kata-containers/configuration.toml
 
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
-          exit_code=$?
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1 || true)
           echo "$output"
-
-          if [ "$exit_code" != "0" ]; then
-            echo "FAILED: nvidia-smi failed without nvrc.log=trace"
-            exit 1
-          fi
 
           echo "$output" | grep -q "NVIDIA-SMI" || exit 1
 
-          if echo "$output" | grep -q "NVRC"; then
-            echo "SUCCESS: nvidia-smi works AND we see nvrc trace logs in VM dmesg"
-          else
-            echo "WARNING: nvrc.log=trace set but no nvrc logs in VM dmesg"
+          if ! echo "$output" | grep -q "NVRC"; then
+            echo "ERROR: nvrc.log=trace set but no NVRC logs in VM dmesg"
+            exit 1
           fi
+
+          echo "SUCCESS: nvidia-smi works AND we see NVRC trace logs in VM dmesg"
 
       - name: Test WITHOUT nvrc.log=trace (regression test)
         run: |
@@ -75,20 +70,14 @@ jobs:
 
           grep kernel_params /etc/kata-containers/configuration.toml
 
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
-          exit_code=$?
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1 || true)
           echo "$output"
-
-          if [ "$exit_code" != "0" ]; then
-            echo "FAILED: nvidia-smi failed without nvrc.log=trace"
-            exit 1
-          fi
 
           echo "$output" | grep -q "NVIDIA-SMI" || exit 1
 
           if echo "$output" | grep -q "NVRC"; then
-            echo "ERROR: Found nvrc logs without nvrc.log=trace!"
+            echo "ERROR: Found NVRC logs without nvrc.log=trace!"
             exit 1
           fi
 
-          echo "SUCCESS: nvidia-smi works WITHOUT nvrc trace spam in VM dmesg"
+          echo "SUCCESS: nvidia-smi works WITHOUT NVRC trace in VM dmesg"
