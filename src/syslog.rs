@@ -110,8 +110,8 @@ fn forward_message(msg: &str) -> std::io::Result<()> {
 fn forward_message_at(msg: &str, path: &str) -> std::io::Result<()> {
     // Check if debug logging is enabled using max_level for test compatibility
     if log::max_level() >= log::LevelFilter::Debug {
-        // In production with initialized logger, this would go to trace!()
-        // In tests without logger, we skip writing to file when debug level is set
+        // When debug logging is enabled, forward to kernel log via trace!()
+        trace!("{}", msg);
         return Ok(());
     }
 
