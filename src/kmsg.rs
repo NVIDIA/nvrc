@@ -55,12 +55,9 @@ pub fn open_kmsg(path: &str) -> BufReader<File> {
         path
     };
 
-    if log_path == crate::syslog::SYSLOG_FILE_PATH && !std::path::Path::new(log_path).exists() {
-        fs::write(log_path, "").or_panic(format_args!("create {log_path}"));
-    }
-
     let file = OpenOptions::new()
         .read(true)
+        .create(true) // Create if doesn't exist
         .custom_flags(libc::O_NONBLOCK)
         .open(log_path)
         .or_panic(format_args!("open {log_path}"));
@@ -289,6 +286,9 @@ mod tests {
     fn test_wait_for_marker_on_dev_kmsg() {
         use std::io::Write;
         require_root();
+
+        // Clear any previous test data to avoid false positives
+        let _ = fs::remove_file(crate::syslog::SYSLOG_FILE_PATH);
 
         // With always-file architecture, open_kmsg("/dev/kmsg") always reads from syslog file
         let mut reader = open_kmsg("/dev/kmsg");

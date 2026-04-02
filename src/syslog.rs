@@ -14,6 +14,7 @@ use once_cell::sync::OnceCell;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsFd;
+use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixDatagram;
 use std::path::Path;
 use std::sync::Mutex;
@@ -106,6 +107,7 @@ fn forward_message(msg: &str) -> std::io::Result<()> {
         OpenOptions::new()
             .create(true)
             .append(true)
+            .mode(0o600) // Restrict to owner only
             .open(SYSLOG_FILE)
             .map(Mutex::new)
     })?;
