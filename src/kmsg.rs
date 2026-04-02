@@ -22,7 +22,8 @@ pub fn kernlog_setup() {
     KERNLOG_INIT.call_once(|| {
         let _ = kernlog::init();
     });
-    log::set_max_level(log::LevelFilter::Off);
+    // Log level will be set by kernel params processing (nvrc.log=...)
+    // Default is Off, but don't override here since params are processed after this
     for path in [
         "/proc/sys/net/core/rmem_default",
         "/proc/sys/net/core/wmem_default",
@@ -44,27 +45,33 @@ pub fn kmsg() -> File {
     })
 }
 
-/// Open a kmsg file for reading. For /dev/kmsg, seeks to end to skip boot
-/// history. Call *before* spawning a daemon to avoid missing its marker.
+/// Open syslog file for reading daemon startup markers.
+/// Maps /dev/kmsg to /run/syslog.log because daemon synchronization needs to
+/// work without trace logging enabled. File-based sync is simpler and more
+/// reliable than trying to coordinate log levels between writer and reader.
 pub fn open_kmsg(path: &str) -> BufReader<File> {
+    let log_path = if path == "/dev/kmsg" {
+        crate::syslog::SYSLOG_FILE_PATH
+    } else {
+        path
+    };
+
+    if log_path == crate::syslog::SYSLOG_FILE_PATH && !std::path::Path::new(log_path).exists() {
+        fs::write(log_path, "").or_panic(format_args!("create {log_path}"));
+    }
+
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NONBLOCK)
-        .open(path)
-        .or_panic(format_args!("open {path}"));
-
-    // Skip boot history on /dev/kmsg; regular files read from the start.
-    // SAFETY: lseek on a valid fd with SEEK_END is well-defined for /dev/kmsg
-    if path == "/dev/kmsg" {
-        let ret = unsafe { libc::lseek(std::os::fd::AsRawFd::as_raw_fd(&file), 0, libc::SEEK_END) };
-        assert!(ret >= 0, "lseek SEEK_END failed on {path}");
-    }
+        .open(log_path)
+        .or_panic(format_args!("open {log_path}"));
 
     BufReader::new(file)
 }
 
 /// Block until `marker` appears in `reader` or `timeout_secs` expires.
-/// Best-effort syslog drain keeps messages visible during the wait.
+/// Calls try_poll() to drain /dev/log socket and write messages to file that
+/// we're reading from. This loop is the syslog daemon for our minimal init.
 pub fn wait_for_marker(reader: &mut BufReader<File>, marker: &str, timeout_secs: u32) {
     let deadline = Instant::now() + Duration::from_secs(timeout_secs as u64);
     let mut line = String::new();
@@ -281,12 +288,22 @@ mod tests {
     #[test]
     #[serial]
     fn test_wait_for_marker_on_dev_kmsg() {
+        use std::io::Write;
         require_root();
 
-        // Open reader *before* writing the marker — same pattern as production.
+        // With always-file architecture, open_kmsg("/dev/kmsg") always reads from syslog file
         let mut reader = open_kmsg("/dev/kmsg");
         let marker = "NVRC_TEST_MARKER_12345";
-        fs::write("/dev/kmsg", format!("{marker}\n")).expect("write /dev/kmsg");
+
+        // Write directly to the syslog file (simulating what syslog.rs does)
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(crate::syslog::SYSLOG_FILE_PATH)
+            .expect("open syslog file");
+        writeln!(file, "{}", marker).expect("write marker");
+        file.flush().expect("flush");
+
         wait_for_marker(&mut reader, marker, 5);
     }
 }

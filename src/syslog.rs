@@ -3,23 +3,35 @@
 
 //! Minimal syslog sink for ephemeral init environments.
 //!
-//! Programs expect /dev/log to exist for logging. As a minimal init we provide
-//! this socket and forward messages to the kernel log via trace!(). Severity
-//! levels are stripped since all messages go to the same destination anyway.
+//! Programs expect /dev/log to exist for logging. We provide this socket and
+//! write all messages to /run/syslog.log. This file serves as the source of
+//! truth for daemon synchronization - wait_for_marker() reads from it to detect
+//! when daemons are ready. File-based approach works regardless of log level.
 
-use log::trace;
+use log::debug;
 use nix::poll::{PollFd, PollFlags, PollTimeout};
 use once_cell::sync::OnceCell;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixDatagram;
 use std::path::Path;
+use std::sync::Mutex;
 
 /// Global syslog socket—lazily initialized on first poll().
 /// OnceCell ensures thread-safe one-time init. Ephemeral init runs once,
 /// no need for reset capability.
 static SYSLOG: OnceCell<UnixDatagram> = OnceCell::new();
 
+/// Global log file for syslog messages - ALWAYS written for synchronization.
+/// Mutex protects concurrent writes from multiple poll() calls.
+static LOGFILE: OnceCell<Mutex<File>> = OnceCell::new();
+
 const DEV_LOG: &str = "/dev/log";
+const SYSLOG_FILE: &str = "/run/syslog.log";
+
+/// Public path to the syslog file for cross-module access.
+pub const SYSLOG_FILE_PATH: &str = SYSLOG_FILE;
 
 /// Create and bind a Unix datagram socket at the given path.
 fn bind(path: &Path) -> std::io::Result<UnixDatagram> {
@@ -79,8 +91,33 @@ fn poll_at(path: &Path) -> std::io::Result<()> {
     };
 
     if let Some(msg) = poll_socket(sock)? {
-        trace!("{}", msg);
+        forward_message(&msg)?;
     }
+
+    Ok(())
+}
+
+/// Write syslog message to persistent file for daemon synchronization.
+/// Daemons like nvidia-persistenced signal readiness via syslog, but we can't
+/// rely on /dev/kmsg because it requires trace logging. File-based approach works
+/// regardless of log level and survives for post-mortem debugging.
+fn forward_message(msg: &str) -> std::io::Result<()> {
+    let logfile = LOGFILE.get_or_try_init(|| {
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(SYSLOG_FILE)
+            .map(Mutex::new)
+    })?;
+
+    let mut file = logfile
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    writeln!(file, "{}", msg)?;
+    file.flush()?;
+
+    // Also forward to dmesg when debug logging is enabled (nvrc.log=debug)
+    debug!("{}", msg);
 
     Ok(())
 }
@@ -90,7 +127,7 @@ fn poll_at(path: &Path) -> std::io::Result<()> {
 fn poll_once(path: &Path) -> std::io::Result<()> {
     let sock = bind(path)?;
     if let Some(msg) = poll_socket(&sock)? {
-        trace!("{}", msg);
+        forward_message(&msg)?;
     }
     Ok(())
 }

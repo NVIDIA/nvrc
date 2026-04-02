@@ -8,3 +8,11 @@ Cargo.lock
 *~
 .DS_Store
 
+
+# Analysis and planning documents (working files)
+ANALYSIS.md
+ARCHITECTURE_COMPARISON.txt
+IMPLEMENTATION_PLAN.md
+SOLUTION_INDEX.md
+SOLUTION_README.md
+SOLUTION_SUMMARY.md
