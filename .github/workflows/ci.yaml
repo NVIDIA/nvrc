@@ -52,7 +52,8 @@ jobs:
 
           grep kernel_params /etc/kata-containers/configuration.toml
 
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
+
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1 || true)
           echo "$output"
 
           echo "$output" | grep -q "NVIDIA-SMI" || exit 1
@@ -70,7 +71,7 @@ jobs:
 
           grep kernel_params /etc/kata-containers/configuration.toml
 
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1 || true)
           echo "$output"
 
           echo "$output" | grep -q "NVIDIA-SMI" || exit 1
