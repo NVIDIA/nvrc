@@ -46,8 +46,8 @@ pub fn kmsg() -> File {
 
 /// Open a log file for reading daemon markers. Automatically selects the
 /// appropriate source based on current log level:
-/// - Debug or higher: /dev/kmsg (kernel message buffer)
-/// - Off: /run/syslog.log (file-based syslog sink)
+/// - Debug or higher (Debug/Trace): /dev/kmsg (kernel message buffer)
+/// - Below Debug (Info/Warn/Error/Off): /run/syslog.log (file-based syslog sink)
 ///
 /// For /dev/kmsg, seeks to end to skip boot history.
 /// Call *before* spawning a daemon to avoid missing its marker.
