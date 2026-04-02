@@ -99,9 +99,8 @@ fn poll_at(path: &Path) -> std::io::Result<()> {
 }
 
 /// Write syslog message to persistent file for daemon synchronization.
-/// Daemons like nvidia-persistenced signal readiness via syslog, but we can't
-/// rely on /dev/kmsg because it requires trace logging. File-based approach works
-/// regardless of log level and survives for post-mortem debugging.
+/// Daemons like nvidia-persistenced signal readiness via syslog. File-based
+/// approach works regardless of log level and survives for post-mortem debugging.
 fn forward_message(msg: &str) -> std::io::Result<()> {
     let logfile = LOGFILE.get_or_try_init(|| {
         OpenOptions::new()
@@ -118,7 +117,7 @@ fn forward_message(msg: &str) -> std::io::Result<()> {
     writeln!(file, "{}", msg)?;
     file.flush()?;
 
-    // Also forward to dmesg when debug logging is enabled (nvrc.log=debug)
+    // Also log when debug enabled - may appear in dmesg depending on logger config
     debug!("{}", msg);
 
     Ok(())
