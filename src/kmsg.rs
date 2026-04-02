@@ -86,20 +86,45 @@ pub fn open_kmsg(path: &str) -> BufReader<File> {
 pub fn wait_for_marker(reader: &mut BufReader<File>, marker: &str, timeout_secs: u32) {
     let deadline = Instant::now() + Duration::from_secs(timeout_secs as u64);
     let mut line = String::new();
+    let mut iterations = 0;
+
+    eprintln!(
+        "[wait_for_marker] Starting wait for: {}, timeout: {}s, log_level: {:?}",
+        marker,
+        timeout_secs,
+        log::max_level()
+    );
 
     loop {
         crate::syslog::try_poll();
         if Instant::now() > deadline {
+            eprintln!("[wait_for_marker] TIMEOUT after {} iterations", iterations);
             panic!("timeout waiting for: {marker}");
+        }
+        iterations += 1;
+        if iterations % 10 == 0 {
+            eprintln!(
+                "[wait_for_marker] Still waiting... iteration {}, elapsed: {}s",
+                iterations,
+                iterations / 2
+            );
         }
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => std::thread::sleep(Duration::from_millis(500)),
-            Ok(_) if line.contains(marker) => {
+            Ok(n) if line.contains(marker) => {
+                eprintln!(
+                    "[wait_for_marker] FOUND marker after {} iterations!",
+                    iterations
+                );
                 info!("{marker}");
                 return;
             }
-            Ok(_) => {}
+            Ok(n) => {
+                if iterations % 10 == 0 && n > 0 {
+                    eprintln!("[wait_for_marker] Read {} bytes: {}", n, line.trim());
+                }
+            }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(500));
             }
