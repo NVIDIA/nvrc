@@ -57,7 +57,8 @@ pub fn open_kmsg(path: &str) -> BufReader<File> {
 
     let file = OpenOptions::new()
         .read(true)
-        .create(true) // Create if doesn't exist
+        .write(true) // Needed for create()
+        .create(true)
         .custom_flags(libc::O_NONBLOCK)
         .open(log_path)
         .or_panic(format_args!("open {log_path}"));
