@@ -52,8 +52,8 @@ pub fn kmsg() -> File {
 /// For /dev/kmsg, seeks to end to skip boot history.
 /// Call *before* spawning a daemon to avoid missing its marker.
 pub fn open_kmsg(path: &str) -> BufReader<File> {
-    // Auto-select log source based on log level
-    let log_path = if path == "/dev/kmsg" && !log_enabled!(log::Level::Debug) {
+    // Auto-select log source based on log level (use max_level for consistency with syslog forwarding)
+    let log_path = if path == "/dev/kmsg" && log::max_level() < log::LevelFilter::Debug {
         crate::syslog::SYSLOG_FILE_PATH
     } else {
         path
