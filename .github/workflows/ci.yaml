@@ -52,8 +52,14 @@ jobs:
 
           grep kernel_params /etc/kata-containers/configuration.toml
 
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1 || true)
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
+          exit_code=$?
           echo "$output"
+
+          if [ "$exit_code" != "0" ]; then
+            echo "FAILED: nerdctl exited with $exit_code (expected 0)"
+            exit 1
+          fi
 
           echo "$output" | grep -q "NVIDIA-SMI" || exit 1
 
@@ -70,8 +76,14 @@ jobs:
 
           grep kernel_params /etc/kata-containers/configuration.toml
 
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1 || true)
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
+          exit_code=$?
           echo "$output"
+
+          if [ "$exit_code" != "0" ]; then
+            echo "FAILED: nerdctl exited with $exit_code (expected 0)"
+            exit 1
+          fi
 
           echo "$output" | grep -q "NVIDIA-SMI" || exit 1
 

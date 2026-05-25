@@ -47,13 +47,16 @@ fn kata_agent(path: &str) {
     exec_agent(path);
 }
 
-/// Guest VMs lack a syslog daemon, so we poll /dev/log to drain messages
-/// and forward them to kmsg. Timeout enables testing without infinite loops.
+/// Drains `/dev/log` (bound in `main()` before fork) into `/run/syslog.log`.
+///
+/// Uses `try_poll()` not `poll()`: this child inherits NVRC's power-off panic
+/// hook, and a transient drain I/O error must not reboot the VM while
+/// kata-agent is still running (kata exit 255).
 fn syslog_loop(timeout_secs: u32) {
     let iterations = (timeout_secs as u64) * 2; // 500ms per iteration
     for _ in 0..iterations {
         sleep(Duration::from_millis(500));
-        crate::syslog::poll();
+        crate::syslog::try_poll();
     }
 }
 
@@ -64,7 +67,7 @@ pub fn fork_agent(timeout_secs: u32) {
     // SAFETY: fork() is safe here because:
     // 1. We are PID 1 with no other threads (single-threaded process)
     // 2. Parent immediately execs kata-agent (no shared state issues)
-    // 3. Child only calls async-signal-safe functions (syslog::poll, sleep)
+    // 3. Child only calls async-signal-safe functions (syslog::try_poll, sleep)
     // 4. No locks or mutexes exist that could deadlock in child
     match unsafe { fork() }.expect("fork agent") {
         ForkResult::Parent { .. } => {
@@ -81,6 +84,7 @@ mod tests {
     use super::*;
     use crate::test_utils::require_root;
     use nix::sys::wait::{waitpid, WaitStatus};
+    use serial_test::serial;
     use std::panic;
 
     /// Install a panic hook that exits with code 1.
@@ -143,19 +147,61 @@ mod tests {
 
     #[test]
     fn test_syslog_loop_timeout() {
-        // syslog_loop with 1 second timeout runs up to 2 iterations (500ms each).
-        // Two possible outcomes:
-        // 1. poll() works: runs full 2 iterations (~1000ms)
-        // 2. poll() panics: test fails due to missing /dev/log
-        // We catch_unwind to handle missing /dev/log gracefully in test env
+        // ~1s: two 500ms iterations; try_poll() is best-effort on /dev/log.
         let start = std::time::Instant::now();
-        let _ = panic::catch_unwind(|| syslog_loop(1));
+        syslog_loop(1);
         let elapsed = start.elapsed();
 
         // Lower bound: at least 1 sleep cycle (500ms) runs before poll
         // Upper bound: 2 iterations + scheduling overhead = ~1200ms max
         assert!(elapsed.as_millis() >= 400);
         assert!(elapsed.as_millis() < 1500);
+    }
+
+    /// Regression: with the power-off hook installed, syslog_loop must not panic
+    /// on drain I/O (fork isolates from parallel tests). In-VM, `/dev/log` is
+    /// already bound by main(); this child does a fresh bind — on dev hosts
+    /// with a host syslog daemon, reverting to `poll()` reproduces via EADDRINUSE.
+    #[test]
+    #[serial]
+    fn test_syslog_loop_does_not_trigger_power_off_hook() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let saved_hook = panic::take_hook();
+
+        let triggered = Arc::new(AtomicBool::new(false));
+        let triggered_for_hook = triggered.clone();
+
+        crate::lockdown::set_panic_hook_with(move || {
+            triggered_for_hook.store(true, Ordering::SeqCst);
+        });
+
+        // SAFETY: child runs syslog_loop and exits; no shared state.
+        let fork_result = unsafe { fork() }.expect("fork");
+
+        match fork_result {
+            ForkResult::Parent { child } => {
+                let status = waitpid(child, None).expect("waitpid");
+                panic::set_hook(saved_hook);
+
+                assert_eq!(
+                    status,
+                    WaitStatus::Exited(child, 0),
+                    "syslog_loop must not fire the power-off hook on drain I/O \
+                     (kata exit 255 regression)"
+                );
+            }
+            ForkResult::Child => {
+                let loop_result = panic::catch_unwind(|| syslog_loop(1));
+
+                if triggered.load(Ordering::SeqCst) || loop_result.is_err() {
+                    std::process::exit(42);
+                } else {
+                    std::process::exit(0);
+                }
+            }
+        }
     }
 
     #[test]
