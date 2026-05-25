@@ -30,7 +30,6 @@ extern crate kernlog;
 
 use daemon::FABRIC_MODE_FULL;
 use daemon::FABRIC_MODE_SHARED;
-use kata_agent::SYSLOG_POLL_FOREVER as POLL_FOREVER;
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
 
@@ -110,5 +109,5 @@ fn main() {
     }
 
     lockdown::disable_modules_loading();
-    kata_agent::fork_agent(POLL_FOREVER);
+    kata_agent::fork_agent();
 }

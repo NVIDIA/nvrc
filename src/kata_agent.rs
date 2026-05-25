@@ -12,10 +12,6 @@ use std::time::Duration;
 
 const KATA_AGENT_PATH: &str = "/usr/bin/kata-agent";
 
-/// Syslog polling runs indefinitely in production—VM lifetime measured in hours/days,
-/// not the 136 years this represents. Using u32::MAX avoids overflow concerns.
-pub const SYSLOG_POLL_FOREVER: u32 = u32::MAX;
-
 /// OOM score adjustment for kata-agent. Value of -997 makes it nearly unkillable,
 /// ensuring VM stability even under memory pressure. Range is -1000 (never kill) to 1000 (always kill first).
 const KATA_AGENT_OOM_SCORE_ADJ: &str = "-997";
@@ -49,9 +45,10 @@ fn kata_agent(path: &str) {
 
 /// Drains `/dev/log` (bound in `main()` before fork) into `/run/syslog.log`.
 ///
-/// Uses `try_poll()` not `poll()`: this child inherits NVRC's power-off panic
-/// hook, and a transient drain I/O error must not reboot the VM while
-/// kata-agent is still running (kata exit 255).
+/// Uses `try_poll()` not `poll()`: keeps NVRC's power-off panic hook for real
+/// errors, but a transient drain I/O error must not reboot the VM while
+/// kata-agent is still running (kata exit 255). Used in unit tests only;
+/// production exits the fork child immediately (see `fork_agent`).
 fn syslog_loop(timeout_secs: u32) {
     let iterations = (timeout_secs as u64) * 2; // 500ms per iteration
     for _ in 0..iterations {
@@ -60,22 +57,24 @@ fn syslog_loop(timeout_secs: u32) {
     }
 }
 
-/// Parent execs kata-agent (becoming it), child stays as syslog poller.
-/// This way kata-agent inherits our PID and becomes the main guest process.
-/// Timeout parameter allows tests to verify the fork/syslog logic exits cleanly
-pub fn fork_agent(timeout_secs: u32) {
+/// Fork child exits after fork: kata-agent keeps `/dev/log` across exec.
+fn fork_agent_child_exit() {
+    crate::syslog::try_poll();
+    unsafe { libc::_exit(0) };
+}
+
+/// Parent execs kata-agent (becoming it); child exits so PID 1 has no stray
+/// poller at shutdown (nerdctl exit 255 / `ttrpc: closed` otherwise).
+pub fn fork_agent() {
     // SAFETY: fork() is safe here because:
     // 1. We are PID 1 with no other threads (single-threaded process)
     // 2. Parent immediately execs kata-agent (no shared state issues)
-    // 3. Child only calls async-signal-safe functions (syslog::try_poll, sleep)
-    // 4. No locks or mutexes exist that could deadlock in child
+    // 3. Child calls try_poll() then _exit(0) — no locks held across fork
     match unsafe { fork() }.expect("fork agent") {
         ForkResult::Parent { .. } => {
             kata_agent(KATA_AGENT_PATH);
         }
-        ForkResult::Child => {
-            syslog_loop(timeout_secs);
-        }
+        ForkResult::Child => fork_agent_child_exit(),
     }
 }
 
@@ -204,6 +203,21 @@ mod tests {
         }
     }
 
+    /// Regression: fork child must not outlive kata-agent (nerdctl `ttrpc: closed`).
+    #[test]
+    #[serial]
+    fn test_fork_agent_child_exits_immediately() {
+        match unsafe { fork() }.expect("fork") {
+            ForkResult::Parent { child } => {
+                assert_eq!(
+                    waitpid(child, None).expect("waitpid"),
+                    WaitStatus::Exited(child, 0)
+                );
+            }
+            ForkResult::Child => fork_agent_child_exit(),
+        }
+    }
+
     #[test]
     fn test_fork_agent_with_timeout() {
         require_root();
@@ -222,8 +236,8 @@ mod tests {
                 set_test_panic_hook();
                 // This child calls fork_agent, which forks again internally.
                 // - Inner parent (us): kata_agent() panics
-                // - Inner child: runs syslog_loop(1), exits after ~1 second
-                fork_agent(1);
+                // - Inner child: exits immediately via fork_agent_child_exit()
+                fork_agent();
                 std::process::exit(0); // Won't reach here due to panic
             }
         }
