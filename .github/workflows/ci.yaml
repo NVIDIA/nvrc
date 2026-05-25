@@ -15,6 +15,30 @@ on:
         required: false
         type: string
         default: ""
+  # Allow manual runs against an internal branch (no PR required).
+  # Inputs mirror workflow_call; commit-hash defaults to the dispatched ref.
+  workflow_dispatch:
+    inputs:
+      commit-hash:
+        description: "Commit SHA to test (defaults to dispatched ref)"
+        required: false
+        type: string
+        default: ""
+      pr-number:
+        description: "PR number (cosmetic for manual runs)"
+        required: false
+        type: string
+        default: "manual"
+      tag:
+        description: "Tag suffix for build artifacts"
+        required: false
+        type: string
+        default: "manual"
+      target-branch:
+        description: "Base branch (cosmetic for manual runs)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -27,7 +51,9 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ inputs.commit-hash }}
+          # workflow_call always passes commit-hash; workflow_dispatch may
+          # leave it empty, in which case fall back to the dispatched ref.
+          ref: ${{ inputs.commit-hash != '' && inputs.commit-hash || github.sha }}
           fetch-depth: 0 # This is needed in order to keep the commit ids history
           persist-credentials: false
       - name: Install Rust toolchain
@@ -45,6 +71,8 @@ jobs:
           script -fec "sudo -E AGENT_INIT=no USE_DOCKER=true ./image_builder.sh \"${ROOTFS_IMAGE_DIR}\""
       - name: Test WITH nvrc.log=trace (baseline)
         run: |
+          set -euo pipefail
+
           if ! grep -q "nvrc.log=trace" /etc/kata-containers/configuration.toml; then
             echo "Adding nvrc.log=trace to configuration.toml"
             sudo sed -i 's/kernel_params = "/kernel_params = "nvrc.log=trace /' /etc/kata-containers/configuration.toml
@@ -52,16 +80,31 @@ jobs:
 
           grep kernel_params /etc/kata-containers/configuration.toml
 
+          # Capture nerdctl output and exit code without aborting under bash -e.
+          set +e
           output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
           exit_code=$?
-          echo "$output"
+          set -e
 
-          if [ "$exit_code" != "0" ]; then
+          echo "=== nerdctl output ==="
+          echo "$output"
+          echo "=== nerdctl exit code: $exit_code ==="
+
+          if [ "$exit_code" -ne 0 ]; then
             echo "FAILED: nerdctl exited with $exit_code (expected 0)"
             exit 1
           fi
 
-          echo "$output" | grep -q "NVIDIA-SMI" || exit 1
+          if echo "$output" | grep -qE 'ttrpc: closed|level=fatal'; then
+            echo "FAILED: kata-runtime fatal error in nerdctl output:"
+            echo "$output" | grep -E 'ttrpc: closed|level=fatal'
+            exit 1
+          fi
+
+          if ! echo "$output" | grep -q "NVIDIA-SMI"; then
+            echo "ERROR: nvidia-smi did not produce expected NVIDIA-SMI banner"
+            exit 1
+          fi
 
           if ! echo "$output" | grep -q "NVRC"; then
             echo "ERROR: nvrc.log=trace set but no NVRC logs in VM dmesg"
@@ -72,20 +115,36 @@ jobs:
 
       - name: Test WITHOUT nvrc.log=trace (regression test)
         run: |
+          set -euo pipefail
+
           sudo sed -i 's/nvrc.log=trace *//' /etc/kata-containers/configuration.toml
 
           grep kernel_params /etc/kata-containers/configuration.toml
 
+          set +e
           output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
           exit_code=$?
-          echo "$output"
+          set -e
 
-          if [ "$exit_code" != "0" ]; then
+          echo "=== nerdctl output ==="
+          echo "$output"
+          echo "=== nerdctl exit code: $exit_code ==="
+
+          if [ "$exit_code" -ne 0 ]; then
             echo "FAILED: nerdctl exited with $exit_code (expected 0)"
             exit 1
           fi
 
-          echo "$output" | grep -q "NVIDIA-SMI" || exit 1
+          if echo "$output" | grep -qE 'ttrpc: closed|level=fatal'; then
+            echo "FAILED: kata-runtime fatal error in nerdctl output:"
+            echo "$output" | grep -E 'ttrpc: closed|level=fatal'
+            exit 1
+          fi
+
+          if ! echo "$output" | grep -q "NVIDIA-SMI"; then
+            echo "ERROR: nvidia-smi did not produce expected NVIDIA-SMI banner"
+            exit 1
+          fi
 
           if echo "$output" | grep -q "NVRC"; then
             echo "ERROR: Found NVRC logs without nvrc.log=trace!"
