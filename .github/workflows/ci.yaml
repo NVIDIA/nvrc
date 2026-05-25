@@ -63,12 +63,51 @@ jobs:
           targets: aarch64-unknown-linux-musl
       - name: Build NVRC
         run: |
+          set -euo pipefail
+
+          build_bin=./target/aarch64-unknown-linux-musl/release/NVRC
+          rootfs_bin="$ROOTFS_IMAGE_DIR/bin/NVRC-aarch64-unknown-linux-musl"
+          expected_sha_file="$RUNNER_TEMP/nvrc.expected.sha256"
+
           cargo build --release --target=aarch64-unknown-linux-musl
-          sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC "$ROOTFS_IMAGE_DIR/bin/NVRC-aarch64-unknown-linux-musl"
+
+          build_sha=$(sha256sum "$build_bin" | awk '{print $1}')
+          build_size=$(stat -c%s "$build_bin")
+          echo "Built NVRC sha256=${build_sha} size=${build_size}"
+          echo "$build_sha" > "$expected_sha_file"
+
+          sudo cp "$build_bin" "$rootfs_bin"
+
+          rootfs_sha=$(sudo sha256sum "$rootfs_bin" | awk '{print $1}')
+          rootfs_size=$(sudo stat -c%s "$rootfs_bin")
+          echo "Rootfs NVRC sha256=${rootfs_sha} size=${rootfs_size}"
+
+          if [ "$build_sha" != "$rootfs_sha" ]; then
+            echo "FAILED: rootfs NVRC hash does not match built NVRC"
+            exit 1
+          fi
       - name: Create Image with NVRC
         run: |
+          set -euo pipefail
           cd "${IMAGE_BUILDER_DIR}"
           script -fec "sudo -E AGENT_INIT=no USE_DOCKER=true ./image_builder.sh \"${ROOTFS_IMAGE_DIR}\""
+      - name: Verify packaged NVRC hash
+        run: |
+          set -euo pipefail
+
+          rootfs_bin="$ROOTFS_IMAGE_DIR/bin/NVRC-aarch64-unknown-linux-musl"
+          expected_sha_file="$RUNNER_TEMP/nvrc.expected.sha256"
+
+          expected_sha=$(cat "$expected_sha_file")
+          packaged_sha=$(sudo sha256sum "$rootfs_bin" | awk '{print $1}')
+          packaged_size=$(sudo stat -c%s "$rootfs_bin")
+          echo "Expected NVRC sha256=${expected_sha}"
+          echo "Packaged NVRC sha256=${packaged_sha} size=${packaged_size}"
+
+          if [ "$expected_sha" != "$packaged_sha" ]; then
+            echo "FAILED: packaged NVRC hash drifted from built NVRC"
+            exit 1
+          fi
       - name: Test WITH nvrc.log=trace (baseline)
         run: |
           set -euo pipefail
