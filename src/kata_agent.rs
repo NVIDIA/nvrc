@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use log::debug;
+use log::{debug, info, warn};
 use nix::errno::Errno;
 use nix::sched::{unshare, CloneFlags};
 use nix::sys::reboot::{reboot, RebootMode};
@@ -47,6 +47,16 @@ fn kata_agent(path: &str) {
     exec_agent(path);
 }
 
+fn current_nspid() -> String {
+    let status = fs::read_to_string("/proc/self/status")
+        .unwrap_or_else(|e| format!("failed to read /proc/self/status: {e}"));
+    status
+        .lines()
+        .find(|line| line.starts_with("NSpid:"))
+        .map(|line| line.trim().to_string())
+        .unwrap_or_else(|| "NSpid: unavailable".to_string())
+}
+
 /// Run kata-agent in a child PID namespace and own the VM power-off.
 ///
 /// NVRC remains PID 1 in the initial PID namespace. The forked child enters a
@@ -64,16 +74,21 @@ fn kata_agent(path: &str) {
 /// This hands the reboot policy to NVRC without requiring kata-agent changes.
 /// kata-agent still believes it owns shutdown; NVRC owns the hardware power-off.
 pub fn run_supervised_agent() -> ! {
-    debug!(
-        "supervise: about to unshare CLONE_NEWPID (pid={})",
-        nix::unistd::getpid()
+    info!(
+        "supervise: start (pid={}, {})",
+        nix::unistd::getpid(),
+        current_nspid()
     );
 
     // Future fork()s land the child in a new PID namespace as pid 1.
     // The calling process (NVRC) stays in the initial namespace.
     unshare(CloneFlags::CLONE_NEWPID).expect("unshare CLONE_NEWPID");
 
-    debug!("supervise: unshare ok, forking");
+    info!(
+        "supervise: unshare CLONE_NEWPID ok (pid={}, {})",
+        nix::unistd::getpid(),
+        current_nspid()
+    );
 
     // SAFETY: NVRC is PID 1 and single-threaded at this point. The child only
     // calls exec() (async-signal-safe). The parent runs a non-blocking
@@ -82,19 +97,22 @@ pub fn run_supervised_agent() -> ! {
         ForkResult::Child => {
             // Inside the child PID namespace `getpid()` returns 1. Logging it
             // here gives us proof in dmesg that the namespace handoff worked.
-            debug!(
-                "supervise(child): in-ns pid={} — exec kata-agent",
-                nix::unistd::getpid()
+            info!(
+                "supervise(child): before exec pid={} {}",
+                nix::unistd::getpid(),
+                current_nspid()
             );
             kata_agent(KATA_AGENT_PATH);
             // exec failed; surface a non-zero exit so NVRC still powers off.
+            warn!("supervise(child): exec kata-agent failed, exiting with code 1");
             unsafe { libc::_exit(1) };
         }
         ForkResult::Parent { child } => {
-            debug!(
-                "supervise(parent): pid={} child={} — waiting",
+            info!(
+                "supervise(parent): pid={} child={} {} - waiting",
                 nix::unistd::getpid(),
-                child
+                child,
+                current_nspid()
             );
             wait_for_agent(child);
             power_off();
@@ -106,14 +124,29 @@ pub fn run_supervised_agent() -> ! {
 /// Polls with `WNOHANG` so the syslog drain keeps running at the same
 /// 500ms cadence as the previous `syslog_loop`.
 fn wait_for_agent(agent: Pid) {
+    let mut loops = 0u32;
     loop {
+        loops = loops.wrapping_add(1);
         // Best-effort drain so /run/syslog.log captures post-fork messages.
         // try_poll silently absorbs transient I/O errors.
         crate::syslog::try_poll();
 
         match waitpid(agent, Some(WaitPidFlag::WNOHANG)) {
             Ok(WaitStatus::StillAlive) => sleep(Duration::from_millis(500)),
-            Ok(WaitStatus::Exited(_, _)) | Ok(WaitStatus::Signaled(_, _, _)) => return,
+            Ok(WaitStatus::Exited(pid, code)) => {
+                info!(
+                    "supervise(parent): child {} exited code={} after {} loops",
+                    pid, code, loops
+                );
+                return;
+            }
+            Ok(WaitStatus::Signaled(pid, sig, core_dumped)) => {
+                warn!(
+                    "supervise(parent): child {} signaled sig={} core_dumped={} after {} loops",
+                    pid, sig, core_dumped, loops
+                );
+                return;
+            }
             Ok(_) => continue,
             Err(Errno::EINTR) => continue,
             Err(e) => panic!("waitpid kata-agent: {e}"),
