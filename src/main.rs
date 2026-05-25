@@ -30,7 +30,6 @@ extern crate kernlog;
 
 use daemon::FABRIC_MODE_FULL;
 use daemon::FABRIC_MODE_SHARED;
-use kata_agent::SYSLOG_POLL_FOREVER as POLL_FOREVER;
 use nvrc::NVRC;
 use toolkit::nvidia_ctk_cdi;
 
@@ -110,5 +109,7 @@ fn main() {
     }
 
     lockdown::disable_modules_loading();
-    kata_agent::fork_agent(POLL_FOREVER);
+    // NVRC stays as PID 1; kata-agent runs in a child PID namespace and the
+    // hardware power-off is performed by NVRC after kata-agent exits.
+    kata_agent::run_supervised_agent();
 }

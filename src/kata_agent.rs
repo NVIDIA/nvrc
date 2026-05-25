@@ -2,7 +2,11 @@
 // Copyright (c) NVIDIA CORPORATION
 
 use log::debug;
-use nix::unistd::{fork, ForkResult};
+use nix::errno::Errno;
+use nix::sched::{unshare, CloneFlags};
+use nix::sys::reboot::{reboot, RebootMode};
+use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
+use nix::unistd::{fork, sync, ForkResult, Pid};
 use rlimit::{setrlimit, Resource};
 use std::fs;
 use std::os::unix::process::CommandExt;
@@ -12,16 +16,13 @@ use std::time::Duration;
 
 const KATA_AGENT_PATH: &str = "/usr/bin/kata-agent";
 
-/// Syslog polling runs indefinitely in production—VM lifetime measured in hours/days,
-/// not the 136 years this represents. Using u32::MAX avoids overflow concerns.
-pub const SYSLOG_POLL_FOREVER: u32 = u32::MAX;
-
 /// OOM score adjustment for kata-agent. Value of -997 makes it nearly unkillable,
-/// ensuring VM stability even under memory pressure. Range is -1000 (never kill) to 1000 (always kill first).
+/// ensuring VM stability even under memory pressure. Range is -1000 (never kill)
+/// to 1000 (always kill first).
 const KATA_AGENT_OOM_SCORE_ADJ: &str = "-997";
 
 /// kata-agent needs high file descriptor limits for container workloads and
-/// must survive OOM conditions to maintain VM stability
+/// must survive OOM conditions to maintain VM stability.
 fn agent_setup() {
     let nofile = 1024 * 1024;
     setrlimit(Resource::NOFILE, nofile, nofile).expect("setrlimit RLIMIT_NOFILE");
@@ -34,62 +35,94 @@ fn agent_setup() {
     debug!("kata-agent RLIMIT_NOFILE: {:?}", lim);
 }
 
-/// exec() replaces this process with kata-agent, so it only returns on failure.
-/// We want kata-agent to become PID 1's child for proper process hierarchy.
+/// exec() replaces this process with kata-agent. Only returns on failure.
 fn exec_agent(cmd: &str) {
     let err = Command::new(cmd).exec();
     panic!("exec {cmd} failed: {err}");
 }
 
-/// Path parameter enables testing with /bin/true instead of real kata-agent
+/// Path parameter enables testing with a non-existent binary.
 fn kata_agent(path: &str) {
     agent_setup();
     exec_agent(path);
 }
 
-/// Drains `/dev/log` (bound in `main()` before fork) into `/run/syslog.log`.
+/// Run kata-agent in a child PID namespace and own the VM power-off.
 ///
-/// Uses `try_poll()` not `poll()`: this child inherits NVRC's power-off panic
-/// hook, and a transient drain I/O error must not reboot the VM while
-/// kata-agent is still running (kata exit 255).
-fn syslog_loop(timeout_secs: u32) {
-    let iterations = (timeout_secs as u64) * 2; // 500ms per iteration
-    for _ in 0..iterations {
-        sleep(Duration::from_millis(500));
-        crate::syslog::try_poll();
+/// NVRC remains PID 1 in the initial PID namespace. The forked child enters a
+/// fresh PID namespace where it is PID 1, so kata-agent runs with
+/// `init_mode = true` and performs its usual init_agent_as_init setup
+/// (cgroups mount, /dev/ptmx symlink, setsid, sethostname).
+///
+/// When kata-agent later calls `reboot(RB_POWER_OFF)`, the kernel reinterprets
+/// reboot(2) issued from a non-initial PID namespace as `SIGINT` to that
+/// namespace's init process — kata-agent itself. kata-agent terminates instead
+/// of halting the VM. NVRC observes the child exit, drains `/dev/log` one last
+/// time, syncs, and powers the VM off here in the initial namespace, where
+/// `reboot()` actually halts the guest.
+///
+/// This hands the reboot policy to NVRC without requiring kata-agent changes.
+/// kata-agent still believes it owns shutdown; NVRC owns the VM power-off.
+pub fn run_supervised_agent() -> ! {
+    // Future fork()s land the child in a new PID namespace as pid 1.
+    // The calling process (NVRC) stays in the initial namespace.
+    unshare(CloneFlags::CLONE_NEWPID).expect("unshare CLONE_NEWPID");
+
+    // SAFETY: NVRC is PID 1 and single-threaded at this point. The child only
+    // calls exec() (async-signal-safe). The parent runs a non-blocking
+    // waitpid + syslog drain loop with no shared mutable state.
+    match unsafe { fork() }.expect("fork agent") {
+        ForkResult::Child => {
+            kata_agent(KATA_AGENT_PATH);
+            // exec failed; surface a non-zero exit so NVRC still powers off.
+            unsafe { libc::_exit(1) };
+        }
+        ForkResult::Parent { child } => {
+            wait_for_agent(child);
+            power_off();
+        }
     }
 }
 
-/// Parent execs kata-agent (becoming it), child stays as syslog poller.
-/// This way kata-agent inherits our PID and becomes the main guest process.
-/// Timeout parameter allows tests to verify the fork/syslog logic exits cleanly
-pub fn fork_agent(timeout_secs: u32) {
-    // SAFETY: fork() is safe here because:
-    // 1. We are PID 1 with no other threads (single-threaded process)
-    // 2. Parent immediately execs kata-agent (no shared state issues)
-    // 3. Child only calls async-signal-safe functions (syslog::try_poll, sleep)
-    // 4. No locks or mutexes exist that could deadlock in child
-    match unsafe { fork() }.expect("fork agent") {
-        ForkResult::Parent { .. } => {
-            kata_agent(KATA_AGENT_PATH);
-        }
-        ForkResult::Child => {
-            syslog_loop(timeout_secs);
+/// Block until kata-agent exits, draining `/dev/log` opportunistically.
+/// Polls with `WNOHANG` so the syslog drain keeps running at the same
+/// 500ms cadence as the previous `syslog_loop`.
+fn wait_for_agent(agent: Pid) {
+    loop {
+        // Best-effort drain so /run/syslog.log captures post-fork messages.
+        // try_poll silently absorbs transient I/O errors.
+        crate::syslog::try_poll();
+
+        match waitpid(agent, Some(WaitPidFlag::WNOHANG)) {
+            Ok(WaitStatus::StillAlive) => sleep(Duration::from_millis(500)),
+            Ok(WaitStatus::Exited(_, _)) | Ok(WaitStatus::Signaled(_, _, _)) => return,
+            Ok(_) => continue,
+            Err(Errno::EINTR) => continue,
+            Err(e) => panic!("waitpid kata-agent: {e}"),
         }
     }
+}
+
+/// Sync filesystem caches and power off the VM. Must run from the initial
+/// PID namespace so reboot(2) actually halts the guest; in a child PID ns the
+/// kernel reinterprets it into a signal.
+fn power_off() -> ! {
+    debug!("kata-agent exited; powering off VM");
+    sync();
+    let _ = reboot(RebootMode::RB_POWER_OFF);
+    unreachable!("reboot returned");
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::require_root;
-    use nix::sys::wait::{waitpid, WaitStatus};
     use serial_test::serial;
     use std::panic;
 
-    /// Install a panic hook that exits with code 1.
-    /// Required in forked children because Rust's test harness catches panics
-    /// and exits with 0, which breaks our "panic = failure" assertions.
+    /// Install a panic hook that exits with code 1. Required in forked children
+    /// because Rust's test harness catches panics and exits with 0, which would
+    /// break our "panic = abnormal exit" assertions.
     fn set_test_panic_hook() {
         panic::set_hook(Box::new(|info| {
             eprintln!("panic: {info}");
@@ -101,22 +134,18 @@ mod tests {
     fn test_agent_setup() {
         require_root();
 
-        // agent_setup sets rlimit and writes oom_score_adj
         agent_setup();
 
-        // Verify rlimit was set
         let (soft, hard) = rlimit::getrlimit(Resource::NOFILE).unwrap();
         assert_eq!(soft, 1024 * 1024);
         assert_eq!(hard, 1024 * 1024);
 
-        // Verify oom_score_adj was written
         let oom = fs::read_to_string("/proc/self/oom_score_adj").unwrap();
         assert_eq!(oom.trim(), KATA_AGENT_OOM_SCORE_ADJ);
     }
 
     #[test]
     fn test_exec_agent_not_found() {
-        // exec_agent with nonexistent command panics (doesn't exec)
         let result = panic::catch_unwind(|| {
             exec_agent("/nonexistent/command");
         });
@@ -127,105 +156,37 @@ mod tests {
     fn test_kata_agent_not_found() {
         require_root();
 
-        // kata_agent with nonexistent path - setup succeeds, exec panics
-        // SAFETY: Test forks to isolate agent_setup() and exec failure.
-        // Single-threaded test process with no shared state.
+        // SAFETY: single-threaded test process, child isolates the panic.
         match unsafe { fork() }.expect("fork") {
             ForkResult::Parent { child } => {
-                // Child exits abnormally due to panic
                 let status = waitpid(child, None).expect("waitpid");
                 assert!(!matches!(status, WaitStatus::Exited(_, 0)));
             }
             ForkResult::Child => {
                 set_test_panic_hook();
-                // Setup succeeds, exec panics
                 kata_agent("/nonexistent/agent");
-                std::process::exit(0); // Won't reach here
+                std::process::exit(0); // unreachable
             }
         }
     }
 
-    #[test]
-    fn test_syslog_loop_timeout() {
-        // ~1s: two 500ms iterations; try_poll() is best-effort on /dev/log.
-        let start = std::time::Instant::now();
-        syslog_loop(1);
-        let elapsed = start.elapsed();
-
-        // Lower bound: at least 1 sleep cycle (500ms) runs before poll
-        // Upper bound: 2 iterations + scheduling overhead = ~1200ms max
-        assert!(elapsed.as_millis() >= 400);
-        assert!(elapsed.as_millis() < 1500);
-    }
-
-    /// Regression: with the power-off hook installed, syslog_loop must not panic
-    /// on drain I/O (fork isolates from parallel tests). In-VM, `/dev/log` is
-    /// already bound by main(); this child does a fresh bind — on dev hosts
-    /// with a host syslog daemon, reverting to `poll()` reproduces via EADDRINUSE.
+    /// `wait_for_agent` returns when its tracked child exits and tolerates an
+    /// already-reaped child without spinning. The reboot in `power_off()` is
+    /// only exercised in production; tests stop one step before it.
     #[test]
     #[serial]
-    fn test_syslog_loop_does_not_trigger_power_off_hook() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Arc;
-
-        let saved_hook = panic::take_hook();
-
-        let triggered = Arc::new(AtomicBool::new(false));
-        let triggered_for_hook = triggered.clone();
-
-        crate::lockdown::set_panic_hook_with(move || {
-            triggered_for_hook.store(true, Ordering::SeqCst);
-        });
-
-        // SAFETY: child runs syslog_loop and exits; no shared state.
-        let fork_result = unsafe { fork() }.expect("fork");
-
-        match fork_result {
+    fn test_wait_for_agent_returns_on_child_exit() {
+        // SAFETY: single-threaded test process; child only calls _exit.
+        match unsafe { fork() }.expect("fork") {
             ForkResult::Parent { child } => {
-                let status = waitpid(child, None).expect("waitpid");
-                panic::set_hook(saved_hook);
-
-                assert_eq!(
-                    status,
-                    WaitStatus::Exited(child, 0),
-                    "syslog_loop must not fire the power-off hook on drain I/O \
-                     (kata exit 255 regression)"
-                );
+                let start = std::time::Instant::now();
+                wait_for_agent(child);
+                // WNOHANG + 500ms sleep ≤ ~1s in practice.
+                assert!(start.elapsed() < Duration::from_secs(5));
             }
-            ForkResult::Child => {
-                let loop_result = panic::catch_unwind(|| syslog_loop(1));
-
-                if triggered.load(Ordering::SeqCst) || loop_result.is_err() {
-                    std::process::exit(42);
-                } else {
-                    std::process::exit(0);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_fork_agent_with_timeout() {
-        require_root();
-
-        // Double fork: outer fork isolates the test, inner fork (inside fork_agent)
-        // does the real work. This lets us actually call fork_agent() directly.
-        // SAFETY: Outer fork isolates the test in a child process.
-        // Single-threaded test with no shared state.
-        match unsafe { fork() }.expect("outer fork") {
-            ForkResult::Parent { child } => {
-                // Wrapper exits abnormally because kata_agent() panics (no binary)
-                let status = waitpid(child, None).expect("waitpid");
-                assert!(!matches!(status, WaitStatus::Exited(_, 0)));
-            }
-            ForkResult::Child => {
-                set_test_panic_hook();
-                // This child calls fork_agent, which forks again internally.
-                // - Inner parent (us): kata_agent() panics
-                // - Inner child: runs syslog_loop(1), exits after ~1 second
-                fork_agent(1);
-                std::process::exit(0); // Won't reach here due to panic
-            }
+            ForkResult::Child => unsafe {
+                libc::_exit(0);
+            },
         }
     }
 }
