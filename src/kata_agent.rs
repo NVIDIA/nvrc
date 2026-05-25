@@ -62,22 +62,40 @@ fn kata_agent(path: &str) {
 /// `reboot()` actually halts the guest.
 ///
 /// This hands the reboot policy to NVRC without requiring kata-agent changes.
-/// kata-agent still believes it owns shutdown; NVRC owns the VM power-off.
+/// kata-agent still believes it owns shutdown; NVRC owns the hardware power-off.
 pub fn run_supervised_agent() -> ! {
+    debug!(
+        "supervise: about to unshare CLONE_NEWPID (pid={})",
+        nix::unistd::getpid()
+    );
+
     // Future fork()s land the child in a new PID namespace as pid 1.
     // The calling process (NVRC) stays in the initial namespace.
     unshare(CloneFlags::CLONE_NEWPID).expect("unshare CLONE_NEWPID");
+
+    debug!("supervise: unshare ok, forking");
 
     // SAFETY: NVRC is PID 1 and single-threaded at this point. The child only
     // calls exec() (async-signal-safe). The parent runs a non-blocking
     // waitpid + syslog drain loop with no shared mutable state.
     match unsafe { fork() }.expect("fork agent") {
         ForkResult::Child => {
+            // Inside the child PID namespace `getpid()` returns 1. Logging it
+            // here gives us proof in dmesg that the namespace handoff worked.
+            debug!(
+                "supervise(child): in-ns pid={} — exec kata-agent",
+                nix::unistd::getpid()
+            );
             kata_agent(KATA_AGENT_PATH);
             // exec failed; surface a non-zero exit so NVRC still powers off.
             unsafe { libc::_exit(1) };
         }
         ForkResult::Parent { child } => {
+            debug!(
+                "supervise(parent): pid={} child={} — waiting",
+                nix::unistd::getpid(),
+                child
+            );
             wait_for_agent(child);
             power_off();
         }
@@ -107,7 +125,10 @@ fn wait_for_agent(agent: Pid) {
 /// PID namespace so reboot(2) actually halts the guest; in a child PID ns the
 /// kernel reinterprets it into a signal.
 fn power_off() -> ! {
-    debug!("kata-agent exited; powering off VM");
+    debug!(
+        "supervise(parent): kata-agent exited; powering off VM (pid={})",
+        nix::unistd::getpid()
+    );
     sync();
     let _ = reboot(RebootMode::RB_POWER_OFF);
     unreachable!("reboot returned");
