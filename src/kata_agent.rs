@@ -21,6 +21,10 @@ const KATA_AGENT_PATH: &str = "/usr/bin/kata-agent";
 /// to 1000 (always kill first).
 const KATA_AGENT_OOM_SCORE_ADJ: &str = "-997";
 
+/// Grace period between kata-agent exit and final VM power-off.
+/// Gives host-side shim/ttrpc teardown a short window to complete cleanly.
+const SHUTDOWN_GRACE_MS: u64 = 1500;
+
 /// kata-agent needs high file descriptor limits for container workloads and
 /// must survive OOM conditions to maintain VM stability.
 fn agent_setup() {
@@ -158,8 +162,20 @@ fn wait_for_agent(agent: Pid) {
 /// PID namespace so reboot(2) actually halts the guest; in a child PID ns the
 /// kernel reinterprets it into a signal.
 fn power_off() -> ! {
+    info!(
+        "supervise(parent): child exited; waiting {}ms before VM power-off",
+        SHUTDOWN_GRACE_MS
+    );
+
+    let grace_step_ms = 100u64;
+    let loops = SHUTDOWN_GRACE_MS / grace_step_ms;
+    for _ in 0..loops {
+        crate::syslog::try_poll();
+        sleep(Duration::from_millis(grace_step_ms));
+    }
+
     debug!(
-        "supervise(parent): kata-agent exited; powering off VM (pid={})",
+        "supervise(parent): grace elapsed; powering off VM (pid={})",
         nix::unistd::getpid()
     );
     sync();
