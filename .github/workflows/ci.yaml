@@ -15,6 +15,30 @@ on:
         required: false
         type: string
         default: ""
+  # Allow manual runs against an internal branch (no PR required).
+  # Inputs mirror workflow_call; commit-hash defaults to the dispatched ref.
+  workflow_dispatch:
+    inputs:
+      commit-hash:
+        description: "Commit SHA to test (defaults to dispatched ref)"
+        required: false
+        type: string
+        default: ""
+      pr-number:
+        description: "PR number (cosmetic for manual runs)"
+        required: false
+        type: string
+        default: "manual"
+      tag:
+        description: "Tag suffix for build artifacts"
+        required: false
+        type: string
+        default: "manual"
+      target-branch:
+        description: "Base branch (cosmetic for manual runs)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -27,7 +51,9 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ inputs.commit-hash }}
+          # workflow_call always passes commit-hash; workflow_dispatch may
+          # leave it empty, in which case fall back to the dispatched ref.
+          ref: ${{ inputs.commit-hash != '' && inputs.commit-hash || github.sha }}
           fetch-depth: 0 # This is needed in order to keep the commit ids history
           persist-credentials: false
       - name: Install Rust toolchain
