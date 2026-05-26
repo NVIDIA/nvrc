@@ -178,12 +178,12 @@ mod tests {
         let tmpfile = NamedTempFile::new().unwrap();
         let path = tmpfile.path().to_str().unwrap();
 
-        // Values with '=' in them (e.g. base64 encoded) should be preserved
+        // Values with '=' in them (e.g. base64-encoded) should be preserved
         fs::write(path, "TOKEN=abc=def==\n").unwrap();
 
         update_config_file(path, &[("TOKEN", "xyz=123==")]);
 
         let content = fs::read_to_string(path).unwrap();
-        assert!(content.contains("TOKEN=xyz=123=="));
+        assert_eq!(content, "TOKEN=xyz=123==\n");
     }
 }
