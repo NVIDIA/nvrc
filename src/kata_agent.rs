@@ -20,6 +20,10 @@ pub const SYSLOG_POLL_FOREVER: u32 = u32::MAX;
 /// ensuring VM stability even under memory pressure. Range is -1000 (never kill) to 1000 (always kill first).
 const KATA_AGENT_OOM_SCORE_ADJ: &str = "-997";
 
+/// When set, kata-agent exits cleanly in init mode without issuing
+/// reboot(RB_POWER_OFF); NVRC performs the final power-off.
+const KATA_AGENT_NO_REBOOT_ENV: &str = "KATA_AGENT_NO_REBOOT";
+
 /// kata-agent needs high file descriptor limits for container workloads and
 /// must survive OOM conditions to maintain VM stability
 fn agent_setup() {
@@ -37,7 +41,9 @@ fn agent_setup() {
 /// exec() replaces this process with kata-agent, so it only returns on failure.
 /// We want kata-agent to become PID 1's child for proper process hierarchy.
 fn exec_agent(cmd: &str) {
-    let err = Command::new(cmd).exec();
+    let err = Command::new(cmd)
+        .env(KATA_AGENT_NO_REBOOT_ENV, "1")
+        .exec();
     panic!("exec {cmd} failed: {err}");
 }
 
