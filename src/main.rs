@@ -4,6 +4,7 @@
 mod config;
 mod daemon;
 mod execute;
+mod hash;
 mod infiniband;
 mod kata_agent;
 mod kernel_params;
@@ -99,6 +100,7 @@ fn main() {
     kmsg::kernlog_setup();
     syslog::poll();
     init.process_kernel_params(None);
+    hash::self_exe();
 
     let detected = mode::detect();
     match detected.mode {
