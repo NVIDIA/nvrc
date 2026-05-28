@@ -80,3 +80,9 @@ processes, and sockets.
 5. **Minimize Rust Crates**: Suggest smaller crates rather then  pulling in huge
    crates like nix
 6. **KISS**: Minimize the cyclomatic complexity, keep code simple and stupid
+7. **Self-describing code**: Names carry the WHAT so comments can focus on the
+   WHY. If you reach for a comment to explain what a function, type, or
+   variable does, rename it instead. Reserve comments for non-obvious WHY:
+   hidden constraints, subtle invariants, source citations for magic constants
+   (e.g. NIST test vectors), or workarounds for specific bugs. Don't restate
+   what well-named code already says.
