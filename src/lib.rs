@@ -9,6 +9,7 @@
 pub mod config;
 pub mod daemon;
 pub mod execute;
+pub mod hash;
 pub mod kata_agent;
 pub mod kernel_params;
 pub mod kmsg;
