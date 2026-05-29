@@ -30,7 +30,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const GIT_REV: Option<&str> = option_env!("GIT_REV");
 
 pub fn self_exe() {
-    debug!("{}", version_line());
+    info!("{}", version_line());
 }
 
 pub fn version_line() -> String {
