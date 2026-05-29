@@ -1,0 +1,217 @@
+name: Update kata-containers on the runner
+
+# Refreshes the kata-containers install and source tree the self-hosted
+# runner uses to execute the NVRC CI (see .github/workflows/ci.yaml).
+#
+# For a given kata-containers release tag this workflow:
+#   * checks out the matching kata-containers source at
+#     ${KATA_SRC_DIR} (where ci.yaml expects tools/osbuilder & build/);
+#   * rebuilds rootfs-image-nvidia-gpu so ${ROOTFS_IMAGE_DIR} contains a
+#     kata-agent matching the release;
+#   * installs the kata-static-<tag>-arm64.tar.xz payload to /opt/kata
+#     (the previous install is moved aside, not deleted).
+#
+# /etc/kata-containers/configuration.toml is intentionally NOT touched:
+#   ci.yaml mutates kernel_params at runtime and the file carries
+#   runner-local NVRC settings. The new release defaults stay available
+#   under /opt/kata/share/defaults/kata-containers/ for manual review.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kata-tag:
+        description: "kata-containers release tag (e.g. 3.20.0). Leave empty for the latest release."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-kata-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  KATA_REPO: kata-containers/kata-containers
+  KATA_SRC_DIR: /home/ubuntu/actions-runner/_work/kata-containers
+  KATA_INSTALL_PREFIX: /opt/kata
+  ROOTFS_IMAGE_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-image-nvidia-gpu/builddir/rootfs-image/ubuntu_rootfs
+  IMAGE_BUILDER_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/image-builder
+
+jobs:
+  update:
+    runs-on: g5g.metal
+    steps:
+      - name: Resolve release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_TAG: ${{ inputs.kata-tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${REQUESTED_TAG}" || "${REQUESTED_TAG}" == "latest" ]]; then
+            tag=$(gh release view --repo "${KATA_REPO}" --json tagName --jq '.tagName')
+            echo "Resolved 'latest' -> ${tag}"
+          else
+            if ! gh release view "${REQUESTED_TAG}" --repo "${KATA_REPO}" >/dev/null 2>&1; then
+              echo "ERROR: release '${REQUESTED_TAG}' not found in ${KATA_REPO}" >&2
+              exit 1
+            fi
+            tag="${REQUESTED_TAG}"
+          fi
+
+          if [[ -z "${tag}" ]]; then
+            echo "ERROR: could not resolve a tag" >&2
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sync kata-containers source tree to ${{ steps.tag.outputs.tag }}
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          parent=$(dirname "${KATA_SRC_DIR}")
+          if [[ ! -d "${parent}" ]]; then
+            sudo mkdir -p "${parent}"
+            sudo chown "$(id -u)":"$(id -g)" "${parent}"
+          fi
+
+          if [[ ! -d "${KATA_SRC_DIR}/.git" ]]; then
+            echo "No source tree at ${KATA_SRC_DIR}, cloning ${KATA_REPO}..."
+            # Empty/stale dir would make git clone fail; clear it first.
+            if [[ -e "${KATA_SRC_DIR}" ]]; then
+              sudo rm -rf "${KATA_SRC_DIR}"
+            fi
+            git clone "https://github.com/${KATA_REPO}.git" "${KATA_SRC_DIR}"
+          fi
+
+          cd "${KATA_SRC_DIR}"
+          # Drop any local mutations from a previous rootfs build before
+          # moving the tree to a new tag. The build/ tree is regenerated
+          # by `make rootfs-image-nvidia-gpu` below.
+          sudo git reset --hard
+          sudo git clean -ffdx
+          git fetch --tags --force --prune origin
+          git checkout --detach "refs/tags/${TAG}"
+
+          echo "kata-containers @ $(git rev-parse HEAD) ($(git describe --tags --always))"
+
+      - name: Rebuild rootfs-image-nvidia-gpu
+        run: |
+          set -euo pipefail
+
+          cd "${KATA_SRC_DIR}"
+          # USE_DOCKER mirrors what ci.yaml uses when invoking image_builder.sh;
+          # script -fec gives sudo a TTY so docker output streams cleanly.
+          script -fec "sudo -E USE_DOCKER=true make rootfs-image-nvidia-gpu"
+
+          if [[ ! -d "${ROOTFS_IMAGE_DIR}" ]]; then
+            echo "ERROR: expected ${ROOTFS_IMAGE_DIR} after build, not found" >&2
+            exit 1
+          fi
+          if [[ ! -x "${IMAGE_BUILDER_DIR}/image_builder.sh" ]]; then
+            echo "ERROR: ${IMAGE_BUILDER_DIR}/image_builder.sh missing" >&2
+            exit 1
+          fi
+
+          echo "rootfs ready at ${ROOTFS_IMAGE_DIR}"
+
+      - name: Download kata-static asset
+        id: download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          workdir=$(mktemp -d)
+          echo "workdir=${workdir}" >> "${GITHUB_OUTPUT}"
+          cd "${workdir}"
+
+          gh release download "${TAG}" \
+            --repo "${KATA_REPO}" \
+            --pattern 'kata-static-*-arm64.tar.xz'
+
+          asset=$(find . -maxdepth 1 -name 'kata-static-*-arm64.tar.xz' -printf '%f\n' 2>/dev/null | head -n 1 || true)
+          if [[ -z "${asset}" ]]; then
+            echo "ERROR: no kata-static arm64 asset in release ${TAG}" >&2
+            exit 1
+          fi
+          echo "Downloaded ${asset} ($(du -h "${asset}" | cut -f1))"
+          echo "asset=${workdir}/${asset}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install kata-static to /opt/kata
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          ASSET: ${{ steps.download.outputs.asset }}
+        run: |
+          set -euo pipefail
+
+          if [[ -d "${KATA_INSTALL_PREFIX}" ]]; then
+            stamp=$(date -u +%Y%m%dT%H%M%SZ)
+            backup="${KATA_INSTALL_PREFIX}.bak.${stamp}"
+            sudo mv "${KATA_INSTALL_PREFIX}" "${backup}"
+            echo "Previous install backed up to ${backup}"
+          fi
+
+          # kata-static tarballs lay down files at /opt/kata when extracted from /.
+          sudo tar -xf "${ASSET}" -C /
+
+          if [[ ! -x "${KATA_INSTALL_PREFIX}/bin/containerd-shim-kata-v2" ]]; then
+            echo "ERROR: containerd-shim-kata-v2 not found after install" >&2
+            exit 1
+          fi
+
+          echo "Installed kata-static ${TAG} to ${KATA_INSTALL_PREFIX}"
+
+      - name: Refresh /usr/local/bin symlinks
+        run: |
+          set -euo pipefail
+
+          # nerdctl resolves containerd-shim-kata-v2 via $PATH; the runner keeps
+          # a symlink at /usr/local/bin pointing into /opt/kata. Re-create it
+          # idempotently so a broken/missing link can't silently break the CI.
+          sudo ln -sfn "${KATA_INSTALL_PREFIX}/bin/containerd-shim-kata-v2" \
+            /usr/local/bin/containerd-shim-kata-v2
+
+          target=$(readlink -f /usr/local/bin/containerd-shim-kata-v2 || true)
+          if [[ "${target}" != "${KATA_INSTALL_PREFIX}/bin/containerd-shim-kata-v2" ]]; then
+            echo "ERROR: /usr/local/bin/containerd-shim-kata-v2 resolves to '${target}'" >&2
+            exit 1
+          fi
+          ls -l /usr/local/bin/containerd-shim-kata-v2
+
+      - name: Cleanup downloaded asset
+        if: always() && steps.download.outputs.workdir != ''
+        env:
+          WORKDIR: ${{ steps.download.outputs.workdir }}
+        run: rm -rf "${WORKDIR}"
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          src_head=$(git -C "${KATA_SRC_DIR}" rev-parse --short HEAD)
+          shim_version=$("${KATA_INSTALL_PREFIX}/bin/containerd-shim-kata-v2" --version 2>/dev/null | head -n 1 || echo "unknown")
+
+          {
+            echo "## kata-containers updated to \`${TAG}\`"
+            echo ""
+            echo "| item | value |"
+            echo "| --- | --- |"
+            echo "| source tree | \`${KATA_SRC_DIR}\` @ \`${src_head}\` |"
+            echo "| install prefix | \`${KATA_INSTALL_PREFIX}\` |"
+            echo "| shim version | \`${shim_version}\` |"
+            echo "| rootfs dir | \`${ROOTFS_IMAGE_DIR}\` |"
+            echo "| image builder | \`${IMAGE_BUILDER_DIR}\` |"
+            echo ""
+            echo "**Note:** \`/etc/kata-containers/configuration.toml\` was not modified."
+            echo "Diff against \`${KATA_INSTALL_PREFIX}/share/defaults/kata-containers/\` if upstream defaults moved."
+          } >> "${GITHUB_STEP_SUMMARY}"
