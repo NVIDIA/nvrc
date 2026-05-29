@@ -1,0 +1,45 @@
+name: Revoke ok-to-test on push
+
+# Binds the 'ok-to-test' approval to a specific revision. When new commits are
+# pushed to a PR (synchronize), the label is removed so the E2E workflow
+# (ci-on-push.yaml) no longer runs the unreviewed code on the self-hosted
+# runner. A maintainer must re-review and re-apply the label, which fires a
+# fresh 'labeled' event and re-runs CI on the new HEAD.
+#
+# This uses pull_request_target because it needs pull-requests:write to manage
+# labels (a read-only fork token cannot), but it runs NO PR code, so it is safe.
+on:
+  pull_request_target:
+    types:
+      - synchronize
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: revoke-ok-to-test-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  revoke:
+    runs-on: ubuntu-latest
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') }}
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                name: 'ok-to-test',
+              });
+              core.info('Removed ok-to-test: new commits require fresh approval.');
+            } catch (error) {
+              if (error.status === 404) {
+                core.info('Label ok-to-test not present; nothing to revoke.');
+              } else {
+                throw error;
+              }
+            }
