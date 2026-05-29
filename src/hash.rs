@@ -21,9 +21,29 @@ use std::fs;
 const SELF_EXE: &str = "/proc/self/exe";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// Untrusted dev-convenience stamp: the short commit the binary was built from,
+// plus `-dirty` for an uncommitted tree, set by CI on the build command. Lets a
+// dmesg glance tell a dirty/local build from a clean release; absent on a plain
+// release build, which logs VERSION alone. A tampered binary can forge this —
+// authoritative release identity is the sha256 vs Rekor (see above and
+// ARCHITECTURE.md).
+const GIT_REV: Option<&str> = option_env!("GIT_REV");
+
 pub fn self_exe() {
+    debug!("{}", version_line());
+}
+
+pub fn version_line() -> String {
     let digest = sha256().or_panic(format_args!("hash {SELF_EXE}"));
-    debug!("NVRC version={VERSION} sha256={digest}");
+    boot_line(&digest, GIT_REV)
+}
+
+fn boot_line(digest: &str, rev: Option<&str>) -> String {
+    format!("NVRC version={} sha256={digest}", version(rev))
+}
+
+fn version(rev: Option<&str>) -> String {
+    rev.map_or_else(|| VERSION.to_string(), |rev| format!("{VERSION}+{rev}"))
 }
 
 fn sha256() -> std::io::Result<String> {
@@ -81,5 +101,55 @@ mod tests {
     #[test]
     fn test_self_exe_runs_to_completion() {
         self_exe();
+    }
+
+    #[test]
+    fn test_version_without_rev_is_bare_cargo_version() {
+        assert_eq!(version(None), VERSION);
+    }
+
+    #[test]
+    fn test_version_with_rev_appends_plus_metadata() {
+        assert_eq!(version(Some("4895486")), format!("{VERSION}+4895486"));
+    }
+
+    #[test]
+    fn test_version_with_dirty_rev_preserves_dirty_suffix() {
+        assert_eq!(
+            version(Some("4895486-dirty")),
+            format!("{VERSION}+4895486-dirty")
+        );
+    }
+
+    #[test]
+    fn test_boot_line_of_self_carries_cargo_version_and_real_digest() {
+        let digest = sha256().expect("hash self");
+        let line = boot_line(&digest, GIT_REV);
+
+        assert!(line.starts_with(&format!("NVRC version={}", env!("CARGO_PKG_VERSION"))));
+        assert!(line.ends_with(&format!("sha256={digest}")));
+        assert_eq!(
+            line,
+            format!("NVRC version={} sha256={digest}", version(GIT_REV))
+        );
+    }
+
+    #[test]
+    fn test_boot_line_release_build_logs_bare_version() {
+        assert_eq!(
+            boot_line("deadbeef", None),
+            format!("NVRC version={} sha256=deadbeef", env!("CARGO_PKG_VERSION"))
+        );
+    }
+
+    #[test]
+    fn test_boot_line_dev_build_appends_git_rev() {
+        assert_eq!(
+            boot_line("deadbeef", Some("4895486-dirty")),
+            format!(
+                "NVRC version={}+4895486-dirty sha256=deadbeef",
+                env!("CARGO_PKG_VERSION")
+            )
+        );
     }
 }
