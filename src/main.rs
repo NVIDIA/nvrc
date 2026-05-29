@@ -6,6 +6,7 @@ mod daemon;
 mod execute;
 mod hash;
 mod infiniband;
+mod init;
 mod kata_agent;
 mod kernel_params;
 mod kmsg;
@@ -93,6 +94,8 @@ fn mode_nvl5(init: &mut NVRC, fabric_mode: u8) {
 }
 
 fn main() {
+    init::as_pid1();
+
     lockdown::set_panic_hook();
     let mut init = NVRC::default();
     mount::setup();
