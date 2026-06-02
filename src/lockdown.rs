@@ -28,7 +28,7 @@ pub fn set_panic_hook() {
 
 /// Internal: panic handler with configurable shutdown (for unit tests).
 /// Production uses power_off(); tests inject a no-op to avoid rebooting.
-pub(crate) fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) {
+fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) {
     panic::set_hook(Box::new(move |panic_info| {
         // fd 1,2 are always available from the kernel
         eprintln!("panic: {panic_info}");
