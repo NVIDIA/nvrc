@@ -92,7 +92,7 @@ fn mode_nvl5(init: &mut NVRC, fabric_mode: u8) {
 }
 
 fn main() {
-    lockdown::set_panic_hook();
+    //lockdown::set_panic_hook();
     let mut init = NVRC::default();
     mount::setup();
     net::loopback_up();
