@@ -71,8 +71,6 @@ jobs:
           script -fec "sudo -E AGENT_INIT=no USE_DOCKER=true ./image_builder.sh \"${ROOTFS_IMAGE_DIR}\""
       - name: Test WITH nvrc.log=trace (baseline)
         run: |
-          set -euo pipefail
-
           if ! grep -q "nvrc.log=trace" /etc/kata-containers/configuration.toml; then
             echo "Adding nvrc.log=trace to configuration.toml"
             sudo sed -i 's/kernel_params = "/kernel_params = "nvrc.log=trace /' /etc/kata-containers/configuration.toml
@@ -81,10 +79,8 @@ jobs:
           grep kernel_params /etc/kata-containers/configuration.toml
 
           # Capture nerdctl output and exit code without aborting under bash -e.
-          set +e
           output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
           exit_code=$?
-          set -e
 
           echo "=== nerdctl output ==="
           echo "$output"
@@ -114,16 +110,12 @@ jobs:
 
       - name: Test WITHOUT nvrc.log=trace (regression test)
         run: |
-          set -euo pipefail
-
           sudo sed -i 's/nvrc.log=trace *//' /etc/kata-containers/configuration.toml
 
           grep kernel_params /etc/kata-containers/configuration.toml
 
-          set +e
           output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
           exit_code=$?
-          set -e
 
           echo "=== nerdctl output ==="
           echo "$output"
