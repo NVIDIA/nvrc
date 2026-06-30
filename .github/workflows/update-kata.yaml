@@ -43,6 +43,34 @@ jobs:
   update:
     runs-on: g5g.metal
     steps:
+      - name: Ensure GitHub CLI is installed
+        run: |
+          set -euo pipefail
+
+          if command -v gh >/dev/null 2>&1; then
+            echo "gh already present: $(gh --version | head -n 1)"
+            exit 0
+          fi
+
+          echo "gh not found, installing from the official apt repository..."
+          export DEBIAN_FRONTEND=noninteractive
+          if ! command -v curl >/dev/null 2>&1; then
+            sudo -E apt-get update
+            sudo -E apt-get install -y curl
+          fi
+
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+          sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+
+          sudo -E apt-get update
+          sudo -E apt-get install -y gh
+
+          echo "Installed $(gh --version | head -n 1)"
+
       - name: Resolve release tag
         id: tag
         env:
