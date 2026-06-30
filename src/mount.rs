@@ -14,6 +14,20 @@ fn mount(source: &str, target: &str, fstype: &str, flags: MsFlags, data: Option<
         .or_panic(format_args!("mount {source} on {target}"));
 }
 
+/// Check if `target` is already an active mount point.
+/// The second whitespace-separated field of each /proc/mounts line is the
+/// mount target, so callers must mount /proc first. Used to keep the /dev
+/// mount idempotent.
+fn is_mounted(target: &str) -> bool {
+    fs::read_to_string("/proc/mounts")
+        .map(|mounts| {
+            mounts
+                .lines()
+                .any(|line| line.split(' ').nth(1) == Some(target))
+        })
+        .unwrap_or(false)
+}
+
 /// Check if a filesystem type is available in the kernel.
 fn fs_available(filesystems: &str, fstype: &str) -> bool {
     filesystems.lines().any(|line| line.contains(fstype))
@@ -28,10 +42,12 @@ fn mount_optional(filesystems: &str, source: &str, target: &str, fstype: &str, f
 }
 
 /// Set up the minimal filesystem hierarchy required for GPU initialization.
-/// Creates /proc, /sys, /run, /tmp mounts.
-/// The kernel mounts devtmpfs on /dev before init runs; symlinks
-/// (/dev/stdin, /dev/stdout, /dev/stderr, /dev/fd, /dev/core) are
-/// created later by kata-agent.
+/// Mounts /proc, /dev, /sys, /run, /tmp. devtmpfs on /dev is mounted here
+/// instead of relying on the kernel: boots that pass `devtmpfs.mount=0`
+/// leave /dev empty, which breaks the kmsg logger and every device access
+/// (NVRC would then power off silently). The /dev symlinks (/dev/stdin,
+/// /dev/stdout, /dev/stderr, /dev/fd, /dev/core) are created later by
+/// kata-agent.
 pub fn setup() {
     setup_at("")
 }
@@ -41,6 +57,17 @@ fn setup_at(root: &str) {
     let common = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_NODEV | MsFlags::MS_RELATIME;
 
     mount("proc", &format!("{root}/proc"), "proc", common, None);
+
+    // /dev carries device nodes, so it must NOT have MS_NODEV. The kernel
+    // normally mounts devtmpfs before init, but `devtmpfs.mount=0` disables
+    // that, so mount it ourselves unless it is already mounted (avoids
+    // stacking a second mount when the kernel did provide /dev).
+    let dev = format!("{root}/dev");
+    if !is_mounted(&dev) {
+        let dev_flags = MsFlags::MS_NOSUID | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
+        mount("dev", &dev, "devtmpfs", dev_flags, Some("mode=0755"));
+    }
+
     mount("sysfs", &format!("{root}/sys"), "sysfs", common, None);
     mount(
         "run",
@@ -87,6 +114,15 @@ mod tests {
             let fields: Vec<&str> = line.split_whitespace().collect();
             fields.len() > 4 && fields[4] == canonical
         })
+    }
+
+    // === is_mounted tests ===
+
+    #[test]
+    fn test_is_mounted() {
+        // /proc is always mounted on a running Linux system; a bogus path is not.
+        assert!(is_mounted("/proc"));
+        assert!(!is_mounted("/nonexistent/mount/point"));
     }
 
     // === fs_available tests ===
@@ -208,18 +244,12 @@ mod tests {
             fs::create_dir_all(format!("{root}/{dir}")).unwrap();
         }
 
-        // Kernel mounts devtmpfs on /dev before init runs; simulate that here
-        mount(
-            "devtmpfs",
-            &format!("{root}/dev"),
-            "devtmpfs",
-            MsFlags::MS_NOSUID | MsFlags::MS_RELATIME,
-            None,
-        );
-
+        // No kernel pre-mount: setup_at() must mount devtmpfs on /dev itself
+        // (the regression that broke boot when the kernel skips it).
         setup_at(root);
 
-        // devtmpfs auto-creates device nodes
+        // devtmpfs is mounted by setup_at and auto-creates device nodes
+        assert!(is_mountpoint(&format!("{root}/dev")));
         assert!(Path::new(&format!("{root}/dev/null")).exists());
         assert!(Path::new(&format!("{root}/dev/zero")).exists());
         assert!(Path::new(&format!("{root}/dev/random")).exists());
