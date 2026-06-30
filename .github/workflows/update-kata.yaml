@@ -51,22 +51,29 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -z "${REQUESTED_TAG}" || "${REQUESTED_TAG}" == "latest" ]]; then
-            tag=$(gh release view --repo "${KATA_REPO}" --json tagName --jq '.tagName')
-            echo "Resolved 'latest' -> ${tag}"
-          else
-            if ! gh release view "${REQUESTED_TAG}" --repo "${KATA_REPO}" >/dev/null 2>&1; then
-              echo "ERROR: release '${REQUESTED_TAG}' not found in ${KATA_REPO}" >&2
-              exit 1
-            fi
-            tag="${REQUESTED_TAG}"
-          fi
+          # `gh release view <tag>` maps to GET /repos/${KATA_REPO}/releases/tags/<tag>
+          # and `gh release view` (no tag) to .../releases/latest. An empty or
+          # "latest" request resolves the latest release. Capture stderr so a
+          # transient API/network failure surfaces instead of being silently
+          # relabelled "release not found" (the release may well exist).
+          want="${REQUESTED_TAG}"
+          [[ "${want}" == "latest" ]] && want=""
 
-          if [[ -z "${tag}" ]]; then
-            echo "ERROR: could not resolve a tag" >&2
+          err=$(mktemp)
+          if ! tag=$(gh release view ${want:+"${want}"} \
+                       --repo "${KATA_REPO}" \
+                       --json tagName --jq '.tagName' 2>"${err}"); then
+            echo "ERROR: 'gh release view ${want:-<latest>}' failed for ${KATA_REPO}:" >&2
+            cat "${err}" >&2
             exit 1
           fi
 
+          if [[ -z "${tag}" ]]; then
+            echo "ERROR: could not resolve a tag for '${REQUESTED_TAG:-latest}' in ${KATA_REPO}" >&2
+            exit 1
+          fi
+
+          echo "Resolved '${REQUESTED_TAG:-latest}' -> ${tag}"
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Sync kata-containers source tree to ${{ steps.tag.outputs.tag }}
@@ -135,9 +142,9 @@ jobs:
 
           gh release download "${TAG}" \
             --repo "${KATA_REPO}" \
-            --pattern 'kata-static-*-arm64.tar.xz'
+            --pattern 'kata-static-*-arm64.tar.zst'
 
-          asset=$(find . -maxdepth 1 -name 'kata-static-*-arm64.tar.xz' -printf '%f\n' 2>/dev/null | head -n 1 || true)
+          asset=$(find . -maxdepth 1 -name 'kata-static-*-arm64.tar.zst' -printf '%f\n' 2>/dev/null | head -n 1 || true)
           if [[ -z "${asset}" ]]; then
             echo "ERROR: no kata-static arm64 asset in release ${TAG}" >&2
             exit 1
@@ -159,8 +166,9 @@ jobs:
             echo "Previous install backed up to ${backup}"
           fi
 
-          # kata-static tarballs lay down files at /opt/kata when extracted from /.
-          sudo tar -xf "${ASSET}" -C /
+          # kata-static tarballs are zstd-compressed and lay down files at
+          # /opt/kata when extracted from /.
+          sudo tar --zstd -xf "${ASSET}" -C /
 
           if [[ ! -x "${KATA_INSTALL_PREFIX}/bin/containerd-shim-kata-v2" ]]; then
             echo "ERROR: containerd-shim-kata-v2 not found after install" >&2
