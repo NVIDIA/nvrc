@@ -136,16 +136,21 @@ jobs:
 
           echo "kata-containers @ $(git rev-parse HEAD) ($(git describe --tags --always))"
 
-      - name: Rebuild rootfs-image-nvidia-gpu-tarball
+      - name: Rebuild rootfs-image-nvidia-gpu
         run: |
           set -euo pipefail
 
           cd "${KATA_SRC_DIR}"
-          # USE_DOCKER mirrors what ci.yaml uses when invoking image_builder.sh;
-          # script -fec gives sudo a TTY so docker output streams cleanly.
           # rootfs-image-nvidia-gpu-tarball is the top-level make target that
-          # populates ${ROOTFS_IMAGE_DIR}.
-          script -fec "sudo -E USE_DOCKER=true make rootfs-image-nvidia-gpu-tarball"
+          # populates ${ROOTFS_IMAGE_DIR}. The kata-deploy build runs git inside
+          # a container whose uid is derived from ${USER} (id -u "${USER}"), and
+          # only the repo is bind-mounted (no gitconfig). Running it as root via
+          # sudo therefore trips git's "dubious ownership" guard against the
+          # ubuntu-owned checkout, so build as the runner user that owns the
+          # tree. USE_DOCKER mirrors ci.yaml; script -fec keeps a TTY so docker
+          # output streams cleanly.
+          export USER="${USER:-$(id -un)}"
+          script -fec "USE_DOCKER=true make rootfs-image-nvidia-gpu-tarball"
 
           if [[ ! -d "${ROOTFS_IMAGE_DIR}" ]]; then
             echo "ERROR: expected ${ROOTFS_IMAGE_DIR} after build, not found" >&2
