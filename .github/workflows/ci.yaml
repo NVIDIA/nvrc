@@ -150,3 +150,44 @@ jobs:
           fi
 
           echo "SUCCESS: nvidia-smi works WITHOUT NVRC trace in VM dmesg"
+
+      - name: Dump kata/guest diagnostics on failure
+        # Runs whenever an earlier step (typically a test) failed. The tests
+        # only capture nerdctl's stderr, so a "create container timeout" leaves
+        # no guest-side trace; gather the kata runtime log (which carries the
+        # guest console when enable_debug is set), the VFIO/GPU host state and
+        # the relevant configuration.toml lines so failures are debuggable.
+        if: failure()
+        run: |
+          set -uo pipefail
+
+          echo "::group::configuration.toml (relevant lines)"
+          sudo grep -nE '^[[:space:]]*(enable_debug|debug_console_enabled|create_container_timeout|dial_timeout|kernel|initrd|image|path|kernel_params|sandbox_cgroup_only)\b' \
+            /etc/kata-containers/configuration.toml || true
+          echo "::endgroup::"
+
+          echo "::group::kata shim version"
+          sudo /opt/kata/bin/containerd-shim-kata-v2 --version || true
+          echo "::endgroup::"
+
+          echo "::group::VFIO / NVIDIA GPU host state"
+          # vfio0 is what the tests pass via --device; confirm it exists and
+          # that the GPU is actually bound to vfio-pci (not the host driver).
+          ls -l /dev/vfio /dev/vfio/devices 2>/dev/null || true
+          lspci -nnk -d 10de: 2>/dev/null || true
+          echo "::endgroup::"
+
+          echo "::group::host dmesg (vfio/iommu/nvidia)"
+          sudo dmesg --ctime 2>/dev/null | grep -iE 'vfio|iommu|nvidia|10de:' | tail -n 100 || true
+          echo "::endgroup::"
+
+          echo "::group::kata runtime + guest console (journalctl -t kata)"
+          # Empty output here usually means enable_debug is off in the config
+          # above; flip it on to capture the guest boot/agent log.
+          sudo journalctl -t kata --since "10 min ago" --no-pager || true
+          echo "::endgroup::"
+
+          echo "::group::containerd log (kata/shim/vfio lines)"
+          sudo journalctl -u containerd --since "10 min ago" --no-pager 2>/dev/null \
+            | grep -iE 'kata|shim|vfio' | tail -n 200 || true
+          echo "::endgroup::"
