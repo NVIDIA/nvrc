@@ -181,13 +181,27 @@ jobs:
           sudo dmesg --ctime 2>/dev/null | grep -iE 'vfio|iommu|nvidia|10de:' | tail -n 100 || true
           echo "::endgroup::"
 
-          echo "::group::kata runtime + guest console (journalctl -t kata)"
-          # Empty output here usually means enable_debug is off in the config
-          # above; flip it on to capture the guest boot/agent log.
-          sudo journalctl -t kata --since "10 min ago" --no-pager || true
+          # The kata journal is enormous with initcall_debug + agent.log=debug,
+          # so pull it once and surface only the decisive slices below. Empty
+          # output means enable_debug is off in the config above.
+          journal=$(mktemp)
+          sudo journalctl -t kata --since "20 min ago" -o cat > "${journal}" 2>/dev/null || true
+
+          echo "::group::kata shim errors & warnings (qemu / vfio / agent)"
+          grep -E 'level=(error|warning|fatal)' "${journal}" | tail -n 100 || true
           echo "::endgroup::"
 
-          echo "::group::containerd log (kata/shim/vfio lines)"
-          sudo journalctl -u containerd --since "10 min ago" --no-pager 2>/dev/null \
-            | grep -iE 'kata|shim|vfio' | tail -n 200 || true
+          echo "::group::guest console - markers (NVRC / nvidia / agent / panic)"
+          # Strip the shim wrapper down to the raw guest console text, then keep
+          # only the lines that decide NVRC-vs-environment.
+          sed -n 's/.*vmconsole="\(.*\)"$/\1/p' "${journal}" \
+            | grep -iE 'NVRC|nvidia|kata-agent| agent |vsock|panic|call trace|BUG:|oops|segfault|out of memory|reached target|started |failed|cannot|/sbin/init|switch_root' \
+            | tail -n 150 || true
           echo "::endgroup::"
+
+          echo "::group::guest console - tail (raw: shows where boot stopped)"
+          # Unfiltered so an early stall mid-initcall is still visible.
+          sed -n 's/.*vmconsole="\(.*\)"$/\1/p' "${journal}" | tail -n 200 || true
+          echo "::endgroup::"
+
+          rm -f "${journal}"
