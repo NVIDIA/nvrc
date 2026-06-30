@@ -6,9 +6,9 @@ name: Update kata-containers on the runner
 # For a given kata-containers release tag this workflow:
 #   * checks out the matching kata-containers source at
 #     ${KATA_SRC_DIR} (where ci.yaml expects tools/osbuilder & build/);
-#   * rebuilds rootfs-image-nvidia-gpu so ${ROOTFS_IMAGE_DIR} contains a
-#     kata-agent matching the release;
-#   * installs the kata-static-<tag>-arm64.tar.xz payload to /opt/kata
+#   * rebuilds rootfs-image-nvidia-gpu-tarball so ${ROOTFS_IMAGE_DIR}
+#     contains a kata-agent matching the release;
+#   * installs the kata-static-<tag>-arm64.tar.zst payload to /opt/kata
 #     (the previous install is moved aside, not deleted).
 #
 # /etc/kata-containers/configuration.toml is intentionally NOT touched:
@@ -128,7 +128,7 @@ jobs:
           cd "${KATA_SRC_DIR}"
           # Drop any local mutations from a previous rootfs build before
           # moving the tree to a new tag. The build/ tree is regenerated
-          # by `make rootfs-image-nvidia-gpu` below.
+          # by `make rootfs-image-nvidia-gpu-tarball` below.
           sudo git reset --hard
           sudo git clean -ffdx
           git fetch --tags --force --prune origin
@@ -136,14 +136,16 @@ jobs:
 
           echo "kata-containers @ $(git rev-parse HEAD) ($(git describe --tags --always))"
 
-      - name: Rebuild rootfs-image-nvidia-gpu
+      - name: Rebuild rootfs-image-nvidia-gpu-tarball
         run: |
           set -euo pipefail
 
           cd "${KATA_SRC_DIR}"
           # USE_DOCKER mirrors what ci.yaml uses when invoking image_builder.sh;
           # script -fec gives sudo a TTY so docker output streams cleanly.
-          script -fec "sudo -E USE_DOCKER=true make rootfs-image-nvidia-gpu"
+          # rootfs-image-nvidia-gpu-tarball is the top-level make target that
+          # populates ${ROOTFS_IMAGE_DIR}.
+          script -fec "sudo -E USE_DOCKER=true make rootfs-image-nvidia-gpu-tarball"
 
           if [[ ! -d "${ROOTFS_IMAGE_DIR}" ]]; then
             echo "ERROR: expected ${ROOTFS_IMAGE_DIR} after build, not found" >&2
