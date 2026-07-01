@@ -6,10 +6,14 @@ name: Update kata-containers on the runner
 # For a given kata-containers release tag this workflow:
 #   * checks out the matching kata-containers source at
 #     ${KATA_SRC_DIR} (where ci.yaml expects tools/osbuilder & build/);
-#   * rebuilds rootfs-image-nvidia-gpu-tarball so ${ROOTFS_IMAGE_DIR}
-#     contains a kata-agent matching the release;
+#   * rebuilds rootfs-image-nvidia-gpu-tarball with KBUILD_SIGN_PIN so
+#     ${ROOTFS_IMAGE_DIR} contains a kata-agent matching the release and a
+#     *signed* nvidia driver (the guest kernel enforces module signatures);
 #   * installs the kata-static-<tag>-arm64.tar.zst payload to /opt/kata
-#     (the previous install is moved aside, not deleted).
+#     (the previous install is moved aside, not deleted);
+#   * overlays the locally-built, signed vmlinuz-nvidia-gpu.container so the
+#     booting kernel and the signed modules share the same signing key
+#     (kata's released kernel is signed with a key we don't hold).
 #
 # /etc/kata-containers/configuration.toml is intentionally NOT touched:
 #   ci.yaml mutates kernel_params at runtime and the file carries
@@ -38,6 +42,18 @@ env:
   KATA_INSTALL_PREFIX: /opt/kata
   ROOTFS_IMAGE_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-image-nvidia-gpu/builddir/rootfs-image/ubuntu_rootfs
   IMAGE_BUILDER_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/image-builder
+  # kata's local-build output dir (relative to KATA_SRC_DIR) where the
+  # nvidia-gpu kernel tarball lands; consumed by the overlay step below.
+  LOCAL_BUILD_DIR: tools/packaging/kata-deploy/local-build/build
+  # Passphrase for the kernel build's ephemeral module-signing key. The kernel
+  # build generates a random key, embeds its public half in the vmlinuz + signs
+  # the in-tree modules, then encrypts the private key with this pin; the rootfs
+  # build (nvidia_chroot.sh) decrypts it with the SAME pin to sign nvidia.ko.
+  # It only has to be non-empty and identical across the kernel and rootfs
+  # signing of one build, so a hardcoded constant is fine: it guards a
+  # throwaway per-build CI key, not a real secret. Setting it turns on
+  # CONFIG_MODULE_SIG_FORCE + module signing.
+  KBUILD_SIGN_PIN: nvrc-tests
 
 jobs:
   update:
@@ -136,21 +152,35 @@ jobs:
 
           echo "kata-containers @ $(git rev-parse HEAD) ($(git describe --tags --always))"
 
-      - name: Rebuild rootfs-image-nvidia-gpu
+      - name: Rebuild rootfs-image-nvidia-gpu (signed nvidia driver)
         run: |
           set -euo pipefail
 
           cd "${KATA_SRC_DIR}"
-          # rootfs-image-nvidia-gpu-tarball is the top-level make target that
-          # populates ${ROOTFS_IMAGE_DIR}. The kata-deploy build runs git inside
-          # a container whose uid is derived from ${USER} (id -u "${USER}"), and
-          # only the repo is bind-mounted (no gitconfig). Running it as root via
-          # sudo therefore trips git's "dubious ownership" guard against the
-          # ubuntu-owned checkout, so build as the runner user that owns the
-          # tree. USE_DOCKER mirrors ci.yaml; script -fec keeps a TTY so docker
-          # output streams cleanly.
+          build_dir="${KATA_SRC_DIR}/${LOCAL_BUILD_DIR}"
+          kernel_tb="kata-static-kernel-nvidia-gpu.tar.zst"
+
+          # Build the kernel and rootfs in ONE invocation every run so both
+          # signing stages share a single key. rootfs-image-nvidia-gpu-tarball
+          # DEPS on kernel-nvidia-gpu-tarball: the kernel build generates the
+          # ephemeral signing key, embeds its public half in the vmlinuz and
+          # ships the KBUILD_SIGN_PIN-encrypted private key in the kernel
+          # headers, then the rootfs build (nvidia_chroot.sh) decrypts it with
+          # the same pin to sign nvidia.ko.
+          #
+          # The kernel is deliberately NOT cached across runs: a restored kernel
+          # carries an old public key while this run always re-signs nvidia.ko
+          # with a freshly generated key, so the guest kernel rejects the
+          # module ("Loading of module with unavailable key is rejected"). A
+          # fresh matched build is the whole point.
+          #
+          # Build as the runner user that owns the checkout (the kata-deploy
+          # build runs git in a container whose uid is derived from ${USER};
+          # building as root via sudo trips git's "dubious ownership" guard).
+          # USE_DOCKER mirrors ci.yaml; script -fec keeps a TTY so docker output
+          # streams cleanly.
           export USER="${USER:-$(id -un)}"
-          script -fec "USE_DOCKER=true make rootfs-image-nvidia-gpu-tarball"
+          script -fec "USE_DOCKER=true KBUILD_SIGN_PIN=${KBUILD_SIGN_PIN} make rootfs-image-nvidia-gpu-tarball"
 
           if [[ ! -d "${ROOTFS_IMAGE_DIR}" ]]; then
             echo "ERROR: expected ${ROOTFS_IMAGE_DIR} after build, not found" >&2
@@ -160,8 +190,13 @@ jobs:
             echo "ERROR: ${IMAGE_BUILDER_DIR}/image_builder.sh missing" >&2
             exit 1
           fi
+          if [[ ! -f "${build_dir}/${kernel_tb}" ]]; then
+            echo "ERROR: signed kernel tarball ${kernel_tb} not produced by the build" >&2
+            ls -l "${build_dir}" >&2 || true
+            exit 1
+          fi
 
-          echo "rootfs ready at ${ROOTFS_IMAGE_DIR}"
+          echo "rootfs ready at ${ROOTFS_IMAGE_DIR} (signed nvidia modules)"
 
       - name: Download kata-static asset
         id: download
@@ -211,6 +246,30 @@ jobs:
           fi
 
           echo "Installed kata-static ${TAG} to ${KATA_INSTALL_PREFIX}"
+
+      - name: Overlay locally-built signed nvidia-gpu kernel
+        run: |
+          set -euo pipefail
+
+          # The released kernel enforces module signatures against kata's
+          # release key, but our nvidia modules are signed with our own
+          # ephemeral key. Boot OUR kernel so the signatures match. This must
+          # run AFTER the release kata-static install above, which would
+          # otherwise clobber the kernel. The kernel tarball lays files down
+          # under /opt/kata when extracted from /.
+          kernel_tb="${KATA_SRC_DIR}/${LOCAL_BUILD_DIR}/kata-static-kernel-nvidia-gpu.tar.zst"
+          if [[ ! -f "${kernel_tb}" ]]; then
+            echo "ERROR: ${kernel_tb} missing; nvidia-gpu kernel not built" >&2
+            exit 1
+          fi
+          sudo tar --zstd -xf "${kernel_tb}" -C /
+
+          kernel="${KATA_INSTALL_PREFIX}/share/kata-containers/vmlinuz-nvidia-gpu.container"
+          if [[ ! -e "${kernel}" ]]; then
+            echo "ERROR: ${kernel} not present after overlay" >&2
+            exit 1
+          fi
+          echo "Installed locally-built signed kernel: $(readlink -f "${kernel}")"
 
       - name: Refresh /usr/local/bin symlinks
         run: |
