@@ -38,7 +38,6 @@ pub fn loopback_up() {
 mod tests {
     use super::*;
     use crate::test_utils::require_root;
-    use std::panic;
 
     #[test]
     fn test_loopback_up() {
