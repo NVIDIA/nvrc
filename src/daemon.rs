@@ -3,6 +3,7 @@
 
 use crate::config::update_config_file;
 use crate::execute::background;
+use crate::gpu_extension;
 use crate::kmsg;
 use crate::macros::ResultExt;
 use crate::nvrc::NVRC;
@@ -48,7 +49,10 @@ impl NVRC {
     /// optimizations. Enabled by default since most workloads benefit from it.
     pub fn nvidia_persistenced(&mut self) {
         let mut reader = kmsg::open_kmsg("/dev/kmsg");
-        self.spawn_persistenced("/var/run/nvidia-persistenced", "/bin/nvidia-persistenced");
+        self.spawn_persistenced(
+            "/var/run/nvidia-persistenced",
+            &gpu_extension::path("/bin/nvidia-persistenced"),
+        );
         kmsg::wait_for_marker(&mut reader, "Local RPC services initialized", 120);
     }
 
@@ -63,7 +67,7 @@ impl NVRC {
     /// nv-hostengine is the DCGM backend daemon. Only started when DCGM monitoring
     /// is explicitly requested - not needed for basic GPU workloads.
     pub fn nv_hostengine(&mut self) {
-        self.spawn_hostengine("/bin/nv-hostengine")
+        self.spawn_hostengine(&gpu_extension::path("/bin/nv-hostengine"))
     }
 
     fn spawn_hostengine(&mut self, bin: &str) {
@@ -77,7 +81,7 @@ impl NVRC {
     /// dcgm-exporter exposes GPU metrics for Prometheus. Only started when DCGM
     /// is enabled - adds overhead so disabled by default.
     pub fn dcgm_exporter(&mut self) {
-        self.spawn_dcgm_exporter("/bin/dcgm-exporter")
+        self.spawn_dcgm_exporter(&gpu_extension::path("/bin/dcgm-exporter"))
     }
 
     fn spawn_dcgm_exporter(&mut self, bin: &str) {
@@ -91,13 +95,16 @@ impl NVRC {
     /// NVSwitch fabric manager is only needed for multi-GPU NVLink topologies.
     /// Disabled by default since most VMs have single GPUs.
     pub fn nv_fabricmanager(&mut self, fabric_mode: u8, rail_policy: &str) {
-        fs::copy(FM_CONFIG, FM_RUNTIME_CONFIG)
-            .or_panic(format_args!("copy {FM_CONFIG} to {FM_RUNTIME_CONFIG}"));
+        // The stock config ships in the gpu extension; the editable runtime copy
+        // stays on the writable /run tmpfs.
+        let fm_config = gpu_extension::path(FM_CONFIG);
+        fs::copy(&fm_config, FM_RUNTIME_CONFIG)
+            .or_panic(format_args!("copy {fm_config} to {FM_RUNTIME_CONFIG}"));
         self.configure_fabricmanager(FM_RUNTIME_CONFIG, fabric_mode, rail_policy);
         fs::set_permissions(FM_RUNTIME_CONFIG, fs::Permissions::from_mode(0o400))
             .or_panic(format_args!("set permissions {FM_RUNTIME_CONFIG}"));
         let mut reader = kmsg::open_kmsg("/dev/kmsg");
-        self.spawn_fabricmanager("/bin/nv-fabricmanager");
+        self.spawn_fabricmanager(&gpu_extension::path("/bin/nv-fabricmanager"));
         kmsg::wait_for_marker(&mut reader, "FM starting NvLink Inband", 120);
     }
 
@@ -115,7 +122,7 @@ impl NVRC {
 
     /// CX7 bridges require NVLSM to manage NVLink subnet before FM can initialize the fabric.
     pub fn nv_nvlsm(&mut self) {
-        self.spawn_nvlsm("/sbin/nvlsm")
+        self.spawn_nvlsm(&gpu_extension::path("/sbin/nvlsm"))
     }
 
     fn spawn_nvlsm(&mut self, bin: &str) {
@@ -123,7 +130,8 @@ impl NVRC {
             return;
         };
         let guid_owned = guid.clone();
-        let args = vec!["-F", NVLSM_CONFIG, "-g", &guid_owned, "-f", "stdout"];
+        let nvlsm_config = gpu_extension::path(NVLSM_CONFIG);
+        let args = vec!["-F", &nvlsm_config, "-g", &guid_owned, "-f", "stdout"];
         let child = background(bin, &args);
         self.track_daemon("nvlsm", child);
     }
@@ -287,6 +295,13 @@ mod tests {
         let mut nvrc = NVRC::default();
         // port_guid is None, should be a no-op
         nvrc.spawn_nvlsm("/bin/true");
+    }
+
+    #[test]
+    fn test_nv_nvlsm_skipped_without_guid() {
+        // Resolves the nvlsm binary path, then no-ops without a port GUID.
+        let mut nvrc = NVRC::default();
+        nvrc.nv_nvlsm();
     }
 
     #[test]
