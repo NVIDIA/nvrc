@@ -158,8 +158,9 @@ optimization and static linking.
 # Unit tests (requires root for some tests)
 cargo test
 
-# Coverage (requires llvm-cov and root; CI enforces >=90% lines, main.rs exempt)
-cargo llvm-cov --all-features --workspace --ignore-filename-regex 'src/main\.rs$' --fail-under-lines 90 -- --include-ignored --test-threads=1
+# Coverage (requires llvm-cov and root; CI enforces >=90% lines overall and
+# per file, main.rs exempt)
+cargo llvm-cov --all-features --workspace --ignore-filename-regex 'src/main\.rs$' --fail-under-lines 90 --fail-under-file-lines 90 -- --include-ignored --test-threads=1
 
 # Fuzzing
 cargo +nightly fuzz run kernel_params
