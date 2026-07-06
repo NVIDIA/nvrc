@@ -34,6 +34,7 @@ jobs:
               - '**/*.lock'
               - 'Cargo.lock'
               - '.cargo/**'
+              - '.github/workflows/coverage.yaml'
 
   coverage:
     name: Code coverage
@@ -63,8 +64,10 @@ jobs:
       # The #[cfg(coverage)] paths in require_root() panic if not run as root,
       # ensuring coverage accurately reflects execution with proper permissions.
       # --test-threads=1 forces serial execution to avoid /dev/log socket conflicts.
+      # src/main.rs is exempt from coverage: dispatch-only plumbing (module
+      # wiring and the mode match) that only runs end-to-end as PID 1 in a VM.
       - name: Generate coverage
-        run: sudo -E env "PATH=$PATH" cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info -- --include-ignored --test-threads=1
+        run: sudo -E env "PATH=$PATH" cargo llvm-cov --all-features --workspace --ignore-filename-regex 'src/main\.rs$' --lcov --output-path lcov.info -- --include-ignored --test-threads=1
 
       - name: Upload coverage to Coveralls
         uses: coverallsapp/github-action@cfd0633edbd2411b532b808ba7a8b5e04f76d2c8 # v2.3.4
@@ -72,3 +75,11 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           file: lcov.info
           format: lcov
+
+      # Gate after the upload so Coveralls still receives the report when the
+      # threshold fails. `report` regenerates from the profdata and object
+      # files recorded by the generate step, so build/feature/workspace flags
+      # don't apply (cargo-llvm-cov 0.6.21 rejects them on `report`); sudo
+      # because that data is root-owned.
+      - name: Enforce minimum 90% line coverage
+        run: sudo -E env "PATH=$PATH" cargo llvm-cov report --fail-under-lines 90 --ignore-filename-regex 'src/main\.rs$'
