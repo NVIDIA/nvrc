@@ -55,10 +55,12 @@ jobs:
       # cargo-llvm-cov uses LLVM's native instrumentation for accurate coverage.
       # Unlike tarpaulin (ptrace-based), it properly handles #[cfg(coverage)]
       # conditionals we use to skip code paths that can't run in CI (e.g., reboot).
+      # cargo-llvm-cov pinned >= 0.8: --fail-under-file-lines (per-file gate)
+      # does not exist in the 0.6.x line.
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@60581cd7025e0e855cebd745379013e286d9c787 # v2.64.2
+        uses: taiki-e/install-action@4684b8405694ae9dd42c9f39ba901a70ae83f4a3 # v2.82.9
         with:
-          tool: cargo-llvm-cov
+          tool: cargo-llvm-cov@0.8.7
 
       # Run as root: some tests require privileged operations (modprobe, /proc writes).
       # The #[cfg(coverage)] paths in require_root() panic if not run as root,
@@ -77,9 +79,10 @@ jobs:
           format: lcov
 
       # Gate after the upload so Coveralls still receives the report when the
-      # threshold fails. `report` regenerates from the profdata and object
-      # files recorded by the generate step, so build/feature/workspace flags
-      # don't apply (cargo-llvm-cov 0.6.21 rejects them on `report`); sudo
-      # because that data is root-owned.
-      - name: Enforce minimum 90% line coverage
-        run: sudo -E env "PATH=$PATH" cargo llvm-cov report --fail-under-lines 90 --ignore-filename-regex 'src/main\.rs$'
+      # threshold fails. `report` rescores the profdata and object files
+      # recorded by the generate step - feature/workspace selection already
+      # happened at test time, so no such flags here; sudo because that data
+      # is root-owned. The per-file bound stops an aggregate score from
+      # masking under-tested modules.
+      - name: Enforce minimum 90% line coverage (total and per file)
+        run: sudo -E env "PATH=$PATH" cargo llvm-cov report --fail-under-lines 90 --fail-under-file-lines 90 --ignore-filename-regex 'src/main\.rs$'

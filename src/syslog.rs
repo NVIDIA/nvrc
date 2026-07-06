@@ -317,4 +317,19 @@ mod tests {
         // Just exercise the code path, don't assert success
         let _ = panic::catch_unwind(poll);
     }
+
+    #[test]
+    fn test_try_poll_swallows_errors() {
+        // /dev/log may be foreign (bind fails) or already ours; both must be
+        // non-fatal for the best-effort drain.
+        try_poll();
+    }
+
+    #[test]
+    fn test_forward_message_appends_to_syslog_file() {
+        crate::test_utils::require_root();
+        forward_message("<test> forward_message smoke").unwrap();
+        let content = std::fs::read_to_string(SYSLOG_FILE).unwrap();
+        assert!(content.contains("forward_message smoke"));
+    }
 }

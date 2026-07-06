@@ -56,4 +56,23 @@ mod tests {
         as_pid1_with(false, || exited.set(true));
         assert!(exited.get(), "non-PID-1 must report identity and exit");
     }
+
+    // The production guard calls std::process::exit(0), which no in-process
+    // test survives; fork so the child runs the real thing.
+    #[test]
+    fn test_as_pid1_production_guard_exits_zero() {
+        match unsafe { libc::fork() } {
+            0 => {
+                as_pid1();
+                unsafe { libc::_exit(1) } // only reached if the guard fell through
+            }
+            pid if pid > 0 => {
+                let mut status = 0;
+                assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+                assert!(libc::WIFEXITED(status), "guard must exit, not crash");
+                assert_eq!(libc::WEXITSTATUS(status), 0, "guard must exit(0)");
+            }
+            err => panic!("fork failed: {err}"),
+        }
+    }
 }
