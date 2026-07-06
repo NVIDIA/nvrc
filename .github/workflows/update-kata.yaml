@@ -6,10 +6,14 @@ name: Update kata-containers on the runner
 # For a given kata-containers release tag this workflow:
 #   * checks out the matching kata-containers source at
 #     ${KATA_SRC_DIR} (where ci.yaml expects tools/osbuilder & build/);
-#   * rebuilds rootfs-image-nvidia-gpu so ${ROOTFS_IMAGE_DIR} contains a
-#     kata-agent matching the release;
-#   * installs the kata-static-<tag>-arm64.tar.xz payload to /opt/kata
-#     (the previous install is moved aside, not deleted).
+#   * rebuilds rootfs-image-nvidia-gpu-tarball with KBUILD_SIGN_PIN so
+#     ${ROOTFS_IMAGE_DIR} contains a kata-agent matching the release and a
+#     *signed* nvidia driver (the guest kernel enforces module signatures);
+#   * installs the kata-static-<tag>-arm64.tar.zst payload to /opt/kata
+#     (the previous install is moved aside, not deleted);
+#   * overlays the locally-built, signed vmlinuz-nvidia-gpu.container so the
+#     booting kernel and the signed modules share the same signing key
+#     (kata's released kernel is signed with a key we don't hold).
 #
 # /etc/kata-containers/configuration.toml is intentionally NOT touched:
 #   ci.yaml mutates kernel_params at runtime and the file carries
@@ -38,11 +42,51 @@ env:
   KATA_INSTALL_PREFIX: /opt/kata
   ROOTFS_IMAGE_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-image-nvidia-gpu/builddir/rootfs-image/ubuntu_rootfs
   IMAGE_BUILDER_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/image-builder
+  # kata's local-build output dir (relative to KATA_SRC_DIR) where the
+  # nvidia-gpu kernel tarball lands; consumed by the overlay step below.
+  LOCAL_BUILD_DIR: tools/packaging/kata-deploy/local-build/build
+  # Passphrase for the kernel build's ephemeral module-signing key. The kernel
+  # build generates a random key, embeds its public half in the vmlinuz + signs
+  # the in-tree modules, then encrypts the private key with this pin; the rootfs
+  # build (nvidia_chroot.sh) decrypts it with the SAME pin to sign nvidia.ko.
+  # It only has to be non-empty and identical across the kernel and rootfs
+  # signing of one build, so a hardcoded constant is fine: it guards a
+  # throwaway per-build CI key, not a real secret. Setting it turns on
+  # CONFIG_MODULE_SIG_FORCE + module signing.
+  KBUILD_SIGN_PIN: nvrc-tests
 
 jobs:
   update:
     runs-on: g5g.metal
     steps:
+      - name: Ensure GitHub CLI is installed
+        run: |
+          set -euo pipefail
+
+          if command -v gh >/dev/null 2>&1; then
+            echo "gh already present: $(gh --version | head -n 1)"
+            exit 0
+          fi
+
+          echo "gh not found, installing from the official apt repository..."
+          export DEBIAN_FRONTEND=noninteractive
+          if ! command -v curl >/dev/null 2>&1; then
+            sudo -E apt-get update
+            sudo -E apt-get install -y curl
+          fi
+
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+          sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+
+          sudo -E apt-get update
+          sudo -E apt-get install -y gh
+
+          echo "Installed $(gh --version | head -n 1)"
+
       - name: Resolve release tag
         id: tag
         env:
@@ -51,22 +95,29 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -z "${REQUESTED_TAG}" || "${REQUESTED_TAG}" == "latest" ]]; then
-            tag=$(gh release view --repo "${KATA_REPO}" --json tagName --jq '.tagName')
-            echo "Resolved 'latest' -> ${tag}"
-          else
-            if ! gh release view "${REQUESTED_TAG}" --repo "${KATA_REPO}" >/dev/null 2>&1; then
-              echo "ERROR: release '${REQUESTED_TAG}' not found in ${KATA_REPO}" >&2
-              exit 1
-            fi
-            tag="${REQUESTED_TAG}"
-          fi
+          # `gh release view <tag>` maps to GET /repos/${KATA_REPO}/releases/tags/<tag>
+          # and `gh release view` (no tag) to .../releases/latest. An empty or
+          # "latest" request resolves the latest release. Capture stderr so a
+          # transient API/network failure surfaces instead of being silently
+          # relabelled "release not found" (the release may well exist).
+          want="${REQUESTED_TAG}"
+          [[ "${want}" == "latest" ]] && want=""
 
-          if [[ -z "${tag}" ]]; then
-            echo "ERROR: could not resolve a tag" >&2
+          err=$(mktemp)
+          if ! tag=$(gh release view ${want:+"${want}"} \
+                       --repo "${KATA_REPO}" \
+                       --json tagName --jq '.tagName' 2>"${err}"); then
+            echo "ERROR: 'gh release view ${want:-<latest>}' failed for ${KATA_REPO}:" >&2
+            cat "${err}" >&2
             exit 1
           fi
 
+          if [[ -z "${tag}" ]]; then
+            echo "ERROR: could not resolve a tag for '${REQUESTED_TAG:-latest}' in ${KATA_REPO}" >&2
+            exit 1
+          fi
+
+          echo "Resolved '${REQUESTED_TAG:-latest}' -> ${tag}"
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Sync kata-containers source tree to ${{ steps.tag.outputs.tag }}
@@ -93,7 +144,7 @@ jobs:
           cd "${KATA_SRC_DIR}"
           # Drop any local mutations from a previous rootfs build before
           # moving the tree to a new tag. The build/ tree is regenerated
-          # by `make rootfs-image-nvidia-gpu` below.
+          # by `make rootfs-image-nvidia-gpu-tarball` below.
           sudo git reset --hard
           sudo git clean -ffdx
           git fetch --tags --force --prune origin
@@ -101,14 +152,35 @@ jobs:
 
           echo "kata-containers @ $(git rev-parse HEAD) ($(git describe --tags --always))"
 
-      - name: Rebuild rootfs-image-nvidia-gpu
+      - name: Rebuild rootfs-image-nvidia-gpu (signed nvidia driver)
         run: |
           set -euo pipefail
 
           cd "${KATA_SRC_DIR}"
-          # USE_DOCKER mirrors what ci.yaml uses when invoking image_builder.sh;
-          # script -fec gives sudo a TTY so docker output streams cleanly.
-          script -fec "sudo -E USE_DOCKER=true make rootfs-image-nvidia-gpu"
+          build_dir="${KATA_SRC_DIR}/${LOCAL_BUILD_DIR}"
+          kernel_tb="kata-static-kernel-nvidia-gpu.tar.zst"
+
+          # Build the kernel and rootfs in ONE invocation every run so both
+          # signing stages share a single key. rootfs-image-nvidia-gpu-tarball
+          # DEPS on kernel-nvidia-gpu-tarball: the kernel build generates the
+          # ephemeral signing key, embeds its public half in the vmlinuz and
+          # ships the KBUILD_SIGN_PIN-encrypted private key in the kernel
+          # headers, then the rootfs build (nvidia_chroot.sh) decrypts it with
+          # the same pin to sign nvidia.ko.
+          #
+          # The kernel is deliberately NOT cached across runs: a restored kernel
+          # carries an old public key while this run always re-signs nvidia.ko
+          # with a freshly generated key, so the guest kernel rejects the
+          # module ("Loading of module with unavailable key is rejected"). A
+          # fresh matched build is the whole point.
+          #
+          # Build as the runner user that owns the checkout (the kata-deploy
+          # build runs git in a container whose uid is derived from ${USER};
+          # building as root via sudo trips git's "dubious ownership" guard).
+          # USE_DOCKER mirrors ci.yaml; script -fec keeps a TTY so docker output
+          # streams cleanly.
+          export USER="${USER:-$(id -un)}"
+          script -fec "USE_DOCKER=true KBUILD_SIGN_PIN=${KBUILD_SIGN_PIN} make rootfs-image-nvidia-gpu-tarball"
 
           if [[ ! -d "${ROOTFS_IMAGE_DIR}" ]]; then
             echo "ERROR: expected ${ROOTFS_IMAGE_DIR} after build, not found" >&2
@@ -118,8 +190,13 @@ jobs:
             echo "ERROR: ${IMAGE_BUILDER_DIR}/image_builder.sh missing" >&2
             exit 1
           fi
+          if [[ ! -f "${build_dir}/${kernel_tb}" ]]; then
+            echo "ERROR: signed kernel tarball ${kernel_tb} not produced by the build" >&2
+            ls -l "${build_dir}" >&2 || true
+            exit 1
+          fi
 
-          echo "rootfs ready at ${ROOTFS_IMAGE_DIR}"
+          echo "rootfs ready at ${ROOTFS_IMAGE_DIR} (signed nvidia modules)"
 
       - name: Download kata-static asset
         id: download
@@ -135,9 +212,9 @@ jobs:
 
           gh release download "${TAG}" \
             --repo "${KATA_REPO}" \
-            --pattern 'kata-static-*-arm64.tar.xz'
+            --pattern 'kata-static-*-arm64.tar.zst'
 
-          asset=$(find . -maxdepth 1 -name 'kata-static-*-arm64.tar.xz' -printf '%f\n' 2>/dev/null | head -n 1 || true)
+          asset=$(find . -maxdepth 1 -name 'kata-static-*-arm64.tar.zst' -printf '%f\n' 2>/dev/null | head -n 1 || true)
           if [[ -z "${asset}" ]]; then
             echo "ERROR: no kata-static arm64 asset in release ${TAG}" >&2
             exit 1
@@ -159,8 +236,9 @@ jobs:
             echo "Previous install backed up to ${backup}"
           fi
 
-          # kata-static tarballs lay down files at /opt/kata when extracted from /.
-          sudo tar -xf "${ASSET}" -C /
+          # kata-static tarballs are zstd-compressed and lay down files at
+          # /opt/kata when extracted from /.
+          sudo tar --zstd -xf "${ASSET}" -C /
 
           if [[ ! -x "${KATA_INSTALL_PREFIX}/bin/containerd-shim-kata-v2" ]]; then
             echo "ERROR: containerd-shim-kata-v2 not found after install" >&2
@@ -168,6 +246,30 @@ jobs:
           fi
 
           echo "Installed kata-static ${TAG} to ${KATA_INSTALL_PREFIX}"
+
+      - name: Overlay locally-built signed nvidia-gpu kernel
+        run: |
+          set -euo pipefail
+
+          # The released kernel enforces module signatures against kata's
+          # release key, but our nvidia modules are signed with our own
+          # ephemeral key. Boot OUR kernel so the signatures match. This must
+          # run AFTER the release kata-static install above, which would
+          # otherwise clobber the kernel. The kernel tarball lays files down
+          # under /opt/kata when extracted from /.
+          kernel_tb="${KATA_SRC_DIR}/${LOCAL_BUILD_DIR}/kata-static-kernel-nvidia-gpu.tar.zst"
+          if [[ ! -f "${kernel_tb}" ]]; then
+            echo "ERROR: ${kernel_tb} missing; nvidia-gpu kernel not built" >&2
+            exit 1
+          fi
+          sudo tar --zstd -xf "${kernel_tb}" -C /
+
+          kernel="${KATA_INSTALL_PREFIX}/share/kata-containers/vmlinuz-nvidia-gpu.container"
+          if [[ ! -e "${kernel}" ]]; then
+            echo "ERROR: ${kernel} not present after overlay" >&2
+            exit 1
+          fi
+          echo "Installed locally-built signed kernel: $(readlink -f "${kernel}")"
 
       - name: Refresh /usr/local/bin symlinks
         run: |

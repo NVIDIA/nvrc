@@ -10,6 +10,7 @@ use crate::macros::ResultExt;
 use nix::sys::reboot::{reboot, RebootMode};
 use nix::unistd::sync;
 use std::fs;
+use std::io::Write;
 use std::panic;
 
 /// Default shutdown action: power off the VM.
@@ -30,8 +31,13 @@ pub fn set_panic_hook() {
 /// Production uses power_off(); tests inject a no-op to avoid rebooting.
 pub(crate) fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) {
     panic::set_hook(Box::new(move |panic_info| {
-        // fd 1,2 are always available from the kernel
-        eprintln!("panic: {panic_info}");
+        let msg = format!("NVRC panic: {panic_info}");
+        // /dev/kmsg lands in the kernel ring buffer, which the kernel flushes
+        // to the console during power-off. That is what keeps a panic visible
+        // in the guest console (and thus in the kata journal).
+        if let Ok(mut kmsg) = fs::OpenOptions::new().write(true).open("/dev/kmsg") {
+            let _ = writeln!(kmsg, "{msg}");
+        }
         sync();
         shutdown();
     }));
