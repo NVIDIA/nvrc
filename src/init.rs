@@ -68,11 +68,21 @@ mod tests {
             }
             pid if pid > 0 => {
                 let mut status = 0;
-                assert_eq!(unsafe { libc::waitpid(pid, &mut status, 0) }, pid);
+                let waited = loop {
+                    match unsafe { libc::waitpid(pid, &mut status, 0) } {
+                        -1 if std::io::Error::last_os_error().raw_os_error()
+                            == Some(libc::EINTR) =>
+                        {
+                            continue
+                        }
+                        r => break r,
+                    }
+                };
+                assert_eq!(waited, pid, "waitpid: {}", std::io::Error::last_os_error());
                 assert!(libc::WIFEXITED(status), "guard must exit, not crash");
                 assert_eq!(libc::WEXITSTATUS(status), 0, "guard must exit(0)");
             }
-            err => panic!("fork failed: {err}"),
+            _ => panic!("fork failed: {}", std::io::Error::last_os_error()),
         }
     }
 }

@@ -328,8 +328,15 @@ mod tests {
     #[test]
     fn test_forward_message_appends_to_syslog_file() {
         crate::test_utils::require_root();
-        forward_message("<test> forward_message smoke").unwrap();
+        // Nonce keeps the assertion honest against /run/syslog.log contents
+        // accumulated by earlier runs on the same machine.
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let marker = format!("<test> forward_message smoke {nonce}");
+        forward_message(&marker).unwrap();
         let content = std::fs::read_to_string(SYSLOG_FILE).unwrap();
-        assert!(content.contains("forward_message smoke"));
+        assert!(content.contains(&marker));
     }
 }
