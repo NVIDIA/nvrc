@@ -58,31 +58,26 @@ mod tests {
     }
 
     // The production guard calls std::process::exit(0), which no in-process
-    // test survives; fork so the child runs the real thing.
+    // test survives; fork so the child runs the real thing. Error handling is
+    // shaped so every line runs on the happy path: test code is instrumented
+    // too, and untaken lines count against the per-file coverage gate.
     #[test]
     fn test_as_pid1_production_guard_exits_zero() {
-        match unsafe { libc::fork() } {
-            0 => {
-                as_pid1();
-                unsafe { libc::_exit(1) } // only reached if the guard fell through
-            }
-            pid if pid > 0 => {
-                let mut status = 0;
-                let waited = loop {
-                    match unsafe { libc::waitpid(pid, &mut status, 0) } {
-                        -1 if std::io::Error::last_os_error().raw_os_error()
-                            == Some(libc::EINTR) =>
-                        {
-                            continue
-                        }
-                        r => break r,
-                    }
-                };
-                assert_eq!(waited, pid, "waitpid: {}", std::io::Error::last_os_error());
-                assert!(libc::WIFEXITED(status), "guard must exit, not crash");
-                assert_eq!(libc::WEXITSTATUS(status), 0, "guard must exit(0)");
-            }
-            _ => panic!("fork failed: {}", std::io::Error::last_os_error()),
+        let pid = unsafe { libc::fork() };
+        if pid == 0 {
+            as_pid1();
+            unsafe { libc::_exit(1) } // only reached if the guard fell through
         }
+        assert!(pid > 0, "fork failed: {}", std::io::Error::last_os_error());
+
+        let mut status = 0;
+        let waited = std::iter::repeat_with(|| unsafe { libc::waitpid(pid, &mut status, 0) })
+            .find(|&r| {
+                r != -1 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR)
+            })
+            .expect("repeat_with is infinite");
+        assert_eq!(waited, pid, "waitpid: {}", std::io::Error::last_os_error());
+        assert!(libc::WIFEXITED(status), "guard must exit, not crash");
+        assert_eq!(libc::WEXITSTATUS(status), 0, "guard must exit(0)");
     }
 }
