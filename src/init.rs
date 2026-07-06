@@ -58,9 +58,13 @@ mod tests {
     }
 
     // The production guard calls std::process::exit(0), which no in-process
-    // test survives; fork so the child runs the real thing. Error handling is
-    // shaped so every line runs on the happy path: test code is instrumented
-    // too, and untaken lines count against the per-file coverage gate.
+    // test survives; fork so the child runs the real thing. The child allocates
+    // and locks stdio (println!, sha256 of /proc/self/exe), which can deadlock
+    // if another harness thread holds those locks at fork time - so the test
+    // only exists under coverage, where the run is pinned to --test-threads=1.
+    // Error handling is shaped so every line runs on the happy path: test code
+    // is instrumented too, and untaken lines count against the per-file gate.
+    #[cfg(coverage)]
     #[test]
     fn test_as_pid1_production_guard_exits_zero() {
         let pid = unsafe { libc::fork() };

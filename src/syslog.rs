@@ -145,6 +145,7 @@ fn strip_priority(msg: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use tempfile::TempDir;
 
     // === strip_priority tests ===
@@ -325,7 +326,9 @@ mod tests {
         try_poll();
     }
 
+    // Serialized with the kmsg test that removes and recreates the same file.
     #[test]
+    #[serial]
     fn test_forward_message_appends_to_syslog_file() {
         crate::test_utils::require_root();
         // Nonce keeps the assertion honest against /run/syslog.log contents
