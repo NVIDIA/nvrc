@@ -15,9 +15,11 @@ concurrency:
 name: Code Coverage
 
 jobs:
-  # Detect if only docs changed - skip CI if so
+  # Detect if only docs changed - skip CI if so. Named uniquely: the CI
+  # workflow also has a "Detect changes" job, and required status checks
+  # match check names globally.
   changes:
-    name: Detect changes
+    name: Detect changes (coverage)
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
