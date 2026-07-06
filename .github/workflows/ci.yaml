@@ -46,7 +46,7 @@ env:
   ROOTFS_IMAGE_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-image-nvidia-gpu/builddir/rootfs-image/ubuntu_rootfs
   IMAGE_BUILDER_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/image-builder
 jobs:
-  build-asset:
+  run-e2e-nerdctl-tests:
     runs-on: g5g.metal
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -63,6 +63,9 @@ jobs:
           targets: aarch64-unknown-linux-musl
       - name: Build NVRC
         run: |
+          GIT_REV="$(git rev-parse --short HEAD)"
+          if [ -n "$(git status --porcelain)" ]; then GIT_REV="${GIT_REV}-dirty"; fi
+          export GIT_REV
           cargo build --release --target=aarch64-unknown-linux-musl
           sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC "$ROOTFS_IMAGE_DIR/bin/NVRC-aarch64-unknown-linux-musl"
       - name: Create Image with NVRC
