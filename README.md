@@ -159,7 +159,7 @@ optimization and static linking.
 cargo test
 
 # Coverage (requires llvm-cov and root; CI enforces >=90% lines, main.rs exempt)
-cargo llvm-cov --all-features --workspace --ignore-filename-regex 'src/main\.rs$' --fail-under-lines 90
+cargo llvm-cov --all-features --workspace --ignore-filename-regex 'src/main\.rs$' --fail-under-lines 90 -- --include-ignored --test-threads=1
 
 # Fuzzing
 cargo +nightly fuzz run kernel_params

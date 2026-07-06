@@ -77,7 +77,8 @@ jobs:
           format: lcov
 
       # Gate after the upload so Coveralls still receives the report when the
-      # threshold fails. `report` reuses the profdata from the generate step;
-      # sudo because that data is root-owned.
+      # threshold fails. `report` regenerates from the profdata and object
+      # files recorded by the generate step (no test-selection flags exist,
+      # e.g. --workspace); sudo because that data is root-owned.
       - name: Enforce minimum 90% line coverage
-        run: sudo -E env "PATH=$PATH" cargo llvm-cov report --fail-under-lines 90 --ignore-filename-regex 'src/main\.rs$'
+        run: sudo -E env "PATH=$PATH" cargo llvm-cov report --all-features --fail-under-lines 90 --ignore-filename-regex 'src/main\.rs$'
