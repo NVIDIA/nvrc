@@ -14,8 +14,9 @@ once_cell = "1.21.3"
 sha2 = { version = "0.10", default-features = false }
 
 [profile.release]
-opt-level = "s"
+opt-level = "z" # PID 1 runs once per boot: size beats speed
 lto = true
+codegen-units = 1 # one unit gives fat LTO full visibility and a smaller binary
 strip = true
 panic = 'abort'
 
