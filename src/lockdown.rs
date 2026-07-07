@@ -61,21 +61,6 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn test_set_panic_hook_with_custom_action() {
-        let called = Arc::new(AtomicBool::new(false));
-        let called_clone = called.clone();
-
-        // Install hook with test closure
-        set_panic_hook_with(move || {
-            called_clone.store(true, Ordering::SeqCst);
-        });
-
-        // The hook is installed - we can't trigger it without panicking,
-        // but we've exercised the code path
-        assert!(!called.load(Ordering::SeqCst)); // Not called yet
-    }
-
-    #[test]
     #[ignore] // Permanently disables module loading until reboot - run with --include-ignored on CI
     fn test_disable_modules_loading() {
         require_root();
@@ -96,10 +81,33 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(miri), serial_test::serial)]
+    #[cfg_attr(miri, ignore = "the hook calls sync(), which miri cannot emulate")]
+    fn test_panic_hook_invokes_shutdown_on_panic() {
+        let saved_hook = panic::take_hook();
+        let called = Arc::new(AtomicBool::new(false));
+        let called_clone = called.clone();
+        set_panic_hook_with(move || called_clone.store(true, Ordering::SeqCst));
+
+        assert!(!called.load(Ordering::SeqCst)); // must not fire on install
+
+        let result = panic::catch_unwind(|| panic!("boom"));
+        panic::set_hook(saved_hook);
+
+        assert!(result.is_err());
+        assert!(
+            called.load(Ordering::SeqCst),
+            "panic must reach the shutdown action"
+        );
+    }
+
+    #[test]
     #[ignore] // Installs real power_off hook - run with --include-ignored on CI
     fn test_set_panic_hook() {
-        // Installs the real hook (with power_off) - just don't trigger it!
+        // Restore the previous hook: leaving power_off installed powers
+        // off the machine on the next caught panic.
+        let saved_hook = panic::take_hook();
         set_panic_hook();
-        // If we got here, the hook was installed successfully
+        panic::set_hook(saved_hook);
     }
 }
