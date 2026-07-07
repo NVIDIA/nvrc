@@ -56,17 +56,16 @@ jobs:
           ref: ${{ inputs.commit-hash != '' && inputs.commit-hash || github.sha }}
           fetch-depth: 0 # This is needed in order to keep the commit ids history
           persist-credentials: false
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+      - name: Install pinned Rust toolchain
+        uses: ./.github/actions/rust-toolchain
         with:
-          toolchain: stable minus 2 releases
           targets: aarch64-unknown-linux-musl
       - name: Build NVRC
         run: |
           GIT_REV="$(git rev-parse --short HEAD)"
           if [ -n "$(git status --porcelain)" ]; then GIT_REV="${GIT_REV}-dirty"; fi
           export GIT_REV
-          cargo build --release --target=aarch64-unknown-linux-musl
+          cargo build --release --locked --target=aarch64-unknown-linux-musl
           sudo cp ./target/aarch64-unknown-linux-musl/release/NVRC "$ROOTFS_IMAGE_DIR/bin/NVRC-aarch64-unknown-linux-musl"
       - name: Create Image with NVRC
         run: |
