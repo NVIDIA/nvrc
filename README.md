@@ -139,7 +139,10 @@ nvrc.mode=gpu nvrc.fm.mode=0 nvrc.log=debug
 
 ## Build
 
-NVRC is compiled as a statically-linked musl binary for minimal dependencies:
+NVRC is compiled as a statically-linked musl binary for minimal dependencies.
+The compiler version is pinned in `rust-toolchain.toml`; rustup installs it,
+musl targets included, on first use. Requires `musl-gcc` (Debian/Ubuntu:
+`musl-tools`).
 
 ```bash
 # x86_64
@@ -149,8 +152,13 @@ cargo build --release --target x86_64-unknown-linux-musl
 cargo build --release --target aarch64-unknown-linux-musl
 ```
 
-Build configuration in `.cargo/config.toml` enables aggressive size
-optimization and static linking.
+Release artifacts are built with `./scripts/build-release.sh <target>`, which
+additionally remaps machine-specific paths so the binary is byte-reproducible;
+see [VERIFY.md](VERIFY.md) for reproducing and verifying a release.
+
+Codegen policy (size optimization, LTO, `panic=abort`) lives in
+`[profile.release]` in `Cargo.toml`; `.cargo/config.toml` holds the musl
+linker and static-linking flags.
 
 ## Testing
 

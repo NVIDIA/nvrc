@@ -259,6 +259,37 @@ If you run releases via `workflow_dispatch`, you can also pin the trigger:
 
 ---
 
+## 8) Reproduce the build
+
+Signature checks prove *who* built the artifact; a rebuild proves *what* was
+built. The release binary is byte-reproducible: building the tag yourself
+must yield exactly the sha256 recorded in Rekor — the same digest NVRC logs
+at boot (`NVRC version=... sha256=...`), so a dmesg line can be traced all
+the way back to public source.
+
+Requirements: `rustup` and `musl-gcc` (Debian/Ubuntu: `musl-tools`). The
+compiler version is taken from `rust-toolchain.toml` automatically —
+rustup installs the pinned toolchain and musl targets on first use.
+
+Run this from the directory that holds the extracted `NVRC-${TARGET}`
+binary from steps 2–3; the final comparison refers back to it as
+`../NVRC-${TARGET}`:
+
+```bash
+git clone --branch "$TAG" --depth 1 https://github.com/NVIDIA/nvrc
+cd nvrc
+# Remaps machine-specific paths (CARGO_HOME, toolchain sysroot) so your
+# bytes match CI's regardless of directory layout:
+./scripts/build-release.sh "$TARGET"
+sha256sum "target/${TARGET}/release/NVRC" "../NVRC-${TARGET}"
+```
+
+The two hashes must be identical. A mismatch means your toolchain deviates
+from `rust-toolchain.toml` (check `rustc -V`) or the artifact was not built
+from this tag.
+
+---
+
 ## Notes & troubleshooting
 
 - If **identity check fails**, ensure `REPO` and the regex
