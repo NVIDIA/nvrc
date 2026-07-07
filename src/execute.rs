@@ -47,11 +47,13 @@ mod tests {
     // ==================== foreground tests ====================
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_foreground_success() {
         foreground("/bin/true", &[]);
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_foreground_failure_exit_code() {
         // Command runs but exits non-zero - should panic
         let result = panic::catch_unwind(|| {
@@ -61,6 +63,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_foreground_not_found() {
         // Command doesn't exist - should panic
         let result = panic::catch_unwind(|| {
@@ -70,6 +73,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_foreground_with_args() {
         foreground("/bin/sh", &["-c", "exit 0"]);
 
@@ -82,6 +86,7 @@ mod tests {
     // ==================== background tests ====================
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_background_spawns() {
         let mut child = background("/bin/sleep", &["0.01"]);
         let status = child.wait().unwrap();
@@ -89,6 +94,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_background_not_found() {
         // Command doesn't exist - should panic
         let result = panic::catch_unwind(|| {
@@ -98,6 +104,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_background_check_later() {
         let mut child = background("/bin/sh", &["-c", "exit 7"]);
         let status = child.wait().unwrap();

@@ -40,14 +40,22 @@ mod tests {
     // calls can race and cause spurious failures.
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_load_loop() {
         require_root();
         load("loop");
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_load_nonexistent() {
         require_root();
         let result = panic::catch_unwind(|| {

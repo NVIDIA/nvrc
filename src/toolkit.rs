@@ -29,6 +29,7 @@ mod tests {
     use std::panic;
 
     #[test]
+    #[cfg_attr(miri, ignore = "spawns a process, which miri cannot emulate")]
     fn test_ctk_fails_without_binary() {
         let result = panic::catch_unwind(|| {
             ctk(&["--version"]);
@@ -37,6 +38,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "spawns a process, which miri cannot emulate")]
     fn test_nvidia_ctk_cdi_fails_without_binary() {
         let result = panic::catch_unwind(|| {
             nvidia_ctk_cdi();

@@ -35,6 +35,7 @@ mod tests {
     use std::cell::Cell;
 
     #[test]
+    #[cfg_attr(miri, ignore = "raw syscall(SYS_getpid) is not shimmed by miri")]
     fn test_running_as_init_false_for_test_harness() {
         // The test runner is never PID 1, so the real syscall must report so.
         assert!(!running_as_init());
@@ -51,6 +52,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_as_pid1_exits_when_not_init() {
         let exited = Cell::new(false);
         as_pid1_with(false, || exited.set(true));
@@ -66,6 +71,10 @@ mod tests {
     // is instrumented too, and untaken lines count against the per-file gate.
     #[cfg(coverage)]
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_as_pid1_production_guard_exits_zero() {
         let pid = unsafe { libc::fork() };
         if pid == 0 {

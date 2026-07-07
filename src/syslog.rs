@@ -174,6 +174,10 @@ mod tests {
     // === bind tests ===
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_bind_success() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
@@ -182,6 +186,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_bind_nonexistent_dir() {
         let path = Path::new("/nonexistent/dir/test.sock");
         let err = bind(path).unwrap_err();
@@ -190,6 +198,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_bind_already_exists() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
@@ -202,6 +214,10 @@ mod tests {
     // === poll_socket tests ===
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_poll_socket_no_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
@@ -212,6 +228,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_poll_socket_with_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
@@ -225,6 +245,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_poll_socket_strips_priority() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
@@ -238,6 +262,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_poll_socket_multiple_messages() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
@@ -260,6 +288,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_poll_socket_trims_trailing_whitespace() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
@@ -275,6 +307,10 @@ mod tests {
     // === poll_at / poll_once tests ===
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_poll_once_no_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
@@ -285,6 +321,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_poll_once_with_data() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("test.sock");
@@ -302,6 +342,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_poll_at_custom_path() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("custom.sock");
@@ -312,6 +356,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_poll_dev_log() {
         use std::panic;
         // poll() tries to bind /dev/log - may panic if already bound or no permission
@@ -320,6 +368,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_try_poll_swallows_errors() {
         // /dev/log may be foreign (bind fails) or already ours; both must be
         // non-fatal for the best-effort drain.
@@ -328,7 +380,11 @@ mod tests {
 
     // Serialized with the kmsg test that removes and recreates the same file.
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_forward_message_appends_to_syslog_file() {
         crate::test_utils::require_root();
         // Nonce keeps the assertion honest against /run/syslog.log contents
