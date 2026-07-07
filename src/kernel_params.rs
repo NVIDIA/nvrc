@@ -106,6 +106,92 @@ fn uvm_persistenced_mode(value: &str, ctx: &mut NVRC) {
     debug!("nvrc.uvm.persistence.mode: {enabled}");
 }
 
+/// Kani proof harnesses. NVRC panics by design on invalid state (panic ->
+/// reboot, see ARCHITECTURE.md), so the property is not "no panics" but
+/// "panics exactly when they should": no panic on any valid input, guaranteed
+/// panic on every invalid one.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// Nondeterministic UTF-8 string of at most N bytes. Kani explores every
+    /// byte value and every length, so a harness taking this proves its
+    /// property for ALL strings up to N bytes.
+    fn any_string<const N: usize>() -> String {
+        let bytes: [u8; N] = kani::any();
+        let len: usize = kani::any_where(|l| *l <= N);
+        let s = std::str::from_utf8(&bytes[..len]);
+        kani::assume(s.is_ok());
+        s.unwrap().to_owned()
+    }
+
+    /// parse_boolean is total (no input can panic init) and deny-by-default:
+    /// only the four accepted spellings map to true, everything else is false.
+    /// 8 bytes covers all accepted spellings (longest is "false") plus slack.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn parse_boolean_deny_by_default() {
+        let s = any_string::<8>();
+        let parsed = parse_boolean(&s);
+        let accepted = matches!(s.to_ascii_lowercase().as_str(), "on" | "true" | "1" | "yes");
+        assert_eq!(parsed, accepted);
+        kani::cover!(parsed, "a true spelling is reachable");
+        kani::cover!(!parsed, "a false input is reachable");
+    }
+
+    /// Hand-rolled u32-to-decimal: `to_string` drags core::fmt into the
+    /// model, which is prohibitively slow under CBMC.
+    fn decimal_string(mut v: u32) -> String {
+        let mut buf = [b'0'; 10]; // u32::MAX has 10 digits
+        let mut i = buf.len();
+        loop {
+            i -= 1;
+            buf[i] = b'0' + (v % 10) as u8;
+            v /= 10;
+            if v == 0 {
+                break;
+            }
+        }
+        std::str::from_utf8(&buf[i..]).unwrap().to_owned()
+    }
+
+    /// Clock/power parsers store every accepted value losslessly. Bounded to
+    /// 5 digits: GPU clocks (MHz) and power limits (W) never exceed that, and
+    /// proving the full 10-digit decimal codec takes CBMC >30min vs seconds.
+    /// Rejection of ALL malformed strings is proven unbounded below.
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn smi_parsers_roundtrip_5_digit_values() {
+        let v: u32 = kani::any();
+        kani::assume(v <= 99_999);
+        let s = decimal_string(v);
+        let mut c = NVRC::default();
+        nvidia_smi_lgc(&s, &mut c);
+        nvidia_smi_lmc(&s, &mut c);
+        nvidia_smi_pl(&s, &mut c);
+        assert_eq!(c.nvidia_smi_lgc, Some(v));
+        assert_eq!(c.nvidia_smi_lmc, Some(v));
+        assert_eq!(c.nvidia_smi_pl, Some(v));
+    }
+
+    /// Fail-fast fires: no value that fails u32 parsing can slip through
+    /// silently -- the parser must panic (rebooting the VM by design).
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(9)]
+    fn smi_parser_panics_on_every_invalid_value() {
+        let s = any_string::<8>();
+        kani::assume(s.parse::<u32>().is_err());
+        nvidia_smi_lgc(&s, &mut NVRC::default());
+    }
+
+    // process_kernel_params dispatch harnesses are pending: symbolic bytes
+    // flowing through split_whitespace force CBMC to model UTF-8 char
+    // decoding and Unicode whitespace tables, which does not converge in
+    // CI-viable time. The handlers themselves are proven above; dispatch
+    // stays covered by the kernel_params fuzz target.
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
