@@ -1,0 +1,65 @@
+name: Reproducible build
+
+# Build the tree twice, varying the inputs a verifier cannot copy from CI
+# (workspace directory, CARGO_HOME), and require identical sha256. Guards
+# the dmesg <-> Rekor correlation promised in VERIFY.md and ARCHITECTURE.md.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  double-build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install dependencies
+        # No apt-get update: the image index suffices; refreshing pulls
+        # third-party repos whose breakage fails the job.
+        run: sudo apt-get install -y musl-tools
+
+      - name: Build twice from different locations
+        shell: bash
+        # Same script the release workflow runs.
+        run: |
+          set -euxo pipefail
+          for build in first second-deliberately-longer-path; do
+            src="${RUNNER_TEMP}/${build}/src"
+            mkdir -p "$src" "${RUNNER_TEMP}/${build}/cargo-home"
+            cp -a . "$src"
+            (cd "$src" && CARGO_HOME="${RUNNER_TEMP}/${build}/cargo-home" \
+              ./scripts/build-release.sh "${{ matrix.target }}")
+          done
+
+      - name: Require identical sha256
+        shell: bash
+        run: |
+          set -euo pipefail
+          a="${RUNNER_TEMP}/first/src/target/${{ matrix.target }}/release/NVRC"
+          b="${RUNNER_TEMP}/second-deliberately-longer-path/src/target/${{ matrix.target }}/release/NVRC"
+          sha256sum "$a" "$b"
+          if [ "$(sha256sum < "$a")" != "$(sha256sum < "$b")" ]; then
+            echo "::error::release binary is not reproducible across build locations"
+            # The offending path is usually visible in the strings diff.
+            diff <(strings "$a") <(strings "$b") | head -50 || true
+            exit 1
+          fi
