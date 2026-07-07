@@ -176,13 +176,35 @@ mod proofs {
 
     /// Fail-fast fires: no value that fails u32 parsing can slip through
     /// silently -- the parser must panic (rebooting the VM by design).
+    /// One harness per parser: they are textually identical today, but the
+    /// property must hold per entry point so an edit to one cannot silently
+    /// drop its fail-fast. A should_panic harness dies at the first panic,
+    /// so the three parsers cannot share one harness.
     #[kani::proof]
     #[kani::should_panic]
     #[kani::unwind(9)]
-    fn smi_parser_panics_on_every_invalid_value() {
+    fn smi_lgc_panics_on_every_invalid_value() {
         let s = any_string::<8>();
         kani::assume(s.parse::<u32>().is_err());
         nvidia_smi_lgc(&s, &mut NVRC::default());
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(9)]
+    fn smi_lmc_panics_on_every_invalid_value() {
+        let s = any_string::<8>();
+        kani::assume(s.parse::<u32>().is_err());
+        nvidia_smi_lmc(&s, &mut NVRC::default());
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(9)]
+    fn smi_pl_panics_on_every_invalid_value() {
+        let s = any_string::<8>();
+        kani::assume(s.parse::<u32>().is_err());
+        nvidia_smi_pl(&s, &mut NVRC::default());
     }
 
     // process_kernel_params dispatch harnesses are pending: symbolic bytes

@@ -48,6 +48,7 @@ jobs:
               - '**/*.rs'
               - '**/*.toml'
               - 'Cargo.lock'
+              - '.cargo/**'
               - '.github/workflows/kani.yaml'
 
   verify:
@@ -60,7 +61,24 @@ jobs:
         with:
           persist-credentials: false
 
+      # WHY cache + cargo install over model-checking/kani-github-action:
+      # the action is a stale composite (v1.1, 2024) that runs this exact
+      # install via internally UNPINNED actions - SHA-pinning a composite
+      # does not pin its internals. Caching the compiled binaries and the
+      # toolchain bundle removes the recurring compile cost and the
+      # crates.io dependency on warm runs.
+      - name: Cache Kani
+        id: cache-kani
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cargo/bin/kani
+            ~/.cargo/bin/cargo-kani
+            ~/.kani
+          key: kani-${{ env.KANI_VERSION }}-${{ runner.os }}
+
       - name: Install Kani
+        if: steps.cache-kani.outputs.cache-hit != 'true'
         run: |
           cargo install kani-verifier --version "${KANI_VERSION}" --locked
           cargo kani setup
