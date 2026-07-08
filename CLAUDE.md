@@ -49,7 +49,8 @@ to tmpfs.
 
 - `anyhow` - yes, supports no_std (disable default features)
 - `log` - yes, supports no_std
-- `nix` - REMOVED, replaced with direct libc syscalls
+- `nix` - direct dependency (mount, reboot, fork, poll, ioctl); no_std goal is
+  to replace it with direct libc syscalls
 - `once_cell` - yes, supports no_std
 - `kernlog` - no, requires std (may need replacement)
 - `rlimit` - needs investigation
