@@ -40,6 +40,10 @@ mod tests {
     use crate::test_utils::require_root;
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
     fn test_loopback_up() {
         require_root();
         // lo is already up on a normal system, calling again is idempotent
@@ -47,6 +51,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
     fn test_loopback_up_idempotent() {
         require_root();
         loopback_up();
@@ -54,6 +62,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
     fn test_loopback_up_verifies_flags() {
         require_root();
         loopback_up();
@@ -82,6 +94,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
     fn test_siocgifflags_invalid_interface() {
         require_root();
 

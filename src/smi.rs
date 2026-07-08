@@ -82,6 +82,7 @@ mod tests {
     // When fields are Some, nvidia-smi is called (panics without NVIDIA hardware)
 
     #[test]
+    #[cfg_attr(miri, ignore = "spawns a process, which miri cannot emulate")]
     fn test_lmc_some_fails_without_nvidia_smi() {
         let mut nvrc = NVRC::default();
         nvrc.nvidia_smi_lmc = Some(1000);
@@ -92,6 +93,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "spawns a process, which miri cannot emulate")]
     fn test_lgc_some_fails_without_nvidia_smi() {
         let mut nvrc = NVRC::default();
         nvrc.nvidia_smi_lgc = Some(1500);
@@ -102,6 +104,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "spawns a process, which miri cannot emulate")]
     fn test_pl_some_fails_without_nvidia_smi() {
         let mut nvrc = NVRC::default();
         nvrc.nvidia_smi_pl = Some(300);
@@ -112,6 +115,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "spawns a process, which miri cannot emulate")]
     fn test_srs_some_fails_without_nvidia_smi() {
         let mut nvrc = NVRC::default();
         nvrc.nvidia_smi_srs = Some("1".into());

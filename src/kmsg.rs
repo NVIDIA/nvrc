@@ -151,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(not(miri), serial)]
     fn test_kmsg_routes_to_dev_null_when_log_off() {
         // Default log level is Off, so kmsg() should open /dev/null
         log::set_max_level(log::LevelFilter::Off);
@@ -159,7 +159,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_kmsg_routes_to_kmsg_when_debug() {
         require_root();
         // When debug is enabled, kmsg() should open /dev/kmsg
@@ -169,7 +173,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_kernlog_setup() {
         require_root();
 
@@ -213,6 +221,10 @@ mod tests {
     // === wait_for_marker tests ===
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
     fn test_wait_for_marker_finds_marker() {
         let mut tmp = NamedTempFile::new().unwrap();
         writeln!(tmp, "some noise").unwrap();
@@ -228,6 +240,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
     fn test_wait_for_marker_finds_marker_at_end() {
         let mut tmp = NamedTempFile::new().unwrap();
         writeln!(tmp, "line 1").unwrap();
@@ -243,6 +259,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
     fn test_wait_for_marker_no_marker_panics() {
         let mut tmp = NamedTempFile::new().unwrap();
         writeln!(tmp, "no match here").unwrap();
@@ -259,6 +279,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
     fn test_wait_for_marker_empty_file_panics() {
         let tmp = NamedTempFile::new().unwrap();
 
@@ -273,6 +297,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
     fn test_wait_for_marker_nonexistent_file_panics() {
         let result = panic::catch_unwind(|| {
             wait_for_marker(&mut open_kmsg("/nonexistent/path"), "marker", 1);
@@ -281,6 +309,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
     fn test_wait_for_marker_partial_match_not_enough() {
         let mut tmp = NamedTempFile::new().unwrap();
         writeln!(tmp, "FM starting").unwrap();
@@ -299,7 +331,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_wait_for_marker_on_dev_kmsg() {
         require_root();
 

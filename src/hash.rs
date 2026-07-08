@@ -74,6 +74,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "under miri /proc/self/exe is the interpreter binary; hashing it takes hours"
+    )]
     fn test_sha256_self_returns_64_hex_chars() {
         let digest = sha256().expect("hash self");
         assert_eq!(digest.len(), 64);
@@ -99,6 +103,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "under miri /proc/self/exe is the interpreter binary; hashing it takes hours"
+    )]
     fn test_self_exe_runs_to_completion() {
         self_exe();
     }
@@ -122,6 +130,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "under miri /proc/self/exe is the interpreter binary; hashing it takes hours"
+    )]
     fn test_boot_line_of_self_carries_cargo_version_and_real_digest() {
         let digest = sha256().expect("hash self");
         let line = boot_line(&digest, GIT_REV);

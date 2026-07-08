@@ -195,6 +195,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_nv_fabricmanager_gpu_mode() {
         use tempfile::NamedTempFile;
 
@@ -212,6 +213,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_persistenced_success() {
         let tmpdir = TempDir::new().unwrap();
         let run_dir = tmpdir.path().join("nvidia-persistenced");
@@ -227,6 +229,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_persistenced_uvm_disabled() {
         let tmpdir = TempDir::new().unwrap();
         let run_dir = tmpdir.path().join("nvidia-persistenced");
@@ -237,6 +240,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_hostengine_success() {
         let mut nvrc = NVRC::default();
         nvrc.dcgm_enabled = Some(true);
@@ -245,6 +249,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_dcgm_exporter_success() {
         let mut nvrc = NVRC::default();
         nvrc.dcgm_enabled = Some(true);
@@ -252,12 +257,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_fabricmanager_success() {
         let mut nvrc = NVRC::default();
         nvrc.spawn_fabricmanager("/bin/true");
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_fabricmanager_with_port_guid() {
         let mut nvrc = NVRC::default();
         nvrc.port_guid = Some("0xdeadbeef".to_string());
@@ -266,6 +273,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_nvlsm_success() {
         let mut nvrc = NVRC::default();
         nvrc.port_guid = Some("0xdeadbeef".to_string());
@@ -274,6 +282,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_nvlsm_skipped_without_guid() {
         let mut nvrc = NVRC::default();
         // port_guid is None, should be a no-op
@@ -281,6 +290,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_persistenced_binary_not_found() {
         use std::panic;
 

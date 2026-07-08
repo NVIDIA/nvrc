@@ -98,6 +98,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
     fn test_agent_setup() {
         require_root();
 
@@ -115,6 +119,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "exec_agent calls execvp, which miri cannot emulate")]
     fn test_exec_agent_not_found() {
         // exec_agent with nonexistent command panics (doesn't exec)
         let result = panic::catch_unwind(|| {
@@ -124,6 +129,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_kata_agent_not_found() {
         require_root();
 
@@ -146,6 +155,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_syslog_loop_timeout() {
         // ~1s: two 500ms iterations; try_poll() is best-effort on /dev/log.
         let start = std::time::Instant::now();
@@ -163,7 +176,11 @@ mod tests {
     /// already bound by main(); this child does a fresh bind — on dev hosts
     /// with a host syslog daemon, reverting to `poll()` reproduces via EADDRINUSE.
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_syslog_loop_does_not_trigger_power_off_hook() {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
@@ -205,6 +222,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
     fn test_fork_agent_with_timeout() {
         require_root();
 

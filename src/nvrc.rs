@@ -67,6 +67,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_track_daemon() {
         let mut nvrc = NVRC::default();
         let child = Command::new("/bin/true").spawn().unwrap();
@@ -76,6 +77,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_health_checks_success() {
         let mut nvrc = NVRC::default();
         // /bin/true exits with 0
@@ -86,6 +88,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_health_checks_failure() {
         let mut nvrc = NVRC::default();
         // /bin/false exits with 1
@@ -99,6 +102,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_health_checks_still_running() {
         let mut nvrc = NVRC::default();
         // sleep 1 will still be running when we check immediately
@@ -114,6 +118,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_health_checks_multiple() {
         let mut nvrc = NVRC::default();
         nvrc.track_daemon("d1", Command::new("/bin/true").spawn().unwrap());

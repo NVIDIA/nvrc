@@ -109,6 +109,7 @@ mod tests {
     // === mount_optional tests ===
 
     #[test]
+    #[cfg_attr(miri, ignore = "mount/mknod are foreign syscalls miri cannot emulate")]
     fn test_mount_optional_target_not_exists() {
         // When target path doesn't exist, should be no-op
         let filesystems = "nodev tmpfs\n";
@@ -122,6 +123,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore = "mount/mknod are foreign syscalls miri cannot emulate")]
     fn test_mount_optional_fs_not_available() {
         use tempfile::TempDir;
 
@@ -141,6 +143,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
     fn test_mount_optional_success() {
         use nix::mount::umount;
         use tempfile::TempDir;
@@ -169,6 +175,7 @@ mod tests {
     // === Error path tests ===
 
     #[test]
+    #[cfg_attr(miri, ignore = "mount/mknod are foreign syscalls miri cannot emulate")]
     fn test_mount_fails_nonexistent_target() {
         use std::panic;
 
@@ -187,6 +194,10 @@ mod tests {
     // === setup_at() tests with temp directory ===
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
     fn test_setup_at_with_temp_root() {
         use nix::mount::umount;
         use tempfile::TempDir;

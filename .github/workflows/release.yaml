@@ -73,26 +73,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master # v1.70
+      - name: Install pinned Rust toolchain
+        uses: ./.github/actions/rust-toolchain
         with:
-          toolchain: stable minus 2 releases
           targets: ${{ matrix.target }}
 
 
       - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools jq
+        # No apt-get update: the image index suffices; refreshing pulls
+        # third-party repos whose breakage fails the job.
+        run: sudo apt-get install -y musl-tools jq
 
       - name: Build (${{ matrix.target }})
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p dist
-          SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
-          export SOURCE_DATE_EPOCH
-          cargo build --release --target "${{ matrix.target }}"
+          ./scripts/build-release.sh "${{ matrix.target }}"
           cp "target/${{ matrix.target }}/release/NVRC" "dist/NVRC-${{ matrix.target }}"
 
       - name: Compute digest (sha256sum format)

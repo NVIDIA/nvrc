@@ -1,0 +1,9 @@
+# The compiler is a build input: rustc embeds /rustc/<commit-hash> stdlib
+# paths in the binary, so byte-reproducibility requires one pinned rustc
+# (ARCHITECTURE.md "Provenance & Supply-Chain Security"). Bump in its own
+# commit.
+[toolchain]
+channel = "1.94.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]

@@ -40,18 +40,22 @@ jobs:
 
       - name: Install Rust nightly
         # WHY nightly: libFuzzer instrumentation requires nightly compiler features
-        uses: dtolnay/rust-toolchain@nightly
+        # WHY toolchain input: a SHA-pinned ref no longer selects the channel
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master 2026-06-30
         with:
+          toolchain: nightly
           components: llvm-tools-preview
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz
+        # +nightly: a bare cargo install would pull the pinned toolchain
+        run: cargo +nightly install cargo-fuzz
 
       - name: Run fuzzer - ${{ matrix.target }}
         # WHY max_total_time: prevent infinite runs, control CI costs
         # WHY -jobs=2: parallel fuzzing instances for better coverage
+        # +nightly outranks rust-toolchain.toml; libFuzzer needs nightly rustc
         run: |
-          cargo fuzz run ${{ matrix.target }} -- \
+          cargo +nightly fuzz run ${{ matrix.target }} -- \
             -max_total_time=${{ env.FUZZ_DURATION }} \
             -jobs=2
 

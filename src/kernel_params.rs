@@ -123,7 +123,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_nvrc_log_debug() {
         require_root();
         log_setup();
@@ -134,7 +138,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_process_kernel_params_nvrc_log_debug() {
         require_root();
         log_setup();
@@ -149,7 +157,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_process_kernel_params_nvrc_log_info() {
         require_root();
         log_setup();
@@ -164,7 +176,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_process_kernel_params_nvrc_log_0() {
         require_root();
         log_setup();
@@ -175,7 +191,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_process_kernel_params_nvrc_log_none() {
         require_root();
         log_setup();
@@ -186,7 +206,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_process_kernel_params_nvrc_log_trace() {
         require_root();
         log_setup();
@@ -197,7 +221,11 @@ mod tests {
     }
 
     #[test]
-    #[serial]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    #[cfg_attr(not(miri), serial)]
     fn test_process_kernel_params_nvrc_log_unknown() {
         require_root();
         log_setup();

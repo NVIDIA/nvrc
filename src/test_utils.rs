@@ -75,6 +75,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
     fn test_require_root_when_actually_root() {
         // We're running as root for coverage, so this should succeed
         require_root();
