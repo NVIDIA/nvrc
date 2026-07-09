@@ -54,7 +54,10 @@ jobs:
               - '**/*.lock'
               - 'Cargo.lock'
               - '.cargo/**'
-
+              # Action/workflow bumps must run the E2E too - a broken or
+              # malicious action update would otherwise merge untested.
+              - '.github/workflows/**'
+              - '.github/actions/**'
   ci:
     needs: changes
     # Only run on self-hosted runner if: 1) ok-to-test label present (security), 2) code changed (efficiency)
@@ -74,20 +77,26 @@ jobs:
   # Gate job for branch protection - set "CI Complete" as required status check
   # Passes when: CI succeeded OR no code changes (docs-only PR)
   ci-complete:
-    name: CI Complete
+    name: Check CI Result
     needs: [changes, ci]
     if: always() && contains(github.event.pull_request.labels.*.name, 'ok-to-test')
     runs-on: ubuntu-latest
     steps:
       - name: Check CI result
+        env:
+          CODE_CHANGED: ${{ needs.changes.outputs.code }}
+          CI_RESULT: ${{ needs.ci.result }}
         run: |
-          if [[ "${{ needs.changes.outputs.code }}" != "true" ]]; then
+          # Only an explicit "false" from the changes job counts as a
+          # docs-only PR. An empty value means the changes job itself failed,
+          # and the gate must fail rather than let the PR merge untested.
+          if [[ "${CODE_CHANGED}" == "false" ]]; then
             echo "✓ No code changes - CI skipped"
             exit 0
           fi
-          if [[ "${{ needs.ci.result }}" == "success" ]]; then
+          if [[ "${CI_RESULT}" == "success" ]]; then
             echo "✓ CI passed"
             exit 0
           fi
-          echo "✗ CI failed: ${{ needs.ci.result }}"
+          echo "✗ CI failed: ${CI_RESULT} (code changed: '${CODE_CHANGED}')"
           exit 1

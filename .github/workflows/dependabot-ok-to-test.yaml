@@ -1,0 +1,37 @@
+name: Auto ok-to-test for Dependabot
+
+# Dependabot branches live in this repo and are authored only by GitHub's
+# dependabot service, so its updates are pre-approved for the E2E runner -
+# testing dependency and action bumps on real hardware is what the label
+# exists for. Safe despite the dangerous trigger: no PR code is executed,
+# the job only adds a label via the API.
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    types:
+      - opened
+      - reopened
+      # Dependabot rebases its PRs; re-add after each push
+      # (revoke-ok-to-test skips dependabot).
+      - synchronize
+
+permissions:
+  pull-requests: write
+  issues: write # labels ride the Issues API even on PRs
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    # PR author, not github.actor: the actor is whoever triggered the event
+    # and is spoofable (e.g. "@dependabot rebase" on a third-party PR).
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['ok-to-test'],
+            });
+            core.info('Added ok-to-test: dependabot updates are pre-approved for E2E.');

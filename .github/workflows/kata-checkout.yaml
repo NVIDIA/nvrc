@@ -1,0 +1,152 @@
+name: kata-checkout slash command
+
+# "/kata-checkout <ref>" on a PR switches the runner's kata source tree to
+# a ref from the canonical kata-containers repo ONLY - fork code never
+# reaches the runner. WHY: ecosystem-coupled changes (e.g. an
+# oci-spec bump) can only go green against a kata WIP branch that carries
+# the matching change - this lets the pair be E2E-validated on the metal
+# before either repo merges. Runs the default-branch definition; no PR code
+# executes here.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+# The kata tree is shared runner state; queued switches must not interleave.
+concurrency:
+  group: kata-checkout-tree
+  cancel-in-progress: false
+
+env:
+  KATA_SRC_DIR: /home/container-device-interface-rs/actions-runner/_work/kata-containers
+  # Canonical repo only - never forks.
+  KATA_REPO: kata-containers/kata-containers
+
+jobs:
+  checkout:
+    # Cheap pre-filter; the real gate is the maintainer check below.
+    # Association is set by GitHub, not spoofable from the comment.
+    # Trailing space: the command requires an argument and must not
+    # prefix-match other commands.
+    if: >-
+      ${{ github.event.issue.pull_request &&
+          startsWith(github.event.comment.body, '/kata-checkout ') &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) }}
+    runs-on: g5g.metal
+    permissions:
+      contents: read
+      pull-requests: write # acknowledge with the resolved SHA
+      issues: write # comments on PRs ride the Issues API
+
+    steps:
+      # Association alone is too coarse (MEMBER = any org member): this puts
+      # arbitrary kata code on the self-hosted runner, so require an actual
+      # repository role of admin or maintain, resolved from the API - the
+      # commenter cannot influence it. Runs before anything touches the tree.
+      - name: Require maintainer permission
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const user = context.payload.comment.user.login;
+            let role = 'none';
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: user,
+              });
+              role = data.role_name || data.permission;
+            } catch (error) {
+              // 404 = not a collaborator: fall through to the denial path.
+              // Anything else fails closed without a comment - deliberate.
+              if (error.status !== 404) throw error;
+            }
+            if (!['admin', 'maintain'].includes(role)) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `\`/kata-checkout\` requires maintainer permission on this repository; @${user} has role \`${role}\`.`,
+              });
+              core.setFailed(`denied: ${user} has role '${role}', need admin or maintain`);
+              return; // setFailed does not stop execution
+            }
+            core.info(`${user} authorized with role '${role}'`);
+
+      - name: Parse command
+        id: cmd
+        env:
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          set -euo pipefail
+
+          # Strict charset keeps the comment body out of shell/git option
+          # positions; a single argument only - no repo override, forks are
+          # deliberately not supported.
+          read -r _ ref extra <<<"${BODY}" || true
+          if [[ -n "${extra:-}" ]]; then
+            echo "ERROR: usage: /kata-checkout <ref> (canonical kata-containers repo only)" >&2
+            exit 1
+          fi
+          # "-" is git's previous-checkout notation; anything else must
+          # start alphanumeric so a ref can never look like an option.
+          if [[ "${ref:-}" != "-" ]] && [[ ! "${ref:-}" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]]; then
+            echo "ERROR: usage: /kata-checkout <ref>" >&2
+            exit 1
+          fi
+          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Switch the kata tree
+        env:
+          REF: ${{ steps.cmd.outputs.ref }}
+        run: |
+          set -euo pipefail
+
+          cd "${KATA_SRC_DIR}"
+
+          # Recorded so the ack comment always says how to get back.
+          prev=$(git describe --tags --always)
+          echo "prev=${prev}" >> "$GITHUB_OUTPUT"
+
+          git reset --hard
+          # No git clean: build/ (rootfs, image) is untracked and survives
+          # the switch - a full clean would force a 30+ minute reprovision
+          # (update-kata) for changes that only affect the agent.
+          if [[ "${REF}" == "-" ]]; then
+            # git's previous-checkout notation; the reflog persists on the
+            # runner, so this undoes the last switch.
+            git checkout --detach -
+          elif git fetch -- "https://github.com/${KATA_REPO}.git" "${REF}" 2>/dev/null; then
+            git checkout --detach FETCH_HEAD
+          elif git rev-parse --verify --quiet "${REF}^{commit}" >/dev/null; then
+            # Already-local tag or SHA (e.g. the provisioned release tag).
+            git checkout --detach "${REF}"
+          else
+            echo "ERROR: '${REF}' not found in ${KATA_REPO} or locally" >&2
+            exit 1
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git log -1 --oneline
+        id: tree
+
+      - name: Acknowledge on the PR
+        # github-script instead of gh: no dependency on CLI presence on the
+        # self-hosted runner, consistent with the other label/comment flows.
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REF: ${{ steps.cmd.outputs.ref }}
+          SHA: ${{ steps.tree.outputs.sha }}
+          PREV: ${{ steps.tree.outputs.prev }}
+        with:
+          script: |
+            const { REF, SHA, PREV } = process.env;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Runner kata tree switched to \`kata-containers/kata-containers#${REF}\` (\`${SHA}\`), previously at \`${PREV}\`. ` +
+                `Re-apply \`ok-to-test\` to run the E2E against it. Restore with \`/kata-checkout -\` or ` +
+                `\`/kata-checkout ${PREV}\`; full reprovision via the update-kata workflow.`,
+            });

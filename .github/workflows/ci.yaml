@@ -45,6 +45,7 @@ permissions:
 env:
   ROOTFS_IMAGE_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-image-nvidia-gpu/builddir/rootfs-image/ubuntu_rootfs
   IMAGE_BUILDER_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/image-builder
+  KATA_CONFIG: /etc/kata-containers/configuration.toml.nvrc
 jobs:
   run-e2e-nerdctl-tests:
     runs-on: g5g.metal
@@ -84,7 +85,9 @@ jobs:
 
           # Capture nerdctl output and exit code without aborting under bash -e.
           set +e
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 \
+            --label "io.katacontainers.config_path=${KATA_CONFIG}" \
+            --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
           exit_code=$?
           set -e
 
