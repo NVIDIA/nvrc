@@ -11,7 +11,7 @@ kernlog = "0.3"
 rlimit = "0.10.2"
 libc = "0.2.178"
 once_cell = "1.21.3"
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 
 [profile.release]
 opt-level = "z" # PID 1 runs once per boot: size beats speed
