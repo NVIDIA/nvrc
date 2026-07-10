@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
+use crate::gpu_extension;
 use log::debug;
 use nix::unistd::{fork, ForkResult};
 use rlimit::{setrlimit, Resource};
@@ -11,6 +12,11 @@ use std::thread::sleep;
 use std::time::Duration;
 
 const KATA_AGENT_PATH: &str = "/usr/bin/kata-agent";
+
+/// Env var kata-agent reads to pick its attestation-agent. Set to
+/// [`gpu_extension::ATTESTER_VARIANT_NVIDIA`] when the GPU extension is present, unset
+/// otherwise. Contract shared with kata-agent (`src/agent/src/main.rs`).
+const ATTESTER_VARIANT_ENV: &str = "KATA_ATTESTER_VARIANT";
 
 /// Syslog polling runs indefinitely in production—VM lifetime measured in hours/days,
 /// not the 136 years this represents. Using u32::MAX avoids overflow concerns.
@@ -34,17 +40,28 @@ fn agent_setup() {
     debug!("kata-agent RLIMIT_NOFILE: {:?}", lim);
 }
 
+/// Build the kata-agent command, injecting the attester-variant env var when
+/// set. Split from [`exec_agent`] so the env wiring is unit-testable. GPU libs
+/// resolve via the loader cache ([`gpu_extension::setup`]), not `LD_LIBRARY_PATH`.
+fn agent_command(cmd: &str, attester_variant: Option<&str>) -> Command {
+    let mut command = Command::new(cmd);
+    if let Some(variant) = attester_variant {
+        command.env(ATTESTER_VARIANT_ENV, variant);
+    }
+    command
+}
+
 /// exec() replaces this process with kata-agent, so it only returns on failure.
 /// We want kata-agent to become PID 1's child for proper process hierarchy.
-fn exec_agent(cmd: &str) {
-    let err = Command::new(cmd).exec();
+fn exec_agent(cmd: &str, attester_variant: Option<&str>) {
+    let err = agent_command(cmd, attester_variant).exec();
     panic!("exec {cmd} failed: {err}");
 }
 
 /// Path parameter enables testing with /bin/true instead of real kata-agent
-fn kata_agent(path: &str) {
+fn kata_agent(path: &str, attester_variant: Option<&str>) {
     agent_setup();
-    exec_agent(path);
+    exec_agent(path, attester_variant);
 }
 
 /// Drains `/dev/log` (bound in `main()` before fork) into `/run/syslog.log`.
@@ -71,7 +88,7 @@ pub fn fork_agent(timeout_secs: u32) {
     // 4. No locks or mutexes exist that could deadlock in child
     match unsafe { fork() }.expect("fork agent") {
         ForkResult::Parent { .. } => {
-            kata_agent(KATA_AGENT_PATH);
+            kata_agent(KATA_AGENT_PATH, gpu_extension::attester_variant());
         }
         ForkResult::Child => {
             syslog_loop(timeout_secs);
@@ -123,9 +140,36 @@ mod tests {
     fn test_exec_agent_not_found() {
         // exec_agent with nonexistent command panics (doesn't exec)
         let result = panic::catch_unwind(|| {
-            exec_agent("/nonexistent/command");
+            exec_agent("/nonexistent/command", None);
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_agent_command_injects_attester_variant() {
+        use std::ffi::OsStr;
+        let cmd = agent_command("/bin/true", Some(gpu_extension::ATTESTER_VARIANT_NVIDIA));
+        let found = cmd.get_envs().any(|(k, v)| {
+            k == OsStr::new(ATTESTER_VARIANT_ENV)
+                && v == Some(OsStr::new(gpu_extension::ATTESTER_VARIANT_NVIDIA))
+        });
+        assert!(
+            found,
+            "expected {ATTESTER_VARIANT_ENV} to be set on the agent command"
+        );
+    }
+
+    #[test]
+    fn test_agent_command_no_variant_leaves_env_unset() {
+        use std::ffi::OsStr;
+        let cmd = agent_command("/bin/true", None);
+        let found = cmd
+            .get_envs()
+            .any(|(k, _)| k == OsStr::new(ATTESTER_VARIANT_ENV));
+        assert!(
+            !found,
+            "did not expect {ATTESTER_VARIANT_ENV} without a GPU extension"
+        );
     }
 
     #[test]
@@ -148,7 +192,7 @@ mod tests {
             ForkResult::Child => {
                 set_test_panic_hook();
                 // Setup succeeds, exec panics
-                kata_agent("/nonexistent/agent");
+                kata_agent("/nonexistent/agent", None);
                 std::process::exit(0); // Won't reach here
             }
         }

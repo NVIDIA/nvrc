@@ -4,6 +4,8 @@
 mod config;
 mod daemon;
 mod execute;
+mod gpu_extension;
+mod guest_extension_image;
 mod hash;
 mod infiniband;
 mod init;
@@ -104,6 +106,12 @@ fn main() {
     syslog::poll();
     init.process_kernel_params(None);
     hash::self_exe();
+
+    // Before disable_modules_loading() so dm-verity/erofs modules can still load.
+    guest_extension_image::mount_all();
+
+    // Expose gpu-extension libs/firmware before any driver load. No-op if absent.
+    gpu_extension::setup();
 
     let detected = mode::detect();
     match detected.mode {

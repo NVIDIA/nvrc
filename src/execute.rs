@@ -95,6 +95,8 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
+    // spawn fails and or_panic diverges, so no child is ever returned to wait on.
+    #[allow(clippy::zombie_processes)]
     fn test_background_not_found() {
         // Command doesn't exist - should panic
         let result = panic::catch_unwind(|| {

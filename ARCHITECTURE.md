@@ -430,6 +430,32 @@ authenticity of new or mutable files, and IPE enforces that only measured,
 policy-approved code ever reaches the CPU, delivering continuous, verifiable
 integrity from boot through runtime.
 
+### **Composable Image Extensions** [#107](https://github.com/NVIDIA/nvrc/issues/107) [#112](https://github.com/NVIDIA/nvrc/issues/112)
+
+Composable VM images split the guest into a measured base rootfs plus
+cold-plugged **extension** images (dm-verity + EROFS), each mounted read-only at
+`/run/kata-extensions/<name>/` before kata-agent starts. Because every extension
+is verity-measured, it inherits the same integrity guarantees as the base
+rootfs, but living on its own superblock forces three controls to be
+reconciled:
+
+* **LoadPin** [#107](https://github.com/NVIDIA/nvrc/issues/107). LoadPin pins
+  kernel file loads (modules, firmware) to the first-mounted rootfs superblock,
+  not to paths. An extension is its own EROFS superblock, so
+  `modprobe --dirname /run/kata-extensions/gpu` and the `/lib/firmware/nvidia`
+  firmware bind (a bind changes the path, not the superblock) fail the pin.
+  Reconciliation: `CONFIG_SECURITY_LOADPIN_VERITY` accepts trusted dm-verity root
+  digests, fed from the extension digests already on the measured cmdline.
+* **SBOM** [#112](https://github.com/NVIDIA/nvrc/issues/112). The base SBOM
+  covers only the base rootfs. Each extension ships its own SBOM bound to its
+  verity root hash, so the guest audit becomes base SBOM + one SBOM per measured
+  extension.
+* **Loader path**. Extension libraries sit on their own superblock at
+  `/run/kata-extensions/gpu/usr/lib/<triplet>` (mirroring the monolith's multiarch
+  layout), off the loader's search path. NVRC rebuilds `ld.so.cache` from the
+  extension and binds it over the read-only base copy, so every consumer
+  (kata-agent, the CDI hooks it runs, and NVRC's own GPU tools) resolves them.
+
 ### **Linux Kernel Runtime Guard (LKRG)** [#110](https://github.com/NVIDIA/nvrc/issues/110)
 
 Linux Kernel Runtime Guard is a self-protecting kernel module that continuously

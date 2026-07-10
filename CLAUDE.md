@@ -49,7 +49,8 @@ to tmpfs.
 
 - `anyhow` - yes, supports no_std (disable default features)
 - `log` - yes, supports no_std
-- `nix` - REMOVED, replaced with direct libc syscalls
+- `nix` - direct dependency (mount, reboot, fork, poll, ioctl); no_std goal is
+  to replace it with direct libc syscalls
 - `once_cell` - yes, supports no_std
 - `kernlog` - no, requires std (may need replacement)
 - `rlimit` - needs investigation
@@ -68,6 +69,21 @@ processes, and sockets.
 - Minimal surface: implement only what NVRC actually needs
 - Single-threaded: NVRC is PID 1 (init) with no threads - no thread::sleep, no
   mutexes, no thread-safe synchronization needed in production code
+
+**Composable image extensions (migration notes):**
+
+- Prefix whitelisting: extensions mount under `/run/kata-extensions/<name>/`, a
+  runtime-built path, so the whitelist needs a prefix rule for that tree, not
+  exact paths. The extension-name charset check (reject `..`/traversal) keeps the
+  prefix sound.
+- Measured arguments: `veritysetup open` takes runtime values (root hash, salt,
+  block counts) from the measured cmdline, so they are as trustworthy as
+  compile-time constants. The future `process` API should encode this (e.g. a
+  `MeasuredArg` type) rather than a blanket `String` escape hatch; `veritysetup`
+  joins the binary whitelist.
+- Loader path: everything (kata-agent, the CDI hooks it runs, and NVRC's own GPU
+  tools) finds the GPU libraries via the loader cache, which NVRC rebuilds from
+  the extension's lib dir.
 
 ## Guidelines
 

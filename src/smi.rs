@@ -4,9 +4,14 @@
 //! All are optional—if the kernel param isn't set, they return immediately.
 
 use crate::execute::foreground;
+use crate::gpu_extension;
 use crate::nvrc::NVRC;
 
 const NVIDIA_SMI: &str = "/bin/nvidia-smi";
+
+fn nvidia_smi() -> String {
+    gpu_extension::path(NVIDIA_SMI)
+}
 
 impl NVRC {
     /// Lock memory clocks to a specific frequency (MHz).
@@ -15,7 +20,7 @@ impl NVRC {
         let Some(mhz) = self.nvidia_smi_lmc else {
             return;
         };
-        foreground(NVIDIA_SMI, &["-lmc", &mhz.to_string()]);
+        foreground(&nvidia_smi(), &["-lmc", &mhz.to_string()]);
     }
 
     /// Lock GPU core clocks to a specific frequency (MHz).
@@ -24,7 +29,7 @@ impl NVRC {
         let Some(mhz) = self.nvidia_smi_lgc else {
             return;
         };
-        foreground(NVIDIA_SMI, &["-lgc", &mhz.to_string()]);
+        foreground(&nvidia_smi(), &["-lgc", &mhz.to_string()]);
     }
 
     /// Set GPU power limit in watts.
@@ -33,7 +38,7 @@ impl NVRC {
         let Some(watts) = self.nvidia_smi_pl else {
             return;
         };
-        foreground(NVIDIA_SMI, &["-pl", &watts.to_string()]);
+        foreground(&nvidia_smi(), &["-pl", &watts.to_string()]);
     }
 
     /// Set GPU Ready State after successful attestation.
@@ -44,7 +49,7 @@ impl NVRC {
         let Some(ref state) = self.nvidia_smi_srs else {
             return;
         };
-        foreground(NVIDIA_SMI, &["conf-compute", "-srs", state]);
+        foreground(&nvidia_smi(), &["conf-compute", "-srs", state]);
     }
 }
 

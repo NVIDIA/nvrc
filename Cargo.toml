@@ -1,6 +1,6 @@
 [package]
 name = "NVRC"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 
 [dependencies]
@@ -24,6 +24,7 @@ panic = 'abort'
 mktemp = "0.5.1"
 tempfile = "3.23.0"
 serial_test = "3.2.0"
+rstest = "0.26.1"
 
 [features]
 confidential = []
