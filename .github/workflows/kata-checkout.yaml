@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  KATA_SRC_DIR: /home/container-device-interface-rs/actions-runner/_work/kata-containers
+  KATA_SRC_DIR: /home/nvrc/actions-runner/_work/kata-containers
   # Canonical repo only - never forks.
   KATA_REPO: kata-containers/kata-containers
 

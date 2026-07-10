@@ -74,7 +74,7 @@ jobs:
       tag: ${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
       target-branch: ${{ github.event.pull_request.base.ref }}
 
-  # Gate job for branch protection - set "CI Complete" as required status check
+  # Gate job for branch protection - set "Check CI Result" as required status check
   # Passes when: CI succeeded OR no code changes (docs-only PR)
   ci-complete:
     name: Check CI Result
