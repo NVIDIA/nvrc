@@ -43,8 +43,9 @@ on:
 permissions:
   contents: read
 env:
-  ROOTFS_IMAGE_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-image-nvidia-gpu/builddir/rootfs-image/ubuntu_rootfs
-  IMAGE_BUILDER_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/image-builder
+  ROOTFS_IMAGE_DIR: /home/nvrc/actions-runner/_work/kata-containers/build/rootfs-image-nvidia-gpu/builddir/rootfs-image/ubuntu_rootfs
+  IMAGE_BUILDER_DIR: /home/nvrc/actions-runner/_work/kata-containers/tools/osbuilder/image-builder
+  KATA_CONFIG: /etc/kata-containers/configuration.toml.nvrc
 jobs:
   run-e2e-nerdctl-tests:
     runs-on: g5g.metal
@@ -75,16 +76,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! grep -q "nvrc.log=trace" /etc/kata-containers/configuration.toml; then
-            echo "Adding nvrc.log=trace to configuration.toml"
-            sudo sed -i 's/kernel_params = "/kernel_params = "nvrc.log=trace /' /etc/kata-containers/configuration.toml
+          if ! grep -q "nvrc.log=trace" "${KATA_CONFIG}"; then
+            echo "Adding nvrc.log=trace to ${KATA_CONFIG}"
+            sudo sed -i 's/kernel_params = "/kernel_params = "nvrc.log=trace /' "${KATA_CONFIG}"
           fi
 
-          grep kernel_params /etc/kata-containers/configuration.toml
+          grep kernel_params "${KATA_CONFIG}"
 
           # Capture nerdctl output and exit code without aborting under bash -e.
           set +e
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 \
+            --label "io.katacontainers.config_path=${KATA_CONFIG}" \
+            --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
           exit_code=$?
           set -e
 
@@ -118,12 +121,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          sudo sed -i 's/nvrc.log=trace *//' /etc/kata-containers/configuration.toml
+          sudo sed -i 's/nvrc.log=trace *//' "${KATA_CONFIG}"
 
-          grep kernel_params /etc/kata-containers/configuration.toml
+          grep kernel_params "${KATA_CONFIG}"
 
           set +e
-          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
+          output=$(sudo nerdctl run --runtime io.containerd.kata.v2 \
+            --label "io.katacontainers.config_path=${KATA_CONFIG}" \
+            --device /dev/vfio/devices/vfio0 --rm ubuntu -- sh -c "nvidia-smi; dmesg" 2>&1)
           exit_code=$?
           set -e
 
@@ -163,9 +168,9 @@ jobs:
         run: |
           set -uo pipefail
 
-          echo "::group::configuration.toml (relevant lines)"
+          echo "::group::${KATA_CONFIG} (relevant lines)"
           sudo grep -nE '^[[:space:]]*(enable_debug|debug_console_enabled|create_container_timeout|dial_timeout|kernel|initrd|image|path|kernel_params|sandbox_cgroup_only)\b' \
-            /etc/kata-containers/configuration.toml || true
+            "${KATA_CONFIG}" || true
           echo "::endgroup::"
 
           echo "::group::kata shim version"

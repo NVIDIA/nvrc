@@ -1,0 +1,42 @@
+# zizmor - static security auditor for GitHub Actions workflows
+# (credential persistence, template injection, cache poisoning,
+# impostor commits, ...). Complements actionlint (syntax/typing) and
+# CodeQL's actions queries. Findings are uploaded as SARIF to the
+# repository's Code Scanning dashboard.
+
+name: zizmor
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: Audit workflows
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write # needed for SARIF upload to code scanning
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@192e21d79ab29983730a13d1382995c2307fbcaa # v0.5.7

@@ -38,10 +38,10 @@ concurrency:
 
 env:
   KATA_REPO: kata-containers/kata-containers
-  KATA_SRC_DIR: /home/ubuntu/actions-runner/_work/kata-containers
+  KATA_SRC_DIR: /home/nvrc/actions-runner/_work/kata-containers
   KATA_INSTALL_PREFIX: /opt/kata
-  ROOTFS_IMAGE_DIR: /home/ubuntu/actions-runner/_work/kata-containers/build/rootfs-image-nvidia-gpu/builddir/rootfs-image/ubuntu_rootfs
-  IMAGE_BUILDER_DIR: /home/ubuntu/actions-runner/_work/kata-containers/tools/osbuilder/image-builder
+  ROOTFS_IMAGE_DIR: /home/nvrc/actions-runner/_work/kata-containers/build/rootfs-image-nvidia-gpu/builddir/rootfs-image/ubuntu_rootfs
+  IMAGE_BUILDER_DIR: /home/nvrc/actions-runner/_work/kata-containers/tools/osbuilder/image-builder
   # kata's local-build output dir (relative to KATA_SRC_DIR) where the
   # nvidia-gpu kernel tarball lands; consumed by the overlay step below.
   LOCAL_BUILD_DIR: tools/packaging/kata-deploy/local-build/build
