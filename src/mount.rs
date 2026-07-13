@@ -16,7 +16,12 @@ fn mount(source: &str, target: &str, fstype: &str, flags: MsFlags, data: Option<
 
 /// Check if a filesystem type is available in the kernel.
 pub fn fs_available(filesystems: &str, fstype: &str) -> bool {
-    filesystems.lines().any(|line| line.contains(fstype))
+    // /proc/filesystems lines: optional "nodev\t" prefix then the fs name.
+    // Match the last token exactly so "mp" does not accidentally match "tmpfs".
+    !fstype.is_empty()
+        && filesystems
+            .lines()
+            .any(|line| line.split_whitespace().last() == Some(fstype))
 }
 
 /// Mount optional filesystem if the fstype is available AND the target exists.
