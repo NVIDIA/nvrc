@@ -15,7 +15,7 @@ fn mount(source: &str, target: &str, fstype: &str, flags: MsFlags, data: Option<
 }
 
 /// Check if a filesystem type is available in the kernel.
-fn fs_available(filesystems: &str, fstype: &str) -> bool {
+pub fn fs_available(filesystems: &str, fstype: &str) -> bool {
     filesystems.lines().any(|line| line.contains(fstype))
 }
 
