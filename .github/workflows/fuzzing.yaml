@@ -48,7 +48,7 @@ jobs:
 
       - name: Install cargo-fuzz
         # +nightly: a bare cargo install would pull the pinned toolchain
-        run: cargo +nightly install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked
 
       - name: Run fuzzer - ${{ matrix.target }}
         # WHY max_total_time: prevent infinite runs, control CI costs
