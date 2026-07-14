@@ -101,7 +101,7 @@ jobs:
       - name: Install pinned Rust toolchain
         uses: ./.github/actions/rust-toolchain
 
-      - run: cargo install cargo-audit
+      - run: cargo install cargo-audit --locked
       - run: cargo audit
 
   # Verify licenses, check for banned dependencies, and audit sources
@@ -118,7 +118,7 @@ jobs:
       - name: Install pinned Rust toolchain
         uses: ./.github/actions/rust-toolchain
 
-      - run: cargo install cargo-deny
+      - run: cargo install cargo-deny --locked
       - run: cargo deny check
 
   # Detect unused dependencies in Cargo.toml
@@ -156,7 +156,7 @@ jobs:
       - name: Install pinned Rust toolchain
         uses: ./.github/actions/rust-toolchain
 
-      - run: cargo install cargo-bloat
+      - run: cargo install cargo-bloat --locked
       - run: cargo bloat --release --all-features -n 20
 
   # Detect undefined behavior in unsafe code using Miri interpreter
