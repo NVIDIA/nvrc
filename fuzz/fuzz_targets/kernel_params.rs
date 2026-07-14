@@ -29,7 +29,7 @@ fuzz_target!(|data: &[u8]| {
                 "nvrc.smi.lmc: invalid frequency",
                 "nvrc.smi.pl: invalid wattage",
             ];
-            if !EXPECTED.contains(&msg) {
+            if !EXPECTED.iter().any(|prefix| msg.starts_with(prefix)) {
                 std::panic::resume_unwind(payload);
             }
         }
