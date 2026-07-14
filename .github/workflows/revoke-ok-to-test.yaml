@@ -23,7 +23,10 @@ concurrency:
 jobs:
   revoke:
     runs-on: ubuntu-latest
-    if: ${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') }}
+    # Skip dependabot: dependabot-ok-to-test re-adds the label on every push,
+    # so revoking and re-adding on the same event creates a race. Dependabot
+    # PRs are pre-approved; only human-authored PRs need the revoke/re-approve cycle.
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') && github.event.pull_request.user.login != 'dependabot[bot]' }}
     steps:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:

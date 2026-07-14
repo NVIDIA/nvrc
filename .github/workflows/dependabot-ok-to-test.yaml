@@ -15,8 +15,11 @@ on:
       - synchronize
 
 permissions:
-  pull-requests: write
-  issues: write # labels ride the Issues API even on PRs
+  issues: write # labels ride the Issues API even on PRs; pull-requests:write not needed
+
+concurrency:
+  group: dependabot-ok-to-test-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   label:
