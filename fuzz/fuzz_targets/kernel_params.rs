@@ -24,7 +24,12 @@ fuzz_target!(|data: &[u8]| {
                 .copied()
                 .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
                 .unwrap_or("");
-            if !msg.contains("nvrc.smi.") {
+            const EXPECTED: &[&str] = &[
+                "nvrc.smi.lgc: invalid frequency",
+                "nvrc.smi.lmc: invalid frequency",
+                "nvrc.smi.pl: invalid wattage",
+            ];
+            if !EXPECTED.iter().any(|prefix| msg.starts_with(prefix)) {
                 std::panic::resume_unwind(payload);
             }
         }
