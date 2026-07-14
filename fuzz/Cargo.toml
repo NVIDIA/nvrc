@@ -20,3 +20,11 @@ path = "fuzz_targets/kernel_params.rs"
 test = false
 doc = false
 bench = false
+
+# /proc/filesystems content parsing fuzz target
+[[bin]]
+name = "mount_parsing"
+path = "fuzz_targets/mount_parsing.rs"
+test = false
+doc = false
+bench = false
