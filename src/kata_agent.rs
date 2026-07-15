@@ -104,13 +104,28 @@ mod tests {
     use serial_test::serial;
     use std::panic;
 
-    /// Install a panic hook that exits with code 1.
-    /// Required in forked children because Rust's test harness catches panics
-    /// and exits with 0, which breaks our "panic = failure" assertions.
+    /// Forked children need this hook: the test harness catches panics and
+    /// exits 0, defeating the parent's "panic = failure" assertions.
+    ///
+    /// Raw syscalls only: a parallel test thread may hold a stdio/atexit lock
+    /// at fork time, deadlocking the child on eprintln! or process::exit.
+    /// _exit also skips the atexit coverage dump, hence the explicit flush
+    /// (%p in the profraw pattern keeps child files distinct).
     fn set_test_panic_hook() {
+        #[cfg(coverage)]
+        extern "C" {
+            fn __llvm_profile_write_file() -> libc::c_int;
+        }
+
         panic::set_hook(Box::new(|info| {
-            eprintln!("panic: {info}");
-            std::process::exit(1);
+            let msg = format!("panic: {info}\n");
+            // SAFETY: only async-signal-safe calls; no locks touched after fork.
+            unsafe {
+                libc::write(2, msg.as_ptr().cast(), msg.len());
+                #[cfg(coverage)]
+                __llvm_profile_write_file();
+                libc::_exit(1);
+            }
         }));
     }
 

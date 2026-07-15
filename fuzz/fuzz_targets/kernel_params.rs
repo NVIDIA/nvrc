@@ -1,8 +1,8 @@
-//! Fuzz target for kernel command line parameter parsing.
+//! Fuzz kernel command line parsing.
 //!
-//! Tests that arbitrary input to process_kernel_params() doesn't panic.
-//! Catches integer overflows, malformed UTF-8 handling, and edge cases
-//! in split/parse logic.
+//! Fuzzes the try_ variant because cargo-fuzz builds with panic=abort, so
+//! catch_unwind cannot filter the expected validation panics. Err is an
+//! expected rejection; any panic is a real bug and becomes a libFuzzer crash.
 
 #![no_main]
 
@@ -10,29 +10,7 @@ use libfuzzer_sys::fuzz_target;
 use NVRC::nvrc::NVRC;
 
 fuzz_target!(|data: &[u8]| {
-    // Only fuzz valid UTF-8 strings (kernel cmdline is always ASCII/UTF-8)
     if let Ok(input) = std::str::from_utf8(data) {
-        // NVRC is fail-fast: invalid numeric params must panic and reboot the VM.
-        // Swallow only those known validation panics; re-raise anything else so
-        // libFuzzer still catches genuine parser bugs.
-        if let Err(payload) = std::panic::catch_unwind(|| {
-            let mut nvrc = NVRC::default();
-            nvrc.process_kernel_params(Some(input));
-        }) {
-            let msg = payload
-                .downcast_ref::<&str>()
-                .copied()
-                .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-                .unwrap_or("");
-            const EXPECTED: &[&str] = &[
-                "nvrc.smi.lgc: invalid frequency",
-                "nvrc.smi.lmc: invalid frequency",
-                "nvrc.smi.pl: invalid wattage",
-            ];
-            if !EXPECTED.iter().any(|prefix| msg.starts_with(prefix)) {
-                std::panic::resume_unwind(payload);
-            }
-        }
+        let _ = NVRC::default().try_process_kernel_params(Some(input));
     }
 });
-
