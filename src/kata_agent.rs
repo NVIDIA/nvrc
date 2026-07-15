@@ -107,10 +107,20 @@ mod tests {
     /// Install a panic hook that exits with code 1.
     /// Required in forked children because Rust's test harness catches panics
     /// and exits with 0, which breaks our "panic = failure" assertions.
+    ///
+    /// Uses libc::write + libc::_exit rather than eprintln! + std::process::exit:
+    /// the latter flush stdio and run atexit handlers, which acquire mutexes that
+    /// another test thread may have held at fork time -- deadlocking the child.
     fn set_test_panic_hook() {
         panic::set_hook(Box::new(|info| {
-            eprintln!("panic: {info}");
-            std::process::exit(1);
+            let msg = format!("panic: {info}\n");
+            // SAFETY: write(2, ...) and _exit are async-signal-safe; they
+            // bypass the stdio and atexit locks that can deadlock a forked
+            // child of the multi-threaded test harness.
+            unsafe {
+                libc::write(2, msg.as_ptr().cast(), msg.len());
+                libc::_exit(1);
+            }
         }));
     }
 
