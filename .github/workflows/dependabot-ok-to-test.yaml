@@ -15,7 +15,8 @@ on:
       - synchronize
 
 permissions:
-  issues: write # labels ride the Issues API even on PRs; pull-requests:write not needed
+  issues: write        # addLabels endpoint
+  pull-requests: write # required by GitHub when the issue is a pull request
 
 concurrency:
   group: dependabot-ok-to-test-${{ github.event.pull_request.number }}
