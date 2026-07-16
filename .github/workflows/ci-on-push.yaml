@@ -41,7 +41,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           # Fetch enough history to compare with base
           fetch-depth: 0
-      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
         id: filter
         with:
           # Explicitly specify base and ref to compare PR head against base
