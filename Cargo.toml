@@ -30,4 +30,4 @@ rstest = "0.26.1"
 confidential = []
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)', 'cfg(kani)'] }
