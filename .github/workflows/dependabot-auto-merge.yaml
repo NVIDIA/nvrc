@@ -34,7 +34,10 @@ concurrency:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    # Only auto-merge Cargo crate updates; GitHub Actions bumps require manual review.
+    if: |
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      startsWith(github.head_ref, 'dependabot/cargo/')
     steps:
       - name: Enable auto-merge
         env:
