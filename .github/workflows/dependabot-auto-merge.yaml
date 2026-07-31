@@ -1,9 +1,10 @@
 name: Dependabot automation
 
-# Adds ok-to-test and (for Cargo PRs) enables auto-merge in one workflow so
-# the label is present before ci-on-push.yaml evaluates it. Running both in
-# the same pull_request_target workflow eliminates the race between separate
-# workflows competing on the same event.
+# Adds ok-to-test and (for Cargo PRs) enables auto-merge in one workflow.
+# Previously two separate pull_request_target workflows raced on the same event;
+# ci-on-push.yaml still recovers via the pull_request:labeled re-trigger when
+# the label arrives after the opened event, but consolidating here ensures the
+# label job and auto-merge job share one concurrency slot and one workflow run.
 #
 # Security notes:
 #   - pull_request_target runs the BASE branch's workflow file, never PR code.
