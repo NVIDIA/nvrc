@@ -23,10 +23,7 @@ on:
       # Re-enable after each rebase: GitHub clears auto-merge on force-push.
       - synchronize
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write # labels ride the Issues API even on PRs
+permissions: {}
 
 concurrency:
   group: dependabot-automation-${{ github.event.pull_request.number }}
@@ -36,6 +33,8 @@ jobs:
   label:
     runs-on: ubuntu-latest
     if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    permissions:
+      issues: write # labels ride the Issues API even on PRs
     steps:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -54,6 +53,9 @@ jobs:
     if: |
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/cargo/')
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Enable auto-merge
         env:
