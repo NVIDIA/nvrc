@@ -1,9 +1,9 @@
-name: Auto-merge Dependabot PRs
+name: Dependabot automation
 
-# Enables auto-merge on every Dependabot PR so GitHub merges it automatically
-# once all required branch-protection checks pass. The actual merge decision
-# stays with GitHub's branch-protection engine - this workflow only flips the
-# flag; it cannot bypass any required check.
+# Adds ok-to-test and (for Cargo PRs) enables auto-merge in one workflow so
+# the label is present before ci-on-push.yaml evaluates it. Running both in
+# the same pull_request_target workflow eliminates the race between separate
+# workflows competing on the same event.
 #
 # Security notes:
 #   - pull_request_target runs the BASE branch's workflow file, never PR code.
@@ -23,21 +23,39 @@ on:
       # Re-enable after each rebase: GitHub clears auto-merge on force-push.
       - synchronize
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
-  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  group: dependabot-automation-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
+  label:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    permissions:
+      issues: write # labels ride the Issues API even on PRs
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['ok-to-test'],
+            });
+            core.info('Added ok-to-test: dependabot updates are pre-approved for E2E.');
+
   auto-merge:
     runs-on: ubuntu-latest
     # Only auto-merge Cargo crate updates; GitHub Actions bumps require manual review.
     if: |
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/cargo/')
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Enable auto-merge
         env:
