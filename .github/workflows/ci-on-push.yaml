@@ -26,11 +26,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Detect if only docs changed - skip CI if so
-  # Only run if ok-to-test label present (security gate for self-hosted runner)
+  # Detect if only docs changed - skip CI if so.
+  # Gate: ok-to-test label required for human PRs; dependabot bypasses the label.
   changes:
     name: Detect changes
-    if: ${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') }}
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'ok-to-test') ||
+      github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
@@ -60,8 +62,11 @@ jobs:
               - '.github/actions/**'
   ci:
     needs: changes
-    # Only run on self-hosted runner if: 1) ok-to-test label present (security), 2) code changed (efficiency)
-    if: ${{ contains(github.event.pull_request.labels.*.name, 'ok-to-test') && needs.changes.outputs.code == 'true' }}
+    # Only run on self-hosted runner if: 1) approved (security), 2) code changed (efficiency)
+    if: |
+      needs.changes.outputs.code == 'true' &&
+      (contains(github.event.pull_request.labels.*.name, 'ok-to-test') ||
+       github.event.pull_request.user.login == 'dependabot[bot]')
     permissions:
       contents: read
       packages: write
@@ -79,7 +84,10 @@ jobs:
   ci-complete:
     name: Check CI Result
     needs: [changes, ci]
-    if: always() && contains(github.event.pull_request.labels.*.name, 'ok-to-test')
+    if: |
+      always() &&
+      (contains(github.event.pull_request.labels.*.name, 'ok-to-test') ||
+       github.event.pull_request.user.login == 'dependabot[bot]')
     runs-on: ubuntu-latest
     steps:
       - name: Check CI result

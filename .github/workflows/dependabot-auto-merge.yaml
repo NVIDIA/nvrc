@@ -1,10 +1,8 @@
 name: Dependabot automation
 
-# Adds ok-to-test and (for Cargo PRs) enables auto-merge in one workflow.
-# Previously two separate pull_request_target workflows raced on the same event;
-# ci-on-push.yaml still recovers via the pull_request:labeled re-trigger when
-# the label arrives after the opened event, but consolidating here ensures the
-# label job and auto-merge job share one concurrency slot and one workflow run.
+# Enables auto-merge for Cargo crate updates. ci-on-push.yaml gates the
+# self-hosted runner via the ok-to-test label for human PRs, but bypasses
+# the label check for dependabot[bot] directly, so no label is needed here.
 #
 # Security notes:
 #   - pull_request_target runs the BASE branch's workflow file, never PR code.
@@ -31,24 +29,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  label:
-    runs-on: ubuntu-latest
-    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
-    permissions:
-      issues: write # labels ride the Issues API even on PRs
-      pull-requests: write # labeling a PR checks this scope, not just issues
-    steps:
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          script: |
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              labels: ['ok-to-test'],
-            });
-            core.info('Added ok-to-test: dependabot updates are pre-approved for E2E.');
-
   auto-merge:
     runs-on: ubuntu-latest
     # Only auto-merge Cargo crate updates; GitHub Actions bumps require manual review.
