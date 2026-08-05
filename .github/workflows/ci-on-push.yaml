@@ -26,8 +26,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Detect if only docs changed - skip CI if so
-  # Only run if ok-to-test label present (security gate for self-hosted runner)
+  # Detect if only docs changed - skip CI if so.
+  # Gate: ok-to-test label required for human PRs; dependabot bypasses the label.
   changes:
     name: Detect changes
     if: |
