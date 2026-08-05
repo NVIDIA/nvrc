@@ -23,7 +23,7 @@ panic = 'abort'
 [dev-dependencies]
 mktemp = "0.5.1"
 tempfile = "3.23.0"
-serial_test = "3.2.0"
+serial_test = "4.0.1"
 rstest = "0.26.1"
 
 [features]
