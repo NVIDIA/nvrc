@@ -60,7 +60,7 @@ impl NVRC {
             "/var/run/nvidia-persistenced",
             &gpu_extension::path("/bin/nvidia-persistenced"),
         );
-        kmsg::wait_for_marker(&mut reader, "Local RPC services initialized", 120);
+        kmsg::wait_for_marker(&mut reader, "Local RPC services initialized", 600);
     }
 
     fn spawn_persistenced(&mut self, run_dir: &str, bin: &str) {
