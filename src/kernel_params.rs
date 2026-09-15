@@ -16,6 +16,38 @@ fn parse_boolean(s: &str) -> bool {
     }
 }
 
+fn nvrc_extra_modules(value: &str, ctx: &mut NVRC) -> Result<(), String> {
+    if value.is_empty() {
+        ctx.extra_modules.clear();
+        return Ok(());
+    }
+
+    let modules = value
+        .split(',')
+        .map(|module| {
+            let first_ok = module
+                .bytes()
+                .next()
+                .map(|b| b.is_ascii_alphanumeric() || b == b'_')
+                .unwrap_or(false);
+            if !first_ok
+                || !module
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            {
+                return Err(format!(
+                    "nvrc.extra_modules: invalid module name '{module}'"
+                ));
+            }
+            Ok(module.to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    debug!("nvrc.extra_modules: {modules:?}");
+    ctx.extra_modules = modules;
+    Ok(())
+}
+
 impl NVRC {
     /// Parse kernel command line parameters to configure NVRC behavior.
     /// Using kernel params allows configuration without userspace tools—critical
@@ -40,6 +72,7 @@ impl NVRC {
                 "nvrc.log" => nvrc_log(v, self)?,
                 "nvrc.uvm.persistence.mode" => uvm_persistenced_mode(v, self),
                 "nvrc.dcgm" => nvrc_dcgm(v, self),
+                "nvrc.extra_modules" => nvrc_extra_modules(v, self)?,
 
                 "nvrc.smi.srs" => nvidia_smi_srs(v, self),
                 "nvrc.smi.lgc" => nvidia_smi_lgc(v, self)?,
@@ -367,6 +400,34 @@ mod tests {
     }
 
     #[test]
+    fn test_nvrc_extra_modules() {
+        let mut c = NVRC::default();
+
+        nvrc_extra_modules("loop,dm_crypt,vfio-pci", &mut c).unwrap();
+
+        assert_eq!(c.extra_modules, vec!["loop", "dm_crypt", "vfio-pci"]);
+    }
+
+    #[test]
+    fn test_nvrc_extra_modules_empty() {
+        let mut c = NVRC::default();
+        c.extra_modules.push("loop".to_owned());
+
+        nvrc_extra_modules("", &mut c).unwrap();
+
+        assert!(c.extra_modules.is_empty());
+    }
+
+    #[test]
+    fn test_nvrc_extra_modules_rejects_invalid_names() {
+        let mut c = NVRC::default();
+
+        assert!(nvrc_extra_modules("loop,--force", &mut c).is_err());
+        assert!(nvrc_extra_modules("loop,,dm_crypt", &mut c).is_err());
+        assert!(c.extra_modules.is_empty());
+    }
+
+    #[test]
     fn test_process_kernel_params_gpu_settings() {
         let mut c = NVRC::default();
 
@@ -375,6 +436,15 @@ mod tests {
         assert_eq!(c.nvidia_smi_lgc, Some(1500));
         assert_eq!(c.nvidia_smi_lmc, Some(5001));
         assert_eq!(c.nvidia_smi_pl, Some(300));
+    }
+
+    #[test]
+    fn test_process_kernel_params_extra_modules() {
+        let mut c = NVRC::default();
+
+        c.process_kernel_params(Some("nvrc.extra_modules=loop,dm_crypt"));
+
+        assert_eq!(c.extra_modules, vec!["loop", "dm_crypt"]);
     }
 
     #[test]

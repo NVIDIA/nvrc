@@ -23,6 +23,8 @@ pub struct NVRC {
     pub uvm_persistence_mode: Option<bool>,
     /// Enable DCGM exporter for GPU metrics
     pub dcgm_enabled: Option<bool>,
+    /// Additional kernel modules to load before module loading is locked down
+    pub extra_modules: Vec<String>,
 
     /// Port GUID for NVL5+ systems (0x-prefixed hex string)
     pub port_guid: Option<String>,
@@ -63,6 +65,7 @@ mod tests {
         let nvrc = NVRC::default();
         assert!(nvrc.nvidia_smi_srs.is_none());
         assert!(nvrc.nvidia_smi_lgc.is_none());
+        assert!(nvrc.extra_modules.is_empty());
         assert!(nvrc.children.is_empty());
     }
 

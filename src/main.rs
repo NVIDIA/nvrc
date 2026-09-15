@@ -122,6 +122,11 @@ fn main() {
         unknown => panic!("unknown mode: {unknown}"),
     }
 
+    // kata-agent cannot load requested modules after lockdown, so preload them here.
+    for module in &init.extra_modules {
+        modprobe::load(module);
+    }
+
     lockdown::disable_modules_loading();
     kata_agent::fork_agent(POLL_FOREVER);
 }
