@@ -93,6 +93,12 @@ configuration doesn't exist yet.
 | `nvrc.fm.mode`              | `0`, `1`                                | -        | Fabric Manager mode: 0=bare metal, 1=servicevm (shared nvswitch). Auto-set in nvswitch modes.      |
 | `nvrc.fm.rail.policy`       | `greedy`, `symmetric`                   | `greedy` | Partition rail policy. Symmetric required for Confidential Computing on Blackwell.                 |
 
+### Module Loading
+
+| Parameter            | Values                       | Default | Description                                                                                                                                                                                                               |
+| -------------------- | ---------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nvrc.extra_modules` | comma-separated module names | -       | Additional kernel modules to load before module loading is locked down. Each name must match `[A-Za-z0-9_][A-Za-z0-9_-]*` (e.g. `vfio-pci`, `dm-crypt`); option-like names (leading `-`) and empty segments are rejected. |
+
 ### Example Configurations
 
 **Minimal GPU setup (defaults):**
