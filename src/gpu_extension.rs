@@ -57,14 +57,20 @@ fn path_in(present: bool, root: &str, path: &str) -> String {
     }
 }
 
-/// `modprobe --dirname` for `module`: the extension root for NVIDIA modules,
-/// `None` otherwise. In-tree modules (`ib_umad`/`mlx5_ib`) stay in the base image.
+/// Kernel modules the `gpu` extension ships. A `nvidia`-prefix match would also
+/// catch in-tree base-image modules (e.g. `nvidia_wmi_ec_backlight`), which the
+/// extension does not own and would misdirect `--dirname` toward.
+const EXTENSION_MODULES: &[&str] = &["nvidia", "nvidia-uvm"];
+
+/// `modprobe --dirname` for `module`: the extension root for modules the `gpu`
+/// extension ships, `None` otherwise. In-tree modules (`ib_umad`/`mlx5_ib`) stay
+/// in the base image.
 pub fn modprobe_dirname(module: &str) -> Option<String> {
     modprobe_dirname_in(present(), ROOT, module)
 }
 
 fn modprobe_dirname_in(present: bool, root: &str, module: &str) -> Option<String> {
-    (present && module.starts_with("nvidia")).then(|| root.to_owned())
+    (present && EXTENSION_MODULES.contains(&module)).then(|| root.to_owned())
 }
 
 /// `--driver-root` for `nvidia-ctk cdi generate`. nvidia-ctk strips the driver
@@ -227,6 +233,16 @@ mod tests {
         // In-tree modules ship in the base image, not the extension.
         assert_eq!(modprobe_dirname_in(true, ROOT, "ib_umad"), None);
         assert_eq!(modprobe_dirname_in(true, ROOT, "mlx5_ib"), None);
+    }
+
+    #[test]
+    fn test_modprobe_dirname_nvidia_prefixed_base_module_with_extension() {
+        // nvidia_wmi_ec_backlight is an in-tree base-image module, not one the
+        // gpu extension ships; a bare prefix match would misroute it.
+        assert_eq!(
+            modprobe_dirname_in(true, ROOT, "nvidia_wmi_ec_backlight"),
+            None
+        );
     }
 
     // === driver_root ===
