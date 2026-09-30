@@ -1,5 +1,5 @@
 use crate::macros::ResultExt;
-use pcilibs_rs::{nvlink, Sysfs};
+use pcilibs_rs::{platform, Sysfs};
 
 use crate::execute::foreground;
 use crate::gpu_extension;
@@ -16,7 +16,8 @@ pub fn load(module: &str) {
 }
 
 fn isolated_gpu(sysfs: &Sysfs) -> bool {
-    let topology = nvlink::discover(sysfs).or_panic("discover GPUs before loading nvidia");
+    let topology =
+        platform::discover_topology(sysfs).or_panic("discover GPUs before loading nvidia");
     // A single assigned GPU may still need its assigned fabric.
     topology.gpus.len() == 1
         && topology.switches.is_empty()

@@ -78,7 +78,9 @@ management-PF count:
 | Direct NVSwitch | GPU services and FM | ServiceVM with FM |
 | ConnectX management PFs | GPU services, NVLSM and FM | ServiceVM with NVLSM and FM |
 
-pcilibs-rs supplies both the management interface and NVIDIA hardware profile.
+`pcilibs_rs::platform::discover` supplies the NVIDIA hardware profile and any
+management interface. PCIe-only GPUs start GPU services without fabric services
+or an RDMA device tree.
 Direct NVSwitch devices select the H100/H200-style FM path; ConnectX management
 PFs select the Bx00/Rx00-style RDMA/NVLSM/FM path. GPU device/subsystem identity
 refines the profile to HGX Hx00, Bx00, Rx00 or coherent hardware when available.
