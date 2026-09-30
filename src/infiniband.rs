@@ -1,216 +1,114 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-//! HGX Bx00 uses CX7 bridges instead of direct GPU access for NVLink management.
-//! The port GUID from these bridges is required to initialize NVLSM and FM.
-//! SW_MNG filtering happens at the PCI VPD level in `mode.rs`; this module
-//! selects the first SM-enabled IB port GUID from the already-filtered devices.
+//! FM and NVLSM must use the same PCI-qualified management port.
 
 use crate::macros::ResultExt;
 use log::debug;
-use std::fs;
-use std::path::Path;
+use pcilibs_rs::{nvlink, Sysfs};
 
-/// SM must be enabled on the port for NVLSM to manage the subnet.
-const IS_SM_DISABLED_MASK: u32 = 1 << 10;
-
-/// Returns port GUID from first CX7 bridge with SM enabled, or None.
 pub fn detect_port_guid() -> Option<String> {
-    detect_port_guid_from("/sys/class/infiniband")
+    detect_port_guid_from(&Sysfs::default())
 }
 
-fn detect_port_guid_from(ib_class_path: &str) -> Option<String> {
-    if !Path::new(ib_class_path).is_dir() {
-        panic!("{ib_class_path} not found — mlx5_ib module not loaded");
-    }
-
-    let mut entries: Vec<_> = fs::read_dir(ib_class_path)
-        .or_panic(format_args!("read {ib_class_path}"))
-        .flatten()
-        .collect();
-
-    if entries.is_empty() {
-        panic!("{ib_class_path} is empty — mlx5_ib loaded but no IB devices registered");
-    }
-
-    // Deterministic selection: mlx5_0 before mlx5_1, so first SM-enabled device wins.
-    entries.sort_by_key(|e| e.file_name());
-
-    for entry in entries {
-        let device_name = entry.file_name().to_string_lossy().to_string();
-        let device_path = entry.path();
-
-        if !is_sm_enabled(&device_path.join("ports/1/cap_mask")) {
-            debug!("{}: SM disabled, skipping", device_name);
-            continue;
-        }
-
-        if let Some(port_guid) = extract_port_guid(&device_path.join("ports/1/gids/0")) {
-            debug!("{}: port GUID {}", device_name, port_guid);
-            return Some(port_guid);
-        }
-    }
-
-    None
-}
-
-/// NVLSM cannot manage a port with SM disabled.
-fn is_sm_enabled(cap_mask_path: &Path) -> bool {
-    let Ok(content) = fs::read_to_string(cap_mask_path) else {
-        return false;
-    };
-    let trimmed = content.trim().trim_start_matches("0x");
-    let mask = u32::from_str_radix(trimmed, 16).unwrap_or(0);
-    (mask & IS_SM_DISABLED_MASK) == 0
-}
-
-/// Port GUID is the last 64 bits of the GID, formatted as 0x-prefixed hex for FM/NVLSM.
-fn extract_port_guid(gid_path: &Path) -> Option<String> {
-    let content = fs::read_to_string(gid_path).ok()?;
-    let parts: Vec<&str> = content.trim().split(':').collect();
-    if parts.len() != 8 {
-        return None;
-    }
-    Some(format!(
-        "0x{}{}{}{}",
-        parts[4], parts[5], parts[6], parts[7]
-    ))
+fn detect_port_guid_from(sysfs: &Sysfs) -> Option<String> {
+    nvlink::discover_management_ports(sysfs)
+        .or_panic("discover NVLink management ports")
+        .first()
+        .map(|port| {
+            let guid = format!("0x{:016x}", port.guid);
+            debug!(
+                "{} {} port {}: GUID {}",
+                port.pci_bdf, port.ib_device, port.port, guid
+            );
+            guid
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use tempfile::TempDir;
+    use crate::test_utils::add_management_pf;
+    use pcilibs_rs::testfs::{fake, Fake};
+    use std::{fs, os::unix::fs::symlink};
 
-    fn create_ib_device(tmpdir: &TempDir, name: &str, cap_mask: &str, gid: &str) {
-        let dev_path = tmpdir.path().join(name);
-        let cap_path = dev_path.join("ports/1/cap_mask");
-        let gid_path = dev_path.join("ports/1/gids/0");
-
-        fs::create_dir_all(gid_path.parent().unwrap()).unwrap();
-
-        fs::write(&cap_path, cap_mask).unwrap();
-        fs::write(&gid_path, gid).unwrap();
+    fn add_port(f: &Fake, bdf: &str, name: &str, port: u32, cap_mask: &str, gid: &str) {
+        let ib = f.sysfs.infiniband().join(name);
+        let path = ib.join(format!("ports/{port}"));
+        fs::create_dir_all(path.join("gids")).unwrap();
+        symlink(f.device(bdf), ib.join("device")).unwrap();
+        fs::write(path.join("link_layer"), "InfiniBand\n").unwrap();
+        fs::write(path.join("cap_mask"), cap_mask).unwrap();
+        fs::write(path.join("gids/0"), gid).unwrap();
     }
 
     #[test]
-    fn test_detect_port_guid_found() {
-        let tmpdir = TempDir::new().unwrap();
-        create_ib_device(
-            &tmpdir,
-            "mlx5_0",
-            "0x00000200\n", // bit 10 unset, SM enabled
-            "fe80:0000:0000:0000:0002:c903:0029:7de1\n",
+    fn selects_management_pf_even_when_ordinary_nic_sorts_first() {
+        let f = fake();
+        add_management_pf(&f, "0000:01:00.0", false);
+        add_port(&f, "0000:01:00.0", "mlx5_0", 1, "0x200", "fe80::1111");
+        add_management_pf(&f, "0000:03:00.0", true);
+        add_port(&f, "0000:03:00.0", "mlx5_1", 1, "0x400", "fe80::2222");
+        add_management_pf(&f, "0000:03:00.1", false);
+        add_port(
+            &f,
+            "0000:03:00.1",
+            "mlx5_2",
+            2,
+            "0x200",
+            "fe80::2:c903:29:7de1",
         );
-
-        let guid = detect_port_guid_from(tmpdir.path().to_str().unwrap());
-        assert_eq!(guid, Some("0x0002c90300297de1".to_owned()));
-    }
-
-    #[test]
-    fn test_detect_port_guid_sm_disabled() {
-        let tmpdir = TempDir::new().unwrap();
-        create_ib_device(
-            &tmpdir,
-            "mlx5_0",
-            "0x00000400\n", // bit 10 set, SM disabled
-            "fe80:0000:0000:0000:0002:c903:0029:7de1\n",
+        assert_eq!(
+            detect_port_guid_from(&f.sysfs).as_deref(),
+            Some("0x0002c90300297de1")
         );
-
-        let guid = detect_port_guid_from(tmpdir.path().to_str().unwrap());
-        assert!(guid.is_none());
     }
 
     #[test]
-    fn test_detect_port_guid_skips_sm_disabled() {
-        let tmpdir = TempDir::new().unwrap();
-
-        // First device: SM disabled
-        create_ib_device(
-            &tmpdir,
-            "mlx5_0",
-            "0x00000400\n",
-            "fe80:0000:0000:0000:aaaa:bbbb:cccc:dddd\n",
+    fn selects_by_pci_address_instead_of_driver_registration_order() {
+        let f = fake();
+        for (bdf, name, gid) in [
+            ("0000:03:00.0", "mlx5_0", "fe80::2222"),
+            ("0000:02:00.0", "mlx5_9", "fe80::1111"),
+        ] {
+            add_management_pf(&f, bdf, true);
+            add_port(&f, bdf, name, 1, "0x200", gid);
+        }
+        assert_eq!(
+            detect_port_guid_from(&f.sysfs).as_deref(),
+            Some("0x0000000000001111")
         );
-
-        // Second device: SM enabled
-        create_ib_device(
-            &tmpdir,
-            "mlx5_1",
-            "0x00000200\n",
-            "fe80:0000:0000:0000:1111:2222:3333:4444\n",
-        );
-
-        let guid = detect_port_guid_from(tmpdir.path().to_str().unwrap());
-        assert_eq!(guid, Some("0x1111222233334444".to_owned()));
     }
 
     #[test]
-    #[should_panic(expected = "is empty")]
-    fn test_detect_port_guid_empty_dir() {
-        let tmpdir = TempDir::new().unwrap();
-        detect_port_guid_from(tmpdir.path().to_str().unwrap());
+    fn no_sm_enabled_management_port_returns_none() {
+        let f = fake();
+        add_management_pf(&f, "0000:03:00.0", true);
+        add_port(&f, "0000:03:00.0", "mlx5_0", 1, "0x400", "fe80::1111");
+        assert_eq!(detect_port_guid_from(&f.sysfs), None);
     }
 
     #[test]
-    #[should_panic(expected = "/nonexistent/path not found")]
-    fn test_detect_port_guid_nonexistent_dir() {
-        detect_port_guid_from("/nonexistent/path");
+    #[should_panic(expected = "discover NVLink management ports")]
+    fn malformed_capability_cannot_enable_sm() {
+        let f = fake();
+        add_management_pf(&f, "0000:03:00.0", true);
+        add_port(&f, "0000:03:00.0", "mlx5_0", 1, "bad mask", "fe80::1111");
+        detect_port_guid_from(&f.sysfs);
     }
 
     #[test]
-    fn test_is_sm_enabled_bit_unset() {
-        let tmpdir = TempDir::new().unwrap();
-        let cap_path = tmpdir.path().join("cap_mask");
-        // Bit 10 = 0x400, this mask has bit 10 unset
-        fs::write(&cap_path, "0x00000200\n").unwrap();
-
-        assert!(is_sm_enabled(&cap_path));
+    #[should_panic(expected = "discover NVLink management ports")]
+    fn invalid_guid_cannot_reach_daemon_configuration() {
+        let f = fake();
+        add_management_pf(&f, "0000:03:00.0", true);
+        add_port(&f, "0000:03:00.0", "mlx5_0", 1, "0x200", "not a GID");
+        detect_port_guid_from(&f.sysfs);
     }
 
     #[test]
-    fn test_is_sm_enabled_bit_set() {
-        let tmpdir = TempDir::new().unwrap();
-        let cap_path = tmpdir.path().join("cap_mask");
-        // Bit 10 = 0x400, this mask has bit 10 set (SM disabled)
-        fs::write(&cap_path, "0x00000400\n").unwrap();
-
-        assert!(!is_sm_enabled(&cap_path));
-    }
-
-    #[test]
-    fn test_is_sm_enabled_no_file() {
-        let tmpdir = TempDir::new().unwrap();
-        let cap_path = tmpdir.path().join("nonexistent");
-
-        assert!(!is_sm_enabled(&cap_path));
-    }
-
-    #[test]
-    fn test_extract_port_guid_valid() {
-        let tmpdir = TempDir::new().unwrap();
-        let gid_path = tmpdir.path().join("gid");
-        fs::write(&gid_path, "fe80:0000:0000:0000:0002:c903:0029:7de1\n").unwrap();
-
-        let guid = extract_port_guid(&gid_path);
-        assert_eq!(guid, Some("0x0002c90300297de1".to_owned()));
-    }
-
-    #[test]
-    fn test_extract_port_guid_invalid_format() {
-        let tmpdir = TempDir::new().unwrap();
-        let gid_path = tmpdir.path().join("gid");
-        fs::write(&gid_path, "invalid:format\n").unwrap();
-
-        assert!(extract_port_guid(&gid_path).is_none());
-    }
-
-    #[test]
-    fn test_extract_port_guid_no_file() {
-        let tmpdir = TempDir::new().unwrap();
-        let gid_path = tmpdir.path().join("nonexistent");
-
-        assert!(extract_port_guid(&gid_path).is_none());
+    #[should_panic(expected = "discover NVLink management ports")]
+    fn missing_rdma_tree_fails_boot() {
+        detect_port_guid_from(&fake().sysfs);
     }
 }

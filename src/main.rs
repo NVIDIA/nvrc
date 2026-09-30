@@ -3,6 +3,7 @@
 
 use ::NVRC::daemon::{FABRIC_MODE_FULL, FABRIC_MODE_SHARED};
 use ::NVRC::kata_agent::{self, SYSLOG_POLL_FOREVER as POLL_FOREVER};
+use ::NVRC::mode::{Fabric, Mode};
 use ::NVRC::nvrc::NVRC;
 use ::NVRC::toolkit::nvidia_ctk_cdi;
 use ::NVRC::{
@@ -15,15 +16,15 @@ use log::info;
 /// and monitoring daemons before workloads can use the GPU.
 /// On bare metal HGX systems (GPUs + NVSwitches), also starts
 /// the fabric manager via the appropriate NVSwitch mode.
-fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
+fn mode_gpu(init: &mut NVRC, fabric: Option<Fabric>) {
     modprobe::load("nvidia");
     modprobe::load("nvidia-uvm");
     init.setup_uvm_tools();
 
-    match nvswitch {
-        Some("nvl4") => mode_nvl4(init, FABRIC_MODE_FULL),
-        Some("nvl5") => mode_nvl5(init, FABRIC_MODE_FULL),
-        _ => {}
+    match fabric {
+        Some(Fabric::DirectNvSwitch) => mode_direct_nvswitch(init, FABRIC_MODE_FULL),
+        Some(Fabric::ConnectX) => mode_connectx(init, FABRIC_MODE_FULL),
+        None => {}
     }
 
     init.nvidia_persistenced();
@@ -39,26 +40,23 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     init.health_checks();
 }
 
-/// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
-/// Service VM mode for NVLink 4.0 topologies in shared virtualization.
-/// Starts fabric manager; the caller has already loaded the NVIDIA driver.
-fn mode_nvl4(init: &mut NVRC, fabric_mode: u8) {
+/// Direct NVSwitch fabric: the switches are PCI functions of this VM. Starts
+/// fabric manager; the caller has already loaded the NVIDIA driver.
+fn mode_direct_nvswitch(init: &mut NVRC, fabric_mode: u8) {
     init.nv_fabricmanager(fabric_mode, "greedy");
     init.health_checks();
 }
 
-/// HGX Bx00 systems use CX7 bridges for NVLink management instead of direct GPU access.
-/// GPUs are passed to tenant VMs; only the CX7 IB devices are visible here.
-fn mode_nvl5(init: &mut NVRC, fabric_mode: u8) {
-    // ib_umad exposes /dev/umad* for InfiniBand MAD protocol access;
-    // mlx5_ib creates /sys/class/infiniband/mlx5_* entries for the CX7 bridges.
+/// ConnectX-managed fabric: management PFs, not the GPUs, carry NVLink
+/// management, so the GPUs may belong to other VMs.
+fn mode_connectx(init: &mut NVRC, fabric_mode: u8) {
+    // Management GUIDs appear only after the RDMA drivers register their ports.
     modprobe::load("ib_umad");
     modprobe::load("mlx5_ib");
 
-    // CX7 port GUID identifies which bridge to use for fabric management
     init.port_guid = Some(
         infiniband::detect_port_guid()
-            .expect("nvl5 requires SW_MNG IB device with valid port GUID"),
+            .expect("ConnectX fabric management requires an SM-enabled management port"),
     );
 
     // NVLSM must initialize the NVLink subnet before FM can manage the fabric
@@ -86,16 +84,15 @@ fn main() {
     // Expose gpu-extension libs/firmware before any driver load. No-op if absent.
     gpu_extension::setup();
 
-    let detected = mode::detect();
-    match detected.mode {
-        "cpu" => info!("executing cpu mode"),
-        "gpu" => mode_gpu(&mut init, detected.nvswitch),
-        "servicevm-nvl4" => {
+    match mode::detect() {
+        Mode::Cpu => info!("executing cpu mode"),
+        Mode::Gpu(fabric) => mode_gpu(&mut init, fabric),
+        // A service VM has no GPU, so nothing else has loaded the driver.
+        Mode::ServiceVm(Fabric::DirectNvSwitch) => {
             modprobe::load("nvidia");
-            mode_nvl4(&mut init, FABRIC_MODE_SHARED);
+            mode_direct_nvswitch(&mut init, FABRIC_MODE_SHARED);
         }
-        "servicevm-nvl5" => mode_nvl5(&mut init, FABRIC_MODE_SHARED),
-        unknown => panic!("unknown mode: {unknown}"),
+        Mode::ServiceVm(Fabric::ConnectX) => mode_connectx(&mut init, FABRIC_MODE_SHARED),
     }
 
     lockdown::disable_modules_loading();
