@@ -150,6 +150,27 @@ mod tests {
     #[case(0x2330, 0x16c0, true, Kind::HgxHx00, Fabric::DirectNvSwitch)]
     #[case(0x2901, 0x1999, false, Kind::HgxBx00, Fabric::ConnectX)]
     #[case(0x3002, 0x2277, false, Kind::HgxRx00, Fabric::ConnectX)]
+    #[case(
+        0x3041,
+        0x221a,
+        false,
+        Kind::Coherent(pcilibs_rs::gpu::Family::Rubin),
+        Fabric::ConnectX
+    )]
+    #[case(
+        0x307e,
+        0x221a,
+        false,
+        Kind::Coherent(pcilibs_rs::gpu::Family::Rubin),
+        Fabric::ConnectX
+    )]
+    #[case(
+        0x30ff,
+        0x221b,
+        false,
+        Kind::Coherent(pcilibs_rs::gpu::Family::Rubin),
+        Fabric::ConnectX
+    )]
     fn shared_platform_profiles_choose_fabric_startup(
         #[case] device: u16,
         #[case] subsystem: u16,
