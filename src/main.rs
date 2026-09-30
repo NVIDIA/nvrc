@@ -3,14 +3,15 @@
 
 use ::NVRC::daemon::{FABRIC_MODE_FULL, FABRIC_MODE_SHARED};
 use ::NVRC::kata_agent::{self, SYSLOG_POLL_FOREVER as POLL_FOREVER};
+use ::NVRC::macros::ResultExt;
 use ::NVRC::mode::{Fabric, Mode};
 use ::NVRC::nvrc::NVRC;
 use ::NVRC::toolkit::nvidia_ctk_cdi;
 use ::NVRC::{
-    gpu_extension, guest_extension_image, hash, infiniband, init, kmsg, lockdown, mode, modprobe,
-    mount, net, syslog,
+    gpu_extension, guest_extension_image, hash, init, kmsg, lockdown, mode, modprobe, mount, net,
+    syslog,
 };
-use log::info;
+use log::{debug, info};
 
 /// VMs with GPU passthrough need driver setup, clock tuning,
 /// and monitoring daemons before workloads can use the GPU.
@@ -54,9 +55,15 @@ fn mode_connectx(init: &mut NVRC, fabric_mode: u8) {
     modprobe::load("ib_umad");
     modprobe::load("mlx5_ib");
 
-    init.port_guid = Some(
-        infiniband::detect_port_guid()
-            .expect("ConnectX fabric management requires an SM-enabled management port"),
+    let ports = pcilibs_rs::nvlink::discover_management_ports(&pcilibs_rs::Sysfs::default())
+        .or_panic("discover NVLink management ports");
+    let port = ports
+        .first()
+        .expect("ConnectX fabric management requires an SM-enabled management port");
+    init.port_guid = Some(format!("0x{:016x}", port.guid));
+    debug!(
+        "{} {} port {}: GUID {:#018x}",
+        port.pci_bdf, port.ib_device, port.port, port.guid
     );
 
     // NVLSM must initialize the NVLink subnet before FM can manage the fabric
