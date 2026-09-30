@@ -8,7 +8,6 @@ mod execute;
 mod gpu_extension;
 mod guest_extension_image;
 mod hash;
-mod infiniband;
 mod init;
 mod kata_agent;
 mod kernel_params;
@@ -85,9 +84,15 @@ fn mode_connectx(init: &mut NVRC, fabric_mode: u8) {
     modprobe::load("ib_umad");
     modprobe::load("mlx5_ib");
 
-    init.port_guid = Some(
-        infiniband::detect_port_guid()
-            .expect("ConnectX fabric management requires an SM-enabled management port"),
+    let ports = pcilibs_rs::nvlink::discover_management_ports(&pcilibs_rs::Sysfs::default())
+        .or_panic("discover NVLink management ports");
+    let port = ports
+        .first()
+        .expect("ConnectX fabric management requires an SM-enabled management port");
+    init.port_guid = Some(format!("0x{:016x}", port.guid));
+    debug!(
+        "{} {} port {}: GUID {:#018x}",
+        port.pci_bdf, port.ib_device, port.port, port.guid
     );
 
     // NVLSM must initialize the NVLink subnet before FM can manage the fabric
