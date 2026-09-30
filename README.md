@@ -65,8 +65,9 @@ flowchart TD
 ## Hardware discovery
 
 NVRC uses pcilibs-rs so guest startup and kata-device-provisioner can use
-the same PCI classification. The dependency is pinned to the merged discovery
-commit for reproducible builds; firmware CC access is not enabled.
+the same PCI classification. The dependency is pinned to the platform-discovery
+PR commit for reproducible builds, with only Linux `std` access enabled; firmware
+CC access is not enabled.
 
 Assigned device roles choose startup without assuming a full board's GPU or
 management-PF count:
@@ -77,10 +78,15 @@ management-PF count:
 | Direct NVSwitch | GPU services and FM | ServiceVM with FM |
 | ConnectX management PFs | GPU services, NVLSM and FM | ServiceVM with NVLSM and FM |
 
-H100/H200 expose direct NVSwitch PCI devices. Bx00/Rx00 systems exposing the
-ConnectX management interface use its VPD role and sibling PFs. This identifies
-the management interface, not the platform or NVLink generation; Rx00 hardware
-and its driver/service stack still require validation.
+pcilibs-rs supplies both the management interface and NVIDIA hardware profile.
+Direct NVSwitch devices select the H100/H200-style FM path; ConnectX management
+PFs select the Bx00/Rx00-style RDMA/NVLSM/FM path. GPU device/subsystem identity
+refines the profile to HGX Hx00, Bx00, Rx00 or coherent hardware when available.
+No SMBIOS or OEM model mapping is used.
+
+A switch-only ServiceVM can select its services even when its exact GPU family
+is unknown. A hardware profile does not prove the OEM chassis or NVL72 rack
+membership. Rx00 hardware and its driver/service stack still require validation.
 
 PF visibility can change with firmware and VM assignment, so neither four PFs
 nor a marker on every PF is required. After RDMA drivers load, pcilibs-rs selects
