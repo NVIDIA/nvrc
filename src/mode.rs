@@ -6,8 +6,7 @@
 use crate::macros::ResultExt;
 use log::debug;
 use pcilibs_rs::{
-    nvlink,
-    platform::{FabricInterface, Platform},
+    platform::{self, FabricInterface, Platform},
     Sysfs,
 };
 
@@ -29,7 +28,7 @@ pub fn detect() -> Mode {
 }
 
 fn detect_from(sysfs: &Sysfs) -> Mode {
-    let detected = nvlink::discover_platform(sysfs).or_panic("discover NVLink platform");
+    let detected = platform::discover(sysfs).or_panic("discover PCI platform");
     select(&detected.platform)
 }
 
@@ -114,6 +113,20 @@ mod tests {
     }
 
     #[test]
+    fn pcie_only_gpu_does_not_select_fabric_services() {
+        let f = fake();
+        f.add_pci_device("0000:01:00.0", 0x10de, 0x2331, 0x030200, None);
+        fs::write(f.device("0000:01:00.0").join("subsystem_device"), "0x1626").unwrap();
+        let detected = platform::discover(&f.sysfs).unwrap();
+        assert_eq!(
+            detected.platform.kind,
+            Kind::Pcie(pcilibs_rs::gpu::Family::Hopper)
+        );
+        assert_eq!(detect_from(&f.sysfs), Mode::Gpu(None));
+        assert!(!f.sysfs.infiniband().exists());
+    }
+
+    #[test]
     fn ordinary_nic_does_not_select_fabric_services() {
         let f = fake();
         add_management_pf(&f, "0000:03:00.0", false);
@@ -130,7 +143,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "discover NVLink platform")]
+    #[should_panic(expected = "discover PCI platform")]
     fn incomplete_scan_cannot_select_cpu_mode() {
         let f = fake();
         f.add_device("0000:01:00.0", None);
@@ -138,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "discover NVLink platform")]
+    #[should_panic(expected = "discover PCI platform")]
     fn malformed_vpd_cannot_hide_fabric_hardware() {
         let f = fake();
         add_management_pf(&f, "0000:03:00.0", true);
@@ -190,7 +203,7 @@ mod tests {
         } else {
             add_management_pf(&f, "0000:03:00.0", true);
         }
-        let detected = nvlink::discover_platform(&f.sysfs).unwrap();
+        let detected = platform::discover(&f.sysfs).unwrap();
         assert_eq!(detected.platform.kind, kind);
         assert_eq!(detect_from(&f.sysfs), Mode::Gpu(Some(fabric)));
     }
