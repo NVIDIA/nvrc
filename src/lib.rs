@@ -22,6 +22,7 @@ pub mod mode;
 pub mod modprobe;
 pub mod mount;
 pub mod nvrc;
+pub mod selinux;
 pub mod smi;
 pub mod syslog;
 pub mod toolkit;
