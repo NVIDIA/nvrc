@@ -17,8 +17,8 @@ use log::{debug, info};
 /// and monitoring daemons before workloads can use the GPU.
 /// On bare metal HGX systems (GPUs + NVSwitches), also starts
 /// the fabric manager via the appropriate NVSwitch mode.
-fn mode_gpu(init: &mut NVRC, fabric: Option<Fabric>) {
-    modprobe::load("nvidia");
+fn mode_gpu(init: &mut NVRC, fabric: Option<Fabric>, isolated: bool) {
+    modprobe::load_nvidia(isolated);
     modprobe::load("nvidia-uvm");
     init.setup_uvm_tools();
 
@@ -93,7 +93,7 @@ fn main() {
 
     match mode::detect() {
         Mode::Cpu => info!("executing cpu mode"),
-        Mode::Gpu(fabric) => mode_gpu(&mut init, fabric),
+        Mode::Gpu { fabric, isolated } => mode_gpu(&mut init, fabric, isolated),
         // A service VM has no GPU, so nothing else has loaded the driver.
         Mode::ServiceVm(Fabric::DirectNvSwitch) => {
             modprobe::load("nvidia");

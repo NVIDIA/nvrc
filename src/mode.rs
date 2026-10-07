@@ -6,7 +6,7 @@
 use crate::macros::ResultExt;
 use log::debug;
 use pcilibs_rs::{
-    platform::{self, FabricInterface, Platform},
+    platform::{self, FabricInterface, Topology},
     Sysfs,
 };
 
@@ -19,7 +19,11 @@ pub enum Fabric {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Mode {
     Cpu,
-    Gpu(Option<Fabric>),
+    Gpu {
+        fabric: Option<Fabric>,
+        /// One GPU and no fabric: nothing sits at the other end of its NVLinks.
+        isolated: bool,
+    },
     ServiceVm(Fabric),
 }
 
@@ -28,23 +32,26 @@ pub fn detect() -> Mode {
 }
 
 fn detect_from(sysfs: &Sysfs) -> Mode {
-    let detected = platform::discover(sysfs).or_panic("discover PCI platform");
-    select(&detected.platform)
+    let topology = platform::discover_topology(sysfs).or_panic("discover PCI topology");
+    select(&topology)
 }
 
-fn select(platform: &Platform) -> Mode {
-    debug!("platform: {platform:?}");
-    let fabric = match platform.fabric {
+fn select(topology: &Topology) -> Mode {
+    debug!("topology: {topology:?}");
+    let fabric = match topology.fabric_interface() {
         FabricInterface::None => None,
         FabricInterface::DirectNvSwitch => Some(Fabric::DirectNvSwitch),
         FabricInterface::ConnectX => Some(Fabric::ConnectX),
         FabricInterface::Mixed => panic!("mixed direct NVSwitch and ConnectX management topology"),
     };
 
-    let mode = match (platform.gpu_count == 0, fabric) {
-        (true, None) => Mode::Cpu,
-        (true, Some(fabric)) => Mode::ServiceVm(fabric),
-        (false, fabric) => Mode::Gpu(fabric),
+    let mode = match (topology.gpus.len(), fabric) {
+        (0, None) => Mode::Cpu,
+        (0, Some(fabric)) => Mode::ServiceVm(fabric),
+        (gpus, fabric) => Mode::Gpu {
+            fabric,
+            isolated: gpus == 1 && fabric.is_none(),
+        },
     };
     debug!("mode: {mode:?}");
     mode
@@ -54,25 +61,39 @@ fn select(platform: &Platform) -> Mode {
 mod tests {
     use super::*;
     use crate::test_utils::add_management_pf;
-    use pcilibs_rs::{platform::Kind, testfs::fake};
+    use pcilibs_rs::testfs::fake;
     use rstest::rstest;
     use std::fs;
 
+    const ISOLATED_GPU: Mode = Mode::Gpu {
+        fabric: None,
+        isolated: true,
+    };
+
+    fn linked(fabric: Option<Fabric>) -> Mode {
+        Mode::Gpu {
+            fabric,
+            isolated: false,
+        }
+    }
+
     #[rstest]
     #[case(0, 0, 0, Mode::Cpu)]
-    #[case(1, 0, 0, Mode::Gpu(None))]
-    #[case(8, 0, 0, Mode::Gpu(None))]
+    #[case(1, 0, 0, ISOLATED_GPU)]
+    #[case(2, 0, 0, linked(None))]
+    #[case(8, 0, 0, linked(None))]
     #[case(0, 4, 0, Mode::ServiceVm(Fabric::DirectNvSwitch))]
-    #[case(8, 4, 0, Mode::Gpu(Some(Fabric::DirectNvSwitch)))]
+    #[case(8, 4, 0, linked(Some(Fabric::DirectNvSwitch)))]
     #[case(0, 1, 0, Mode::ServiceVm(Fabric::DirectNvSwitch))]
-    #[case(2, 2, 0, Mode::Gpu(Some(Fabric::DirectNvSwitch)))]
+    #[case(1, 1, 0, linked(Some(Fabric::DirectNvSwitch)))]
+    #[case(2, 2, 0, linked(Some(Fabric::DirectNvSwitch)))]
     #[case(0, 0, 1, Mode::ServiceVm(Fabric::ConnectX))]
     #[case(0, 0, 2, Mode::ServiceVm(Fabric::ConnectX))]
     #[case(0, 0, 4, Mode::ServiceVm(Fabric::ConnectX))]
     #[case(0, 0, 6, Mode::ServiceVm(Fabric::ConnectX))]
-    #[case(8, 0, 2, Mode::Gpu(Some(Fabric::ConnectX)))]
-    #[case(8, 0, 4, Mode::Gpu(Some(Fabric::ConnectX)))]
-    #[case(1, 0, 1, Mode::Gpu(Some(Fabric::ConnectX)))]
+    #[case(8, 0, 2, linked(Some(Fabric::ConnectX)))]
+    #[case(8, 0, 4, linked(Some(Fabric::ConnectX)))]
+    #[case(1, 0, 1, linked(Some(Fabric::ConnectX)))]
     fn assigned_devices_choose_startup(
         #[case] gpus: usize,
         #[case] switches: usize,
@@ -89,14 +110,6 @@ mod tests {
                 None,
             );
         }
-        for i in 0..gpus {
-            fs::write(
-                f.device(&format!("0000:01:{i:02x}.0"))
-                    .join("subsystem_device"),
-                "0x16c0",
-            )
-            .unwrap();
-        }
         for i in 0..switches {
             f.add_pci_device(
                 &format!("0000:02:{i:02x}.0"),
@@ -110,20 +123,6 @@ mod tests {
             add_management_pf(&f, &format!("0000:03:00.{i}"), i % 2 == 0);
         }
         assert_eq!(detect_from(&f.sysfs), expected);
-    }
-
-    #[test]
-    fn pcie_only_gpu_does_not_select_fabric_services() {
-        let f = fake();
-        f.add_pci_device("0000:01:00.0", 0x10de, 0x2331, 0x030200, None);
-        fs::write(f.device("0000:01:00.0").join("subsystem_device"), "0x1626").unwrap();
-        let detected = platform::discover(&f.sysfs).unwrap();
-        assert_eq!(
-            detected.platform.kind,
-            Kind::Pcie(pcilibs_rs::gpu::Family::Hopper)
-        );
-        assert_eq!(detect_from(&f.sysfs), Mode::Gpu(None));
-        assert!(!f.sysfs.infiniband().exists());
     }
 
     #[test]
@@ -143,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "discover PCI platform")]
+    #[should_panic(expected = "discover PCI topology")]
     fn incomplete_scan_cannot_select_cpu_mode() {
         let f = fake();
         f.add_device("0000:01:00.0", None);
@@ -151,72 +150,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "discover PCI platform")]
+    #[should_panic(expected = "discover PCI topology")]
     fn malformed_vpd_cannot_hide_fabric_hardware() {
         let f = fake();
         add_management_pf(&f, "0000:03:00.0", true);
         fs::write(f.device("0000:03:00.0").join("vpd"), [0x90]).unwrap();
         detect_from(&f.sysfs);
-    }
-
-    #[rstest]
-    #[case(0x2330, 0x16c0, true, Kind::HgxHx00, Fabric::DirectNvSwitch)]
-    #[case(0x2901, 0x1999, false, Kind::HgxBx00, Fabric::ConnectX)]
-    #[case(0x3002, 0x2277, false, Kind::HgxRx00, Fabric::ConnectX)]
-    #[case(
-        0x3041,
-        0x221a,
-        false,
-        Kind::Coherent(pcilibs_rs::gpu::Family::Rubin),
-        Fabric::ConnectX
-    )]
-    #[case(
-        0x307e,
-        0x221a,
-        false,
-        Kind::Coherent(pcilibs_rs::gpu::Family::Rubin),
-        Fabric::ConnectX
-    )]
-    #[case(
-        0x30ff,
-        0x221b,
-        false,
-        Kind::Coherent(pcilibs_rs::gpu::Family::Rubin),
-        Fabric::ConnectX
-    )]
-    fn shared_platform_profiles_choose_fabric_startup(
-        #[case] device: u16,
-        #[case] subsystem: u16,
-        #[case] direct: bool,
-        #[case] kind: Kind,
-        #[case] fabric: Fabric,
-    ) {
-        let f = fake();
-        f.add_pci_device("0000:01:00.0", 0x10de, device, 0x030200, None);
-        fs::write(
-            f.device("0000:01:00.0").join("subsystem_device"),
-            format!("{subsystem:#06x}"),
-        )
-        .unwrap();
-        if direct {
-            f.add_pci_device("0000:02:00.0", 0x10de, 0x22a3, 0x068000, None);
-        } else {
-            add_management_pf(&f, "0000:03:00.0", true);
-        }
-        let detected = platform::discover(&f.sysfs).unwrap();
-        assert_eq!(detected.platform.kind, kind);
-        assert_eq!(detect_from(&f.sysfs), Mode::Gpu(Some(fabric)));
-    }
-
-    #[test]
-    fn mixed_gpu_families_without_a_fabric_still_use_gpu_mode() {
-        assert_eq!(
-            select(&Platform {
-                kind: Kind::Mixed,
-                fabric: FabricInterface::None,
-                gpu_count: 2,
-            }),
-            Mode::Gpu(None)
-        );
     }
 }
