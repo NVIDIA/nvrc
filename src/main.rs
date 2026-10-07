@@ -3,6 +3,7 @@
 
 mod config;
 mod daemon;
+mod device;
 mod execute;
 mod gpu_extension;
 mod guest_extension_image;

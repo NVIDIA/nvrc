@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use crate::{macros::ResultExt, nvrc::NVRC};
+use crate::{device, macros::ResultExt, nvrc::NVRC};
 use nix::sys::stat::{makedev, mknod, Mode, SFlag};
 use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
@@ -23,7 +23,8 @@ impl NVRC {
 
 fn create_tools_node(devices: &Path, node: &Path) {
     let contents = fs::read_to_string(devices).or_panic("read UVM device major");
-    let major = uvm_major(&contents).expect("nvidia-uvm character device major missing or invalid");
+    let major = device::character_major(&contents, "nvidia-uvm")
+        .expect("nvidia-uvm character device major missing or invalid");
     mknod(
         node,
         SFlag::S_IFCHR,
@@ -36,52 +37,10 @@ fn create_tools_node(devices: &Path, node: &Path) {
         .or_panic("set nvidia-uvm-tools permissions");
 }
 
-fn uvm_major(devices: &str) -> Option<u32> {
-    devices
-        .lines()
-        .skip_while(|line| line.trim() != "Character devices:")
-        .skip(1)
-        .take_while(|line| line.trim() != "Block devices:")
-        .find_map(|line| {
-            let mut fields = line.split_whitespace();
-            let major = fields.next()?;
-            (fields.next() == Some("nvidia-uvm") && fields.next().is_none()).then_some(major)
-        })
-        .and_then(|major| major.parse().ok())
-        .filter(|major| *major != 0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
-
-    #[test]
-    fn major_comes_from_the_exact_character_device_entry() {
-        for major in [234, 509] {
-            let devices = format!(
-                "Character devices:\n195 nvidia\n510 nvidia-uvm-tools\n\t{major}\tnvidia-uvm\n\nBlock devices:\n8 nvidia-uvm\n"
-            );
-            assert_eq!(uvm_major(&devices), Some(major));
-        }
-    }
-
-    #[test]
-    fn missing_or_malformed_uvm_major_is_not_guessed() {
-        for devices in [
-            "",
-            "509 nvidia-uvm\n",
-            "Character devices:\n509 nvidia-uvm-tools\n",
-            "Character devices:\n\nBlock devices:\n509 nvidia-uvm\n",
-            "Character devices:\nbad nvidia-uvm\n",
-            "Character devices:\n-1 nvidia-uvm\n",
-            "Character devices:\n0 nvidia-uvm\n",
-            "Character devices:\n4294967296 nvidia-uvm\n",
-            "Character devices:\n509 nvidia-uvm extra\n",
-        ] {
-            assert_eq!(uvm_major(devices), None, "{devices}");
-        }
-    }
 
     #[test]
     fn disabled_tools_skip_setup() {
