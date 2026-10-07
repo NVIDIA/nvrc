@@ -64,10 +64,10 @@ flowchart TD
 
 ## Hardware discovery
 
-NVRC uses pcilibs-rs so guest startup and kata-device-provisioner can use
-the same PCI classification. The dependency is pinned to a commit on pcilibs-rs
-`main` for reproducible builds, with only Linux `std` access enabled; firmware
-CC access is not enabled.
+NVRC uses pcilibs-rs so guest startup and kata-device-provisioner share one PCI
+classification. The dependency is pinned to a commit on pcilibs-rs `main` for
+reproducible builds, with only Linux `std` access enabled; firmware CC access is
+not enabled.
 
 Assigned device roles choose startup without assuming a full board's GPU or
 management-PF count:
@@ -78,23 +78,27 @@ management-PF count:
 | Direct NVSwitch | GPU services and FM | ServiceVM with FM |
 | ConnectX management PFs | GPU services, NVLSM and FM | ServiceVM with NVLSM and FM |
 
-`pcilibs_rs::platform::discover` supplies the NVIDIA hardware profile and any
-management interface. PCIe-only GPUs start GPU services without fabric services
-or an RDMA device tree.
-Direct NVSwitch devices select the H100/H200-style FM path; ConnectX management
-PFs select the Bx00/Rx00-style RDMA/NVLSM/FM path. GPU device/subsystem identity
-refines the profile to HGX Hx00, Bx00, Rx00 or coherent hardware when available.
-No SMBIOS or OEM model mapping is used.
+`pcilibs_rs::platform::discover_topology` lists NVIDIA GPUs, NVSwitches and
+Mellanox management PFs by PCI class and VPD role. The topology is discovered
+once per boot and drives both mode selection and driver options. PCIe-only GPUs
+start GPU services without fabric services or an RDMA device tree. Direct
+NVSwitch devices select the H100/H200-style FM path; ConnectX management PFs
+select the Bx00/Rx00-style RDMA/NVLSM/FM path. GPU device and subsystem IDs do
+not influence mode selection, and no SMBIOS or OEM model mapping is used.
 
-A switch-only ServiceVM can select its services even when its exact GPU family
-is unknown. A hardware profile does not prove the OEM chassis or NVL72 rack
-membership. Rx00 hardware and its driver/service stack still require validation.
+A single GPU with no fabric has no NVLink peer, so its driver loads with
+`NVreg_NvLinkDisable=1`. Any other assignment keeps NVLink enabled. Rx00
+hardware and its driver/service stack still require validation.
 
 PF visibility can change with firmware and VM assignment, so neither four PFs
 nor a marker on every PF is required. After RDMA drivers load, pcilibs-rs selects
 SM-enabled ports belonging to those management PFs. NVRC uses the first port in
-PCI-address/port order and passes its GUID to both NVLSM and FM. Discovery errors
-and mixed management interfaces stop boot rather than silently selecting a mode.
+PCI-address/port order and passes its GUID to both NVLSM and FM.
+
+Discovery is fail-fast. An unreadable PCI attribute, a mixed direct-NVSwitch and
+ConnectX topology, or an unreadable or malformed VPD on any Mellanox PF stops
+boot rather than silently selecting a mode. This includes ConnectX NICs that are
+unrelated to the fabric; only a missing `vpd` attribute is tolerated.
 
 ## Kernel Parameters
 
