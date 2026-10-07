@@ -12,7 +12,7 @@ rlimit = "0.11.0"
 libc = "0.2.178"
 once_cell = "1.21.3"
 sha2 = { version = "0.11", default-features = false }
-pcilibs-rs = { git = "https://github.com/kata-containers/pcilibs-rs", rev = "3c08ab7cb05db7fc5362d3bbbac97b301c943174", default-features = false, features = ["std"] }
+pcilibs-rs = { git = "https://github.com/kata-containers/pcilibs-rs", rev = "66ebe10b5b0a590d31b966aa697ee4efd0daae03", default-features = false, features = ["std"] }
 
 [profile.release]
 opt-level = "z" # PID 1 runs once per boot: size beats speed
@@ -22,7 +22,7 @@ strip = true
 panic = 'abort'
 
 [dev-dependencies]
-pcilibs-rs = { git = "https://github.com/kata-containers/pcilibs-rs", rev = "3c08ab7cb05db7fc5362d3bbbac97b301c943174", default-features = false, features = ["testfs"] }
+pcilibs-rs = { git = "https://github.com/kata-containers/pcilibs-rs", rev = "66ebe10b5b0a590d31b966aa697ee4efd0daae03", default-features = false, features = ["testfs"] }
 mktemp = "0.5.1"
 tempfile = "3.23.0"
 serial_test = "4.0.1"
