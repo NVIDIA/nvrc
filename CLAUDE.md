@@ -54,6 +54,9 @@ to tmpfs.
 - `once_cell` - yes, supports no_std
 - `kernlog` - no, requires std (may need replacement)
 - `rlimit` - needs investigation
+- `pcilibs-rs` - classification core is no_std; NVRC needs its `std` feature for
+  sysfs discovery, which also pulls the phf-based PCI ID catalog and its build
+  script
 
 ## hardened_std
 

@@ -65,8 +65,8 @@ flowchart TD
 ## Hardware discovery
 
 NVRC uses pcilibs-rs so guest startup and kata-device-provisioner can use
-the same PCI classification. The dependency is pinned to the platform-discovery
-PR commit for reproducible builds, with only Linux `std` access enabled; firmware
+the same PCI classification. The dependency is pinned to a commit on pcilibs-rs
+`main` for reproducible builds, with only Linux `std` access enabled; firmware
 CC access is not enabled.
 
 Assigned device roles choose startup without assuming a full board's GPU or
@@ -205,7 +205,7 @@ cargo deny check
 NVRC operates with a defense-in-depth security model appropriate for
 confidential computing:
 
-1. **Minimal Attack Surface**: statically linked
+1. **Minimal Attack Surface**: 9 direct dependencies, statically linked
 2. **Fail-Fast**: Panic hook powers off VM on any panic (no undefined states)
 3. **Read-Only Root**: Filesystem becomes read-only after initialization
 4. **Module Lockdown**: Kernel module loading disabled after GPU setup
