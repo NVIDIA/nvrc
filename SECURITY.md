@@ -109,9 +109,9 @@ The main trust boundaries are:
   untrusted. Everything the host presents to the guest is attacker-controlled
   input: virtual PCI configuration space and Vital Product Data exposed
   through sysfs, virtio devices, and extension block devices. NVRC matches
-  PCI identity exactly, treats an attribute it cannot read as not matching,
-  and panics and powers the VM off when the devices it finds do not form a
-  supported topology, instead of guessing.
+  PCI identity exactly and fails closed: an attribute or VPD it cannot read
+  or parse, or a mix of direct NVSwitch and ConnectX management devices,
+  panics and powers the VM off instead of guessing.
 - **Measured inputs.** The kernel, root filesystem, and kernel command line
   are part of the launch measurement verified by remote attestation. The
   `nvrc.*` parameters and the per-extension dm-verity parameters are trusted
@@ -147,11 +147,12 @@ The main trust boundaries are:
    or VPD attributes so that NVRC selects the wrong mode, skips fabric
    services, treats an unrelated NIC as a management port, or crashes a
    parser. **Security stance:** in scope. sysfs and VPD are untrusted input;
-   NVRC matches exactly, treats what it cannot read as absent, and panics on a
-   device set that is not a supported topology. A host that withholds devices
-   or makes them unreadable gets a CPU-only or failed boot, which is intended
-   and not a vulnerability. Crafted data that makes NVRC start services it
-   should not, or select a mode that misrepresents the hardware, is in scope.
+   NVRC matches exactly and fails closed: unreadable or malformed attributes
+   and VPD panic rather than being treated as absent, and only a missing VPD
+   attribute means a device is not a management port. A host that withholds
+   devices gets a CPU-only boot, which is intended and not a vulnerability.
+   Crafted data that makes NVRC start services it should not, or select a
+   mode that misrepresents the hardware, is in scope.
 
 2. **Extension image tampering.** The host substitutes or modifies an
    extension block device or strips its verity parameters. **Security

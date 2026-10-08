@@ -32,10 +32,10 @@ flowchart TD
     ParseKernel --> DetectMode[Detect mode]
     DetectMode --> ModeSelect{Mode?}
     
-    ModeSelect -->|gpu default| GPUMode[GPU Mode]
+    ModeSelect -->|GPUs present| GPUMode[GPU Mode]
     ModeSelect -->|cpu| CPUMode[CPU Mode]
-    ModeSelect -->|servicevm-nvl4| NVL4Mode[ServiceVM NVL4<br/>H100/H200/H800]
-    ModeSelect -->|servicevm-nvl5| NVL5Mode[ServiceVM NVL5<br/>B100/B200/B300]
+    ModeSelect -->|direct NVSwitch| NVL4Mode[ServiceVM<br/>Direct NVSwitch]
+    ModeSelect -->|ConnectX management| NVL5Mode[ServiceVM<br/>ConnectX management]
     
     GPUMode --> GPUSteps[• Load nvidia.ko nvidia-uvm<br/>• Start nvidia-persistenced<br/>• nvidia-smi: lmc lgc pl srs<br/>• nv-hostengine dcgm-exporter<br/>• Generate CDI spec<br/>• Health checks]
     
@@ -43,7 +43,7 @@ flowchart TD
     
     NVL4Mode --> NVL4Steps[• Load nvidia.ko<br/>• Start fabric-mgr greedy<br/>• Health checks]
     
-    NVL5Mode --> NVL5Steps[• Load ib_umad mlx5_ib<br/>• Detect CX7 port GUID<br/>• Start nvlsm<br/>• Start fabric-mgr symmetric<br/>• Health checks]
+    NVL5Mode --> NVL5Steps[• Load ib_umad mlx5_ib<br/>• Select management-port GUID<br/>• Start nvlsm<br/>• Start fabric-mgr symmetric<br/>• Health checks]
     
     GPUSteps --> Lockdown
     CPUSteps --> Lockdown
@@ -62,17 +62,53 @@ flowchart TD
     style NVL5Mode fill:#ffccbc
 ```
 
+## Hardware discovery
+
+NVRC uses pcilibs-rs so guest startup and kata-device-provisioner share one PCI
+classification. The dependency is pinned to a commit on pcilibs-rs `main` for
+reproducible builds, with only Linux `std` access enabled; firmware CC access is
+not enabled.
+
+Assigned device roles choose startup without assuming a full board's GPU or
+management-PF count:
+
+| Fabric interface | GPUs present | No GPUs |
+| --- | --- | --- |
+| None | GPU services | CPU mode |
+| Direct NVSwitch | GPU services and FM | ServiceVM with FM |
+| ConnectX management PFs | GPU services, NVLSM and FM | ServiceVM with NVLSM and FM |
+
+`pcilibs_rs::platform::discover_topology` lists NVIDIA GPUs, NVSwitches and
+Mellanox management PFs by PCI class and VPD role. The topology is discovered
+once per boot and drives both mode selection and driver options. PCIe-only GPUs
+start GPU services without fabric services or an RDMA device tree. Direct
+NVSwitch devices select the H100/H200-style FM path; ConnectX management PFs
+select the Bx00/Rx00-style RDMA/NVLSM/FM path. GPU device and subsystem IDs do
+not influence mode selection, and no SMBIOS or OEM model mapping is used.
+
+A single GPU with no fabric has no NVLink peer, so its driver loads with
+`NVreg_NvLinkDisable=1`. Any other assignment keeps NVLink enabled. Rx00
+hardware and its driver/service stack still require validation.
+
+PF visibility can change with firmware and VM assignment, so neither four PFs
+nor a marker on every PF is required. After RDMA drivers load, pcilibs-rs selects
+SM-enabled ports belonging to those management PFs. NVRC uses the first port in
+PCI-address/port order and passes its GUID to both NVLSM and FM.
+
+Discovery is fail-fast. An unreadable PCI attribute, a mixed direct-NVSwitch and
+ConnectX topology, or an unreadable or malformed VPD on any Mellanox PF stops
+boot rather than silently selecting a mode. This includes ConnectX NICs that are
+unrelated to the fabric; only a missing `vpd` attribute is tolerated.
+
 ## Kernel Parameters
 
-NVRC is configured entirely via kernel command-line parameters (no config
-files). This is critical for minimal init environments where userspace
-configuration doesn't exist yet.
+Hardware selects the operating mode. Kernel parameters configure logging and
+GPU services; no userspace configuration file is needed for these settings.
 
 ### Core Parameters
 
 | Parameter   | Values                                           | Default | Description                                                                                                                         |
 | ----------- | ------------------------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `nvrc.mode` | `gpu`, `cpu`, `nvswitch-nvl4`, `nvswitch-nvl5`   | `gpu`   | Operation mode. `cpu` for CPU-only, `nvswitch-nvl4` for H100/H200/H800 service VMs, `nvswitch-nvl5` for B200/B300/B100 service VMs. |
 | `nvrc.log`  | `off`, `error`, `warn`, `info`, `debug`, `trace` | `off`   | Log verbosity level. Also enables `/proc/sys/kernel/printk_devkmsg`.                                                                |
 
 ### GPU Configuration
@@ -102,51 +138,28 @@ skips setup.
 | --------------------------- | --------------------------------------- | -------- | -------------------------------------------------------------------------------------------------- |
 | `nvrc.uvm.persistence.mode` | `on/off`, `true/false`, `1/0`, `yes/no` | `true`   | UVM persistence mode keeps unified memory state across CUDA context teardowns.                     |
 | `nvrc.dcgm`                 | `on/off`, `true/false`, `1/0`, `yes/no` | `false`  | Enable DCGM (Data Center GPU Manager) for telemetry and health monitoring.                         |
-| `nvrc.fm.mode`              | `0`, `1`                                | -        | Fabric Manager mode: 0=bare metal, 1=servicevm (shared nvswitch). Auto-set in nvswitch modes.      |
-| `nvrc.fm.rail.policy`       | `greedy`, `symmetric`                   | `greedy` | Partition rail policy. Symmetric required for Confidential Computing on Blackwell.                 |
 
 ### Example Configurations
 
-**Minimal GPU setup (defaults):**
-
-```text
-nvrc.mode=gpu
-```
-
-**CPU-only mode:**
-
-```text
-nvrc.mode=cpu
-```
-
-**NVSwitch NVL4 mode (Service VM for HGX H100/H200/H800 - NVLink 4.0):**
-
-```text
-nvrc.mode=nvswitch-nvl4
-```
-
-**NVSwitch NVL5 mode (Service VM for HGX B200/B300/B100 - NVLink 5.0):**
-
-```text
-nvrc.mode=nvswitch-nvl5
-```
+Mode selection is automatic: assign GPUs for GPU services, or fabric management
+devices without GPUs for a ServiceVM. `nvrc.mode` is not a supported parameter.
 
 **GPU with locked clocks for benchmarking:**
 
 ```text
-nvrc.mode=gpu nvrc.smi.lgc=1500 nvrc.smi.lmc=5001 nvrc.smi.pl=300
+nvrc.smi.lgc=1500 nvrc.smi.lmc=5001 nvrc.smi.pl=300
 ```
 
 **GPU with DCGM monitoring:**
 
 ```text
-nvrc.mode=gpu nvrc.dcgm=on nvrc.log=info
+nvrc.dcgm=on nvrc.log=info
 ```
 
 **Multi-GPU with NVLink:**
 
 ```text
-nvrc.mode=gpu nvrc.fm.mode=0 nvrc.log=debug
+nvrc.log=debug
 ```
 
 ## Build
@@ -196,7 +209,7 @@ cargo deny check
 NVRC operates with a defense-in-depth security model appropriate for
 confidential computing:
 
-1. **Minimal Attack Surface**: 7 direct dependencies, statically linked
+1. **Minimal Attack Surface**: 9 direct dependencies, statically linked
 2. **Fail-Fast**: Panic hook powers off VM on any panic (no undefined states)
 3. **Read-Only Root**: Filesystem becomes read-only after initialization
 4. **Module Lockdown**: Kernel module loading disabled after GPU setup
@@ -228,7 +241,7 @@ Check kernel logs for panic messages. Common causes:
 
 ### GPU not available in container
 
-- Verify `nvrc.mode=gpu` (default, but check explicitly)
+- Check detected topology with `nvrc.log=debug`
 - Check that GPU is passed through to VM
 - Ensure nvidia kernel modules are present
 - Verify CDI spec generation succeeded
