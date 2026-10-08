@@ -3,6 +3,12 @@ name: Reproducible build
 # Build the tree twice, varying the inputs a verifier cannot copy from CI
 # (workspace directory, CARGO_HOME), and require identical sha256. Guards
 # the dmesg <-> Rekor correlation promised in VERIFY.md and ARCHITECTURE.md.
+#
+# On pull requests the binary is also uploaded as a workflow artifact, which
+# publish-pr-artefacts.yaml publishes when a maintainer adds the
+# "publish-nvrc-from-pr" label, so consumers (e.g. kata-containers) can test
+# the pull request. Only this read-only build ever runs the pull request's
+# code.
 
 on:
   pull_request:
@@ -25,6 +31,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # The PR head, not the default merge ref: the uploaded binary is
+          # published tagged with the head sha and must rebuild from it.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install pinned Rust toolchain
@@ -63,3 +72,21 @@ jobs:
             diff <(strings "$a") <(strings "$b") | head -50 || true
             exit 1
           fi
+
+      - name: Stage the release binary
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "${RUNNER_TEMP}/artifact"
+          cp "${RUNNER_TEMP}/first/src/target/${{ matrix.target }}/release/NVRC" \
+            "${RUNNER_TEMP}/artifact/NVRC-${{ matrix.target }}"
+
+      - name: Upload the release binary
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: NVRC-${{ matrix.target }}
+          path: ${{ runner.temp }}/artifact/NVRC-${{ matrix.target }}
+          retention-days: 15
+          if-no-files-found: error
