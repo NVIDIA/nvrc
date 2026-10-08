@@ -3,6 +3,7 @@
 
 mod config;
 mod daemon;
+mod device;
 mod execute;
 mod gpu_extension;
 mod guest_extension_image;
@@ -22,6 +23,7 @@ mod nvrc;
 mod smi;
 mod syslog;
 mod toolkit;
+mod uvm;
 
 pub use macros::ResultExt;
 
@@ -45,6 +47,7 @@ use toolkit::nvidia_ctk_cdi;
 fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     modprobe::load("nvidia");
     modprobe::load("nvidia-uvm");
+    init.setup_uvm_tools();
 
     match nvswitch {
         Some("nvl4") => mode_nvl4(init, FABRIC_MODE_FULL),

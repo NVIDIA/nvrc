@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod daemon;
+pub mod device;
 pub mod execute;
 pub mod gpu_extension;
 pub mod guest_extension_image;
@@ -25,6 +26,7 @@ pub mod nvrc;
 pub mod smi;
 pub mod syslog;
 pub mod toolkit;
+pub mod uvm;
 
 #[cfg(test)]
 pub mod test_utils;

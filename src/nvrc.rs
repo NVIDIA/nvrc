@@ -21,6 +21,8 @@ pub struct NVRC {
     pub nvidia_smi_pl: Option<u32>,
     /// Enable UVM persistence mode for unified memory optimization
     pub uvm_persistence_mode: Option<bool>,
+    /// Debugging access must be explicitly requested on the measured cmdline.
+    pub uvm_tools_enabled: bool,
     /// Enable DCGM exporter for GPU metrics
     pub dcgm_enabled: Option<bool>,
 
@@ -63,6 +65,7 @@ mod tests {
         let nvrc = NVRC::default();
         assert!(nvrc.nvidia_smi_srs.is_none());
         assert!(nvrc.nvidia_smi_lgc.is_none());
+        assert!(!nvrc.uvm_tools_enabled);
         assert!(nvrc.children.is_empty());
     }
 
