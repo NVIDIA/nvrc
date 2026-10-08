@@ -270,7 +270,8 @@ efficiently bootstrap the Kata agent, including:
   trigger a Pod/Container(s) restart
 * **Randomly generated user-group(s)** used for starting services like
   nvidia-persistenced
-* Remounting the root as **read-only**
+* Running from a **read-only** root image, with writable state confined to
+  the tmpfs mounts NVRC creates at `/run` and `/tmp`
 * After loading the signed drivers, the kernel module loading is disabled
   **`/proc/sys/kernel/modules_disabled`**, and only a reboot can enable it
 * The **CC mode** of all GPUs is checked, and if there is a mismatch, NVRC will
