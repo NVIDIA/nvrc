@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-//! Library interface for fuzzing and testing.
+//! NVRC's logic; `main.rs` is only the mode dispatch.
 
 #![allow(non_snake_case)]
-//! The main binary uses these modules internally.
 
 pub mod config;
 pub mod daemon;
@@ -13,15 +12,17 @@ pub mod execute;
 pub mod gpu_extension;
 pub mod guest_extension_image;
 pub mod hash;
+pub mod infiniband;
+pub mod init;
 pub mod kata_agent;
 pub mod kernel_params;
 pub mod kmsg;
 pub mod lockdown;
-#[macro_use]
 pub mod macros;
 pub mod mode;
 pub mod modprobe;
 pub mod mount;
+pub mod net;
 pub mod nvrc;
 pub mod smi;
 pub mod syslog;
