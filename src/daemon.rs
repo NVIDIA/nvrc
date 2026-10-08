@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-use crate::config::update_config_file;
+use crate::config::{remove_config_keys, update_config_file};
 use crate::gpu_extension;
 use crate::kmsg;
 use crate::macros::ResultExt;
@@ -96,7 +96,7 @@ impl NVRC {
 
     /// NVSwitch fabric manager is only needed for multi-GPU NVLink topologies.
     /// Disabled by default since most VMs have single GPUs.
-    pub fn nv_fabricmanager(&mut self, fabric_mode: u8, rail_policy: &str) {
+    pub fn nv_fabricmanager(&mut self, fabric_mode: u8, rail_policy: Option<&str>) {
         // The stock config ships in the gpu extension; the editable runtime copy
         // stays on the writable /run tmpfs.
         let fm_config = gpu_extension::path(FM_CONFIG);
@@ -135,14 +135,24 @@ impl NVRC {
 
     /// Write FABRIC_MODE and PARTITION_RAIL_POLICY to fabricmanager.cfg.
     /// FABRIC_MODE: 0 = bare metal (GPUs local), 1 = service VM (GPUs in tenant VMs)
-    /// PARTITION_RAIL_POLICY: "greedy" (NVL4) or "symmetric" (NVL5, required for CC on Blackwell)
-    fn configure_fabricmanager(&self, cfg_path: &str, fabric_mode: u8, rail_policy: &str) {
+    /// PARTITION_RAIL_POLICY: "greedy" (NVL4) or "symmetric" (NVL5, required for CC on Blackwell).
+    /// None removes any active PARTITION_RAIL_POLICY line: fabric manager on NVL3 (HGX A100)
+    /// rejects the key and exits.
+    fn configure_fabricmanager(&self, cfg_path: &str, fabric_mode: u8, rail_policy: Option<&str>) {
         let fm = &fabric_mode.to_string();
-        let updates = &[
-            ("FABRIC_MODE", fm.as_str()),
-            ("PARTITION_RAIL_POLICY", rail_policy),
-        ];
-        update_config_file(cfg_path, updates);
+        match rail_policy {
+            Some(policy) => update_config_file(
+                cfg_path,
+                &[
+                    ("FABRIC_MODE", fm.as_str()),
+                    ("PARTITION_RAIL_POLICY", policy),
+                ],
+            ),
+            None => {
+                update_config_file(cfg_path, &[("FABRIC_MODE", fm.as_str())]);
+                remove_config_keys(cfg_path, &["PARTITION_RAIL_POLICY"]);
+            }
+        }
     }
 }
 
@@ -207,7 +217,7 @@ mod tests {
         fs::write(cfg, "FABRIC_MODE=0\n").unwrap();
 
         let mut nvrc = NVRC::default();
-        nvrc.configure_fabricmanager(cfg, FABRIC_MODE_FULL, "greedy");
+        nvrc.configure_fabricmanager(cfg, FABRIC_MODE_FULL, Some("greedy"));
         nvrc.spawn_fabricmanager("/bin/true");
 
         let content = fs::read_to_string(cfg).unwrap();
@@ -323,7 +333,7 @@ mod tests {
     // === Fabricmanager configuration tests ===
 
     /// Run configure_fabricmanager over a config seeded with `initial`.
-    fn configured(initial: &str, fabric_mode: u8, rail_policy: &str) -> String {
+    fn configured(initial: &str, fabric_mode: u8, rail_policy: Option<&str>) -> String {
         use tempfile::NamedTempFile;
 
         let tmpfile = NamedTempFile::new().unwrap();
@@ -344,15 +354,38 @@ mod tests {
         #[case] fabric_mode: u8,
         #[case] rail_policy: &str,
     ) {
-        let content = configured("", fabric_mode, rail_policy);
+        let content = configured("", fabric_mode, Some(rail_policy));
 
         assert!(content.contains(&format!("FABRIC_MODE={fabric_mode}")));
         assert!(content.contains(&format!("PARTITION_RAIL_POLICY={rail_policy}")));
     }
 
     #[test]
+    fn test_configure_fabricmanager_without_rail_policy() {
+        let content = configured("", FABRIC_MODE_FULL, None);
+
+        assert!(content.contains("FABRIC_MODE=0"));
+        assert!(!content.contains("PARTITION_RAIL_POLICY"));
+    }
+
+    #[test]
+    fn test_configure_fabricmanager_without_rail_policy_removes_existing() {
+        let content = configured(
+            "FABRIC_MODE=1\n# PARTITION_RAIL_POLICY=greedy\nPARTITION_RAIL_POLICY=greedy\n",
+            FABRIC_MODE_FULL,
+            None,
+        );
+
+        assert!(content.contains("FABRIC_MODE=0"));
+        assert!(content.contains("# PARTITION_RAIL_POLICY=greedy"));
+        assert!(!content
+            .lines()
+            .any(|l| l.trim().starts_with("PARTITION_RAIL_POLICY=")));
+    }
+
+    #[test]
     fn test_configure_fabricmanager_updates_existing() {
-        let content = configured("FABRIC_MODE=0\n", FABRIC_MODE_SHARED, "greedy");
+        let content = configured("FABRIC_MODE=0\n", FABRIC_MODE_SHARED, Some("greedy"));
 
         assert!(content.contains("FABRIC_MODE=1"));
         assert_eq!(
@@ -369,7 +402,7 @@ mod tests {
         let content = configured(
             "# Comment\nOTHER_SETTING=value\nFABRIC_MODE=0\n",
             FABRIC_MODE_SHARED,
-            "greedy",
+            Some("greedy"),
         );
 
         assert!(content.contains("# Comment"));

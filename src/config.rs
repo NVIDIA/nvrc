@@ -41,6 +41,29 @@ pub fn update_config_file(path: &str, updates: &[(&str, &str)]) {
     fs::write(path, updated).or_panic(format_args!("write {path}"));
 }
 
+/// Removes active KEY=VALUE lines for `keys` from a config file.
+/// Commented-out lines are kept.
+pub fn remove_config_keys(path: &str, keys: &[&str]) {
+    let content = fs::read_to_string(path).or_panic(format_args!("read {path}"));
+
+    let lines: Vec<&str> = content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            let remove = keys
+                .iter()
+                .any(|key| trimmed.starts_with(&format!("{}=", key)));
+            if remove {
+                debug!("{}: removed {}", path, trimmed);
+            }
+            !remove
+        })
+        .collect();
+
+    let updated = lines.join("\n") + "\n";
+    fs::write(path, updated).or_panic(format_args!("write {path}"));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +194,28 @@ mod tests {
     #[should_panic(expected = "read")]
     fn test_update_config_file_nonexistent_file() {
         update_config_file("/nonexistent/path/file.cfg", &[("KEY", "value")]);
+    }
+
+    #[test]
+    fn test_remove_config_keys() {
+        let tmpfile = NamedTempFile::new().unwrap();
+        let path = tmpfile.path().to_str().unwrap();
+
+        fs::write(
+            path,
+            "# KEY1=commented\nKEY1=value\n  KEY1=indented\nKEY1_SUFFIX=kept\nOTHER=kept\n",
+        )
+        .unwrap();
+
+        remove_config_keys(path, &["KEY1"]);
+
+        let content = fs::read_to_string(path).unwrap();
+        assert_eq!(content, "# KEY1=commented\nKEY1_SUFFIX=kept\nOTHER=kept\n");
+    }
+
+    #[test]
+    #[should_panic(expected = "read")]
+    fn test_remove_config_keys_nonexistent_file() {
+        remove_config_keys("/nonexistent/path/file.cfg", &["KEY"]);
     }
 }
