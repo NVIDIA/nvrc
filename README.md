@@ -77,12 +77,24 @@ configuration doesn't exist yet.
 
 ### GPU Configuration
 
-| Parameter      | Values                 | Default | Description                                                                                        |
-| -------------- | ---------------------- | ------- | -------------------------------------------------------------------------------------------------- |
-| `nvrc.smi.lgc` | `<MHz>`                | -       | Lock GPU core clocks to fixed frequency. Eliminates thermal throttling for consistent performance. |
-| `nvrc.smi.lmc` | `<MHz>`                | -       | Lock memory clocks to fixed frequency. Used alongside lgc for fully deterministic GPU behavior.    |
-| `nvrc.smi.pl`  | `<Watts>`              | -       | Set GPU power limit. Lower values reduce heat/power; higher allows peak performance.               |
-| `nvrc.smi.srs` | `enabled`, `disabled`  | -       | Secure Randomization Seed for GPU memory (passed to nvidia-smi).                                   |
+| Parameter        | Values                                  | Default | Description                                                                                        |
+| ---------------- | --------------------------------------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `nvrc.smi.lgc`   | `<MHz>`                                 | -       | Lock GPU core clocks to fixed frequency. Eliminates thermal throttling for consistent performance. |
+| `nvrc.smi.lmc`   | `<MHz>`                                 | -       | Lock memory clocks to fixed frequency. Used alongside lgc for fully deterministic GPU behavior.    |
+| `nvrc.smi.pl`    | `<Watts>`                               | -       | Set GPU power limit. Lower values reduce heat/power; higher allows peak performance.               |
+| `nvrc.smi.srs`   | `enabled`, `disabled`                   | -       | Secure Randomization Seed for GPU memory (passed to nvidia-smi).                                   |
+| `nvrc.uvm.tools` | `on/off`, `true/false`, `1/0`, `yes/no` | `false` | Create `/dev/nvidia-uvm-tools` for debugging.                                                      |
+
+`nvrc.uvm.tools=true` (or `1`, `on`, `yes`) creates the tools node after loading
+`nvidia-uvm` and before generating the CDI spec. Like the other boolean parameters,
+values are case-insensitive; `false`, `0`, `off` and `no` disable creation.
+Creation is disabled by default. Bare parameters are ignored, and empty or
+unrecognized values disable creation. If repeated, the last assigned value wins.
+The node's major comes from the driver's entry in `/proc/devices`; the tools minor
+is `1`. This setting is independent of UVM persistence mode and DCGM.
+
+Creation failures, including an existing node, abort boot. When disabled, NVRC
+skips setup.
 
 ### Daemon Control
 

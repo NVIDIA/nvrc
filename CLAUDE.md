@@ -62,7 +62,10 @@ processes, and sockets.
 
 **Core Principles:**
 
-- Fresh filesystem on every boot - if a path exists, it's an error (fail-fast)
+- Fresh filesystem on every boot - creation fails if a path already exists
+- **Offensive programming:** Call the operation directly and use `or_panic` or
+  `expect` to abort on failure. Let creation failures expose unexpected state;
+  do not add defensive existence checks. Disabled optional setup is a no-op.
 - No `remove_file` - we setup clean state, not fix bad state
 - Whitelist-only: paths, binaries, socket paths must be explicitly allowed
 - Static arguments: `&'static str` only (no runtime injection)

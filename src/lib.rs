@@ -25,6 +25,7 @@ pub mod nvrc;
 pub mod smi;
 pub mod syslog;
 pub mod toolkit;
+pub mod uvm;
 
 #[cfg(test)]
 pub mod test_utils;

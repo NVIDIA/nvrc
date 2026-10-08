@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) NVIDIA CORPORATION
+
 use log::{debug, warn};
 use std::fs;
 
@@ -39,6 +42,10 @@ impl NVRC {
             match k {
                 "nvrc.log" => nvrc_log(v, self)?,
                 "nvrc.uvm.persistence.mode" => uvm_persistenced_mode(v, self),
+                "nvrc.uvm.tools" => {
+                    self.uvm_tools_enabled = parse_boolean(v);
+                    debug!("nvrc.uvm.tools: {}", self.uvm_tools_enabled);
+                }
                 "nvrc.dcgm" => nvrc_dcgm(v, self),
 
                 "nvrc.smi.srs" => nvidia_smi_srs(v, self),
@@ -307,6 +314,66 @@ mod tests {
 
         uvm_persistenced_mode("True", &mut c);
         assert_eq!(c.uvm_persistence_mode, Some(true));
+    }
+
+    #[test]
+    fn uvm_tools_defaults_to_disabled() {
+        for cmdline in [
+            "",
+            "nvrc.uvm.tools",
+            "nvrc.uvm.tools=",
+            "nvrc.uvm.tools=0",
+            "nvrc.uvm.tools=2",
+            "nvrc.uvm.tools=01",
+            "nvrc.uvm.tools=invalid",
+            "other.nvrc.uvm.tools=1",
+            "nvrc.uvm.persistence.mode=1 nvrc.dcgm=1",
+        ] {
+            let mut nvrc = NVRC::default();
+            nvrc.process_kernel_params(Some(cmdline));
+            assert!(!nvrc.uvm_tools_enabled, "{cmdline}");
+        }
+    }
+
+    #[test]
+    fn uvm_tools_accepts_boolean_aliases() {
+        for (value, expected) in [
+            ("1", true),
+            ("true", true),
+            ("on", true),
+            ("yes", true),
+            ("TRUE", true),
+            ("On", true),
+            ("YES", true),
+            ("0", false),
+            ("false", false),
+            ("off", false),
+            ("no", false),
+            ("FALSE", false),
+            ("Off", false),
+            ("NO", false),
+        ] {
+            let mut nvrc = NVRC::default();
+            nvrc.uvm_tools_enabled = !expected;
+            nvrc.process_kernel_params(Some(&format!("nvrc.uvm.tools={value}")));
+            assert_eq!(nvrc.uvm_tools_enabled, expected, "{value}");
+        }
+    }
+
+    #[test]
+    fn last_uvm_tools_parameter_wins() {
+        for (cmdline, expected) in [
+            ("nvrc.uvm.tools=0 nvrc.uvm.tools=1", true),
+            ("nvrc.uvm.tools=1 nvrc.uvm.tools=0", false),
+            ("nvrc.uvm.tools=0 nvrc.uvm.tools=true", true),
+            ("nvrc.uvm.tools=yes nvrc.uvm.tools=OFF", false),
+            ("nvrc.uvm.tools=1 nvrc.uvm.tools=invalid", false),
+            ("nvrc.uvm.tools=1 nvrc.uvm.tools=", false),
+        ] {
+            let mut nvrc = NVRC::default();
+            nvrc.process_kernel_params(Some(cmdline));
+            assert_eq!(nvrc.uvm_tools_enabled, expected, "{cmdline}");
+        }
     }
 
     #[test]
