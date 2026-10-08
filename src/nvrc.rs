@@ -11,8 +11,8 @@ use std::process::Child;
 #[derive(Default)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct NVRC {
-    /// Set/unset ready state
-    pub nvidia_smi_srs: Option<String>,
+    /// Confidential Computing GPU Ready State to set after attestation
+    pub nvidia_smi_srs: Option<bool>,
     /// Lock GPU clocks to specific frequency
     pub nvidia_smi_lgc: Option<u32>,
     /// Lock memory clocks to specific frequency

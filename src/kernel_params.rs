@@ -9,13 +9,17 @@ use crate::nvrc::NVRC;
 /// Kernel parameters use various boolean representations (on/off, true/false, 1/0, yes/no).
 /// Normalize them to a single bool to simplify downstream logic.
 fn parse_boolean(s: &str) -> bool {
+    parse_boolean_strict(s).unwrap_or_else(|e| {
+        warn!("{e}, defaulting to false");
+        false
+    })
+}
+
+fn parse_boolean_strict(s: &str) -> Result<bool, String> {
     match s.to_ascii_lowercase().as_str() {
-        "on" | "true" | "1" | "yes" => true,
-        "off" | "false" | "0" | "no" => false,
-        _ => {
-            warn!("unrecognized boolean '{}', defaulting to false", s);
-            false
-        }
+        "on" | "true" | "1" | "yes" => Ok(true),
+        "off" | "false" | "0" | "no" => Ok(false),
+        _ => Err(format!("unrecognized boolean '{s}'")),
     }
 }
 
@@ -48,7 +52,7 @@ impl NVRC {
                 }
                 "nvrc.dcgm" => nvrc_dcgm(v, self),
 
-                "nvrc.smi.srs" => nvidia_smi_srs(v, self),
+                "nvrc.smi.srs" => nvidia_smi_srs(v, self)?,
                 "nvrc.smi.lgc" => nvidia_smi_lgc(v, self)?,
                 "nvrc.smi.lmc" => nvidia_smi_lmc(v, self)?,
                 "nvrc.smi.pl" => nvidia_smi_pl(v, self)?,
@@ -86,10 +90,13 @@ fn nvrc_log(value: &str, _ctx: &mut NVRC) -> Result<(), String> {
         .map_err(|e| format!("printk_devkmsg: {e}"))
 }
 
-/// Secure Randomization Seed for GPU memory. Passed directly to nvidia-smi.
-fn nvidia_smi_srs(value: &str, ctx: &mut NVRC) {
-    ctx.nvidia_smi_srs = Some(value.to_owned());
-    debug!("nvidia_smi_srs: {value}");
+/// nvidia-smi only accepts 0 or 1 for the ready state, so an unrecognized
+/// value fails here instead of leaving every GPU silently NotReady.
+fn nvidia_smi_srs(value: &str, ctx: &mut NVRC) -> Result<(), String> {
+    let ready = parse_boolean_strict(value).map_err(|e| format!("nvrc.smi.srs: {e}"))?;
+    debug!("nvrc.smi.srs: {ready}");
+    ctx.nvidia_smi_srs = Some(ready);
+    Ok(())
 }
 
 /// Lock GPU core clocks to a fixed frequency (MHz) for consistent performance.
@@ -295,11 +302,15 @@ mod tests {
     fn test_nvidia_smi_srs() {
         let mut c = NVRC::default();
 
-        nvidia_smi_srs("enabled", &mut c);
-        assert_eq!(c.nvidia_smi_srs, Some("enabled".to_owned()));
+        assert!(nvidia_smi_srs("1", &mut c).is_ok());
+        assert_eq!(c.nvidia_smi_srs, Some(true));
 
-        nvidia_smi_srs("disabled", &mut c);
-        assert_eq!(c.nvidia_smi_srs, Some("disabled".to_owned()));
+        assert!(nvidia_smi_srs("off", &mut c).is_ok());
+        assert_eq!(c.nvidia_smi_srs, Some(false));
+
+        let err = nvidia_smi_srs("enabled", &mut c).unwrap_err();
+        assert!(err.starts_with("nvrc.smi.srs:"), "{err}");
+        assert_eq!(c.nvidia_smi_srs, Some(false));
     }
 
     #[test]
@@ -498,9 +509,9 @@ mod tests {
     fn test_process_kernel_params_with_uvm_and_srs() {
         let mut c = NVRC::default();
 
-        c.process_kernel_params(Some("nvrc.uvm.persistence.mode=true nvrc.smi.srs=enabled"));
+        c.process_kernel_params(Some("nvrc.uvm.persistence.mode=true nvrc.smi.srs=1"));
 
         assert_eq!(c.uvm_persistence_mode, Some(true));
-        assert_eq!(c.nvidia_smi_srs, Some("enabled".to_owned()));
+        assert_eq!(c.nvidia_smi_srs, Some(true));
     }
 }
