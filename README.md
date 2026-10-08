@@ -198,7 +198,7 @@ confidential computing:
 
 1. **Minimal Attack Surface**: 7 direct dependencies, statically linked
 2. **Fail-Fast**: Panic hook powers off VM on any panic (no undefined states)
-3. **Read-Only Root**: Filesystem becomes read-only after initialization
+3. **Read-Only Root**: Root image is read-only by construction, never remounted
 4. **Module Lockdown**: Kernel module loading disabled after GPU setup
 5. **OOM Protection**: kata-agent protected with OOM score adjustment (-997)
 6. **Static Linking**: No dynamic library dependencies to compromise
