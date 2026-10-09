@@ -2,9 +2,21 @@
 // Copyright (c) NVIDIA CORPORATION
 
 use log::{debug, warn};
+use once_cell::sync::OnceCell;
 use std::fs;
 
 use crate::nvrc::NVRC;
+
+const CMDLINE: &str = "/proc/cmdline";
+
+static CMDLINE_CONTENT: OnceCell<String> = OnceCell::new();
+
+/// The kernel command line, read once.
+pub fn kernel_cmdline() -> std::io::Result<&'static str> {
+    CMDLINE_CONTENT
+        .get_or_try_init(|| fs::read_to_string(CMDLINE))
+        .map(String::as_str)
+}
 
 /// Kernel parameters use various boolean representations (on/off, true/false, 1/0, yes/no).
 /// Normalize them to a single bool to simplify downstream logic.
@@ -17,6 +29,15 @@ fn parse_boolean(s: &str) -> bool {
             false
         }
     }
+}
+
+/// Numeric nvidia-smi setting (MHz or Watts) applied to all GPUs.
+fn parse_u32(key: &str, what: &str, value: &str) -> Result<u32, String> {
+    let n = value
+        .parse()
+        .map_err(|e| format!("{key}: invalid {what}: {e}"))?;
+    debug!("{key}: {n} (all GPUs)");
+    Ok(n)
 }
 
 impl NVRC {
@@ -33,14 +54,13 @@ impl NVRC {
     /// expected validation panics there.
     pub fn try_process_kernel_params(&mut self, cmdline: Option<&str>) -> Result<(), String> {
         let content = match cmdline {
-            Some(c) => c.to_owned(),
-            None => fs::read_to_string("/proc/cmdline")
-                .map_err(|e| format!("read /proc/cmdline: {e}"))?,
+            Some(c) => c,
+            None => kernel_cmdline().map_err(|e| format!("read {CMDLINE}: {e}"))?,
         };
 
         for (k, v) in content.split_whitespace().filter_map(|p| p.split_once('=')) {
             match k {
-                "nvrc.log" => nvrc_log(v, self)?,
+                "nvrc.log" => nvrc_log(v)?,
                 "nvrc.uvm.persistence.mode" => uvm_persistenced_mode(v, self),
                 "nvrc.uvm.tools" => {
                     self.uvm_tools_enabled = parse_boolean(v);
@@ -49,9 +69,9 @@ impl NVRC {
                 "nvrc.dcgm" => nvrc_dcgm(v, self),
 
                 "nvrc.smi.srs" => nvidia_smi_srs(v, self),
-                "nvrc.smi.lgc" => nvidia_smi_lgc(v, self)?,
-                "nvrc.smi.lmc" => nvidia_smi_lmc(v, self)?,
-                "nvrc.smi.pl" => nvidia_smi_pl(v, self)?,
+                "nvrc.smi.lgc" => self.nvidia_smi_lgc = Some(parse_u32(k, "frequency", v)?),
+                "nvrc.smi.lmc" => self.nvidia_smi_lmc = Some(parse_u32(k, "frequency", v)?),
+                "nvrc.smi.pl" => self.nvidia_smi_pl = Some(parse_u32(k, "wattage", v)?),
                 _ => {}
             }
         }
@@ -69,7 +89,7 @@ fn nvrc_dcgm(value: &str, ctx: &mut NVRC) {
 
 /// Control log verbosity at runtime. Defaults to off to minimize noise.
 /// Enabling devkmsg allows kernel log output even in minimal init environments.
-fn nvrc_log(value: &str, _ctx: &mut NVRC) -> Result<(), String> {
+fn nvrc_log(value: &str) -> Result<(), String> {
     let lvl = match value.to_ascii_lowercase().as_str() {
         "off" | "0" | "" => log::LevelFilter::Off,
         "error" => log::LevelFilter::Error,
@@ -92,39 +112,6 @@ fn nvidia_smi_srs(value: &str, ctx: &mut NVRC) {
     debug!("nvidia_smi_srs: {value}");
 }
 
-/// Lock GPU core clocks to a fixed frequency (MHz) for consistent performance.
-/// Eliminates thermal/power throttling variance in benchmarks and latency-sensitive workloads.
-fn nvidia_smi_lgc(value: &str, ctx: &mut NVRC) -> Result<(), String> {
-    let mhz: u32 = value
-        .parse()
-        .map_err(|e| format!("nvrc.smi.lgc: invalid frequency: {e}"))?;
-    debug!("nvrc.smi.lgc: {} MHz (all GPUs)", mhz);
-    ctx.nvidia_smi_lgc = Some(mhz);
-    Ok(())
-}
-
-/// Lock memory clocks to a fixed frequency (MHz).
-/// Used alongside lgc for fully deterministic GPU behavior.
-fn nvidia_smi_lmc(value: &str, ctx: &mut NVRC) -> Result<(), String> {
-    let mhz: u32 = value
-        .parse()
-        .map_err(|e| format!("nvrc.smi.lmc: invalid frequency: {e}"))?;
-    debug!("nvrc.smi.lmc: {} MHz (all GPUs)", mhz);
-    ctx.nvidia_smi_lmc = Some(mhz);
-    Ok(())
-}
-
-/// Set GPU power limit (Watts). Lower limits reduce heat/power, higher allows peak perf.
-/// Useful for power-constrained environments or thermal management.
-fn nvidia_smi_pl(value: &str, ctx: &mut NVRC) -> Result<(), String> {
-    let watts: u32 = value
-        .parse()
-        .map_err(|e| format!("nvrc.smi.pl: invalid wattage: {e}"))?;
-    debug!("nvrc.smi.pl: {} W (all GPUs)", watts);
-    ctx.nvidia_smi_pl = Some(watts);
-    Ok(())
-}
-
 /// UVM persistence mode keeps unified memory state across CUDA context teardowns.
 /// Reduces initialization overhead for short-lived CUDA applications.
 fn uvm_persistenced_mode(value: &str, ctx: &mut NVRC) {
@@ -139,13 +126,14 @@ mod tests {
     use crate::test_utils::require_root;
     use serial_test::serial;
     use std::panic;
-    use std::sync::{LazyLock, Once};
+    use std::sync::Once;
 
-    static LOG: LazyLock<Once> = LazyLock::new(Once::new);
+    static LOG: Once = Once::new();
 
     fn log_setup() {
+        // kmsg's tests install the logger too; whichever runs first wins.
         LOG.call_once(|| {
-            kernlog::init().unwrap();
+            let _ = kernlog::init();
         });
     }
 
@@ -158,9 +146,8 @@ mod tests {
     fn test_nvrc_log_debug() {
         require_root();
         log_setup();
-        let mut c = NVRC::default();
 
-        nvrc_log("debug", &mut c).unwrap();
+        nvrc_log("debug").unwrap();
         assert!(log_enabled!(log::Level::Debug));
     }
 
@@ -395,42 +382,25 @@ mod tests {
     }
 
     #[test]
-    fn test_nvidia_smi_lgc() {
-        let mut c = NVRC::default();
-
-        assert!(nvidia_smi_lgc("1500", &mut c).is_ok());
-        assert_eq!(c.nvidia_smi_lgc, Some(1500));
-
-        assert!(nvidia_smi_lgc("2100", &mut c).is_ok());
-        assert_eq!(c.nvidia_smi_lgc, Some(2100));
-
-        assert!(nvidia_smi_lgc("invalid", &mut NVRC::default()).is_err());
+    fn test_kernel_cmdline_is_read_once() {
+        let first = kernel_cmdline().unwrap();
+        let second = kernel_cmdline().unwrap();
+        assert!(std::ptr::eq(first, second));
+        assert_eq!(first, fs::read_to_string(CMDLINE).unwrap());
     }
 
     #[test]
-    fn test_nvidia_smi_lmc() {
-        let mut c = NVRC::default();
-
-        assert!(nvidia_smi_lmc("5001", &mut c).is_ok());
-        assert_eq!(c.nvidia_smi_lmc, Some(5001));
-
-        assert!(nvidia_smi_lmc("6000", &mut c).is_ok());
-        assert_eq!(c.nvidia_smi_lmc, Some(6000));
-
-        assert!(nvidia_smi_lmc("not_a_number", &mut NVRC::default()).is_err());
+    fn test_parse_u32() {
+        assert_eq!(parse_u32("nvrc.smi.lgc", "frequency", "1500"), Ok(1500));
+        assert_eq!(parse_u32("nvrc.smi.pl", "wattage", "0"), Ok(0));
     }
 
     #[test]
-    fn test_nvidia_smi_pl() {
-        let mut c = NVRC::default();
-
-        assert!(nvidia_smi_pl("300", &mut c).is_ok());
-        assert_eq!(c.nvidia_smi_pl, Some(300));
-
-        assert!(nvidia_smi_pl("450", &mut c).is_ok());
-        assert_eq!(c.nvidia_smi_pl, Some(450));
-
-        assert!(nvidia_smi_pl("abc", &mut NVRC::default()).is_err());
+    fn test_parse_u32_error_names_key_and_quantity() {
+        let err = parse_u32("nvrc.smi.pl", "wattage", "abc").unwrap_err();
+        assert!(err.starts_with("nvrc.smi.pl: invalid wattage: "), "{err}");
+        assert!(parse_u32("nvrc.smi.lmc", "frequency", "-1").is_err());
+        assert!(parse_u32("nvrc.smi.lmc", "frequency", "").is_err());
     }
 
     #[test]

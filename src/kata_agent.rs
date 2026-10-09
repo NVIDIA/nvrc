@@ -103,30 +103,60 @@ mod tests {
     use nix::sys::wait::{waitpid, WaitStatus};
     use serial_test::serial;
     use std::panic;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Once;
 
-    /// Forked children need this hook: the test harness catches panics and
-    /// exits 0, defeating the parent's "panic = failure" assertions.
-    ///
-    /// Raw syscalls only: a parallel test thread may hold a stdio/atexit lock
-    /// at fork time, deadlocking the child on eprintln! or process::exit.
-    /// _exit also skips the atexit coverage dump, hence the explicit flush
-    /// (%p in the profraw pattern keeps child files distinct).
-    fn set_test_panic_hook() {
+    /// `_exit` a forked child. That skips atexit, so coverage is flushed
+    /// explicitly (%p keeps profraw files distinct).
+    fn exit_child(code: i32) -> ! {
         #[cfg(coverage)]
-        extern "C" {
-            fn __llvm_profile_write_file() -> libc::c_int;
-        }
-
-        panic::set_hook(Box::new(|info| {
-            let msg = format!("panic: {info}\n");
-            // SAFETY: only async-signal-safe calls; no locks touched after fork.
-            unsafe {
-                libc::write(2, msg.as_ptr().cast(), msg.len());
-                #[cfg(coverage)]
-                __llvm_profile_write_file();
-                libc::_exit(1);
+        {
+            extern "C" {
+                fn __llvm_profile_write_file() -> libc::c_int;
             }
-        }));
+            // SAFETY: only reached in a single-threaded forked child.
+            unsafe { __llvm_profile_write_file() };
+        }
+        // SAFETY: _exit is async-signal-safe.
+        unsafe { libc::_exit(code) }
+    }
+
+    /// True only in the forked child of test_fork_agent_with_timeout.
+    static IN_FORKED_CHILD: AtomicBool = AtomicBool::new(false);
+
+    /// Make a panic in a forked child `_exit(1)` at once: the std hook takes
+    /// locks a sibling test thread may hold at fork time, hanging the child.
+    /// Installed once; every other thread gets the previous hook.
+    fn install_child_exit_hook() {
+        static INSTALLED: Once = Once::new();
+        INSTALLED.call_once(|| {
+            let previous = panic::take_hook();
+            panic::set_hook(Box::new(move |info| {
+                if IN_FORKED_CHILD.load(Ordering::Relaxed) {
+                    exit_child(1);
+                }
+                previous(info);
+            }));
+        });
+    }
+
+    /// Run `f` in a forked child and return its wait status: exit 0 if it
+    /// returns, exit 1 if it panics.
+    fn in_forked_child(f: impl FnOnce()) -> WaitStatus {
+        install_child_exit_hook();
+
+        // SAFETY: the child only runs `f` and `_exit`s.
+        match unsafe { fork() }.expect("fork") {
+            ForkResult::Parent { child } => waitpid(child, None).expect("waitpid"),
+            ForkResult::Child => {
+                IN_FORKED_CHILD.store(true, Ordering::Relaxed);
+                // A sibling may hold kernlog's mutex at fork time, and the
+                // copy never unlocks, so keep debug! away from it.
+                log::set_max_level(log::LevelFilter::Off);
+                f();
+                exit_child(0)
+            }
+        }
     }
 
     #[test]
@@ -192,25 +222,13 @@ mod tests {
         miri,
         ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
     )]
+    #[cfg_attr(not(miri), serial)]
     fn test_kata_agent_not_found() {
         require_root();
 
-        // kata_agent with nonexistent path - setup succeeds, exec panics
-        // SAFETY: Test forks to isolate agent_setup() and exec failure.
-        // Single-threaded test process with no shared state.
-        match unsafe { fork() }.expect("fork") {
-            ForkResult::Parent { child } => {
-                // Child exits abnormally due to panic
-                let status = waitpid(child, None).expect("waitpid");
-                assert!(!matches!(status, WaitStatus::Exited(_, 0)));
-            }
-            ForkResult::Child => {
-                set_test_panic_hook();
-                // Setup succeeds, exec panics
-                kata_agent("/nonexistent/agent", None);
-                std::process::exit(0); // Won't reach here
-            }
-        }
+        // Forked: setup alters the process. Setup succeeds, then exec panics.
+        let status = in_forked_child(|| kata_agent("/nonexistent/agent", None));
+        assert!(matches!(status, WaitStatus::Exited(_, 1)), "{status:?}");
     }
 
     #[test]
@@ -218,94 +236,30 @@ mod tests {
         miri,
         ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
     )]
-    fn test_syslog_loop_timeout() {
-        // ~1s: two 500ms iterations; try_poll() is best-effort on /dev/log.
+    fn test_syslog_loop_timeout_and_kata_exit_255_regression() {
+        // Two 500ms iterations. A drain error (here EADDRINUSE on /dev/log)
+        // must not panic and power off the VM (kata exit 255).
         let start = std::time::Instant::now();
         syslog_loop(1);
         let elapsed = start.elapsed();
 
-        // Lower bound: at least 1 sleep cycle (500ms) runs before poll
-        // Upper bound: 2 iterations + scheduling overhead = ~1200ms max
-        assert!(elapsed.as_millis() >= 400);
-        assert!(elapsed.as_millis() < 1500);
+        // Sleeps never return early; the generous upper bound only catches a hang.
+        assert!(elapsed.as_millis() >= 1000);
+        assert!(elapsed.as_millis() < 5000);
     }
 
-    /// Regression: with the power-off hook installed, syslog_loop must not panic
-    /// on drain I/O (fork isolates from parallel tests). In-VM, `/dev/log` is
-    /// already bound by main(); this child does a fresh bind — on dev hosts
-    /// with a host syslog daemon, reverting to `poll()` reproduces via EADDRINUSE.
     #[test]
     #[cfg_attr(
         miri,
         ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
     )]
     #[cfg_attr(not(miri), serial)]
-    fn test_syslog_loop_does_not_trigger_power_off_hook() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use std::sync::Arc;
-
-        let saved_hook = panic::take_hook();
-
-        let triggered = Arc::new(AtomicBool::new(false));
-        let triggered_for_hook = triggered.clone();
-
-        crate::lockdown::set_panic_hook_with(move || {
-            triggered_for_hook.store(true, Ordering::SeqCst);
-        });
-
-        // SAFETY: child runs syslog_loop and exits; no shared state.
-        let fork_result = unsafe { fork() }.expect("fork");
-
-        match fork_result {
-            ForkResult::Parent { child } => {
-                let status = waitpid(child, None).expect("waitpid");
-                panic::set_hook(saved_hook);
-
-                assert_eq!(
-                    status,
-                    WaitStatus::Exited(child, 0),
-                    "syslog_loop must not fire the power-off hook on drain I/O \
-                     (kata exit 255 regression)"
-                );
-            }
-            ForkResult::Child => {
-                let loop_result = panic::catch_unwind(|| syslog_loop(1));
-
-                if triggered.load(Ordering::SeqCst) || loop_result.is_err() {
-                    std::process::exit(42);
-                } else {
-                    std::process::exit(0);
-                }
-            }
-        }
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
-    )]
     fn test_fork_agent_with_timeout() {
         require_root();
 
-        // Double fork: outer fork isolates the test, inner fork (inside fork_agent)
-        // does the real work. This lets us actually call fork_agent() directly.
-        // SAFETY: Outer fork isolates the test in a child process.
-        // Single-threaded test with no shared state.
-        match unsafe { fork() }.expect("outer fork") {
-            ForkResult::Parent { child } => {
-                // Wrapper exits abnormally because kata_agent() panics (no binary)
-                let status = waitpid(child, None).expect("waitpid");
-                assert!(!matches!(status, WaitStatus::Exited(_, 0)));
-            }
-            ForkResult::Child => {
-                set_test_panic_hook();
-                // This child calls fork_agent, which forks again internally.
-                // - Inner parent (us): kata_agent() panics
-                // - Inner child: runs syslog_loop(1), exits after ~1 second
-                fork_agent(1);
-                std::process::exit(0); // Won't reach here due to panic
-            }
-        }
+        // The outer child isolates the test; fork_agent forks again. Its parent
+        // panics on the missing agent (exit 1), its child (timeout 0) exits at once.
+        let status = in_forked_child(|| fork_agent(0));
+        assert!(matches!(status, WaitStatus::Exited(_, 1)), "{status:?}");
     }
 }

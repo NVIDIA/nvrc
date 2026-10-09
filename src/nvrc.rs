@@ -5,6 +5,8 @@
 
 use std::process::Child;
 
+use crate::execute::background;
+
 /// Central configuration state for the NVIDIA Runtime Container init.
 /// Fields are populated from kernel command-line parameters and control
 /// GPU configuration (clocks, power limits) and optional daemons.
@@ -33,10 +35,14 @@ pub struct NVRC {
 }
 
 impl NVRC {
-    /// Track a background daemon for later health check.
+    /// Start a background daemon and track it for the later health check.
     /// Critical daemons (persistenced, hostengine, etc.) are tracked here
     /// so we can detect early failures before handing off to kata-agent.
-    pub fn track_daemon(&mut self, name: &str, child: Child) {
+    pub fn spawn_daemon(&mut self, name: &str, program: &str, args: &[&str]) {
+        self.track_daemon(name, background(program, args));
+    }
+
+    fn track_daemon(&mut self, name: &str, child: Child) {
         self.children.push((name.into(), child));
     }
 
@@ -60,6 +66,13 @@ mod tests {
     use std::panic;
     use std::process::Command;
 
+    /// Whether `health_checks` panics. Reaps the last tracked child first so
+    /// `try_wait()` deterministically sees its exit status.
+    fn health_checks_panic(nvrc: &mut NVRC) -> bool {
+        nvrc.children.last_mut().unwrap().1.wait().unwrap();
+        panic::catch_unwind(panic::AssertUnwindSafe(|| nvrc.health_checks())).is_err()
+    }
+
     #[test]
     fn test_default() {
         let nvrc = NVRC::default();
@@ -81,6 +94,16 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
+    fn test_spawn_daemon_is_tracked_for_health_checks() {
+        let mut nvrc = NVRC::default();
+        nvrc.spawn_daemon("bad-daemon", "/bin/sh", &["-c", "exit 3"]);
+        assert_eq!(nvrc.children.len(), 1);
+        assert_eq!(nvrc.children[0].0, "bad-daemon");
+        assert!(health_checks_panic(&mut nvrc));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_health_checks_success() {
         let mut nvrc = NVRC::default();
         // /bin/true exits with 0
@@ -97,11 +120,7 @@ mod tests {
         // /bin/false exits with 1
         let child = Command::new("/bin/false").spawn().unwrap();
         nvrc.track_daemon("bad-daemon", child);
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            nvrc.health_checks();
-        }));
-        assert!(result.is_err());
+        assert!(health_checks_panic(&mut nvrc));
     }
 
     #[test]

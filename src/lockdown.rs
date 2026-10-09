@@ -31,7 +31,13 @@ pub fn set_panic_hook() {
 /// Internal: panic handler with configurable shutdown (for unit tests).
 /// Production uses power_off(); tests inject a no-op to avoid rebooting.
 pub(crate) fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) {
-    panic::set_hook(Box::new(move |panic_info| {
+    panic::set_hook(Box::new(panic_hook(shutdown)));
+}
+
+fn panic_hook<F: Fn() + Send + Sync + 'static>(
+    shutdown: F,
+) -> impl Fn(&panic::PanicHookInfo<'_>) + Send + Sync + 'static {
+    move |panic_info| {
         let msg = format!("NVRC panic: {panic_info}");
         // /dev/kmsg lands in the kernel ring buffer, which the kernel flushes
         // to the console during power-off. That is what keeps a panic visible
@@ -41,7 +47,7 @@ pub(crate) fn set_panic_hook_with<F: Fn() + Send + Sync + 'static>(shutdown: F) 
         }
         sync();
         shutdown();
-    }));
+    }
 }
 
 /// Permanently disable kernel module loading for this boot.
@@ -66,7 +72,7 @@ fn disable_modules_loading_at(path: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::require_root;
+    use crate::test_utils::{panics_under_hook, require_root};
     use std::panic::catch_unwind;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -107,17 +113,15 @@ mod tests {
     #[cfg_attr(not(miri), serial_test::serial)]
     #[cfg_attr(miri, ignore = "the hook calls sync(), which miri cannot emulate")]
     fn test_panic_hook_invokes_shutdown_on_panic() {
-        let saved_hook = panic::take_hook();
         let called = Arc::new(AtomicBool::new(false));
         let called_clone = called.clone();
-        set_panic_hook_with(move || called_clone.store(true, Ordering::SeqCst));
+        let hook = panic_hook(move || called_clone.store(true, Ordering::SeqCst));
 
-        assert!(!called.load(Ordering::SeqCst)); // must not fire on install
+        assert!(!called.load(Ordering::SeqCst)); // must not fire on creation
 
-        let result = panic::catch_unwind(|| panic!("boom"));
-        panic::set_hook(saved_hook);
+        let panicked = panics_under_hook(hook, || panic!("boom"));
 
-        assert!(result.is_err());
+        assert!(panicked);
         assert!(
             called.load(Ordering::SeqCst),
             "panic must reach the shutdown action"
@@ -126,6 +130,7 @@ mod tests {
 
     #[test]
     #[ignore] // Installs real power_off hook - run with --include-ignored on CI
+    #[cfg_attr(not(miri), serial_test::serial)]
     fn test_set_panic_hook() {
         // Restore the previous hook: leaving power_off installed powers
         // off the machine on the next caught panic.
