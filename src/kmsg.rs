@@ -3,7 +3,7 @@
 
 use crate::macros::ResultExt;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, ErrorKind};
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::Once;
 use std::time::{Duration, Instant};
@@ -55,57 +55,51 @@ pub fn open_kmsg(path: &str) -> BufReader<File> {
         path
     };
 
-    // Try read-only first; if missing, create with secure perms then reopen
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(log_path)
-        .or_else(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                // Create with restrictive permissions
-                OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(0o600)
-                    .open(log_path)?;
-                // Reopen read-only
-                OpenOptions::new()
-                    .read(true)
-                    .custom_flags(libc::O_NONBLOCK)
-                    .open(log_path)
-            } else {
-                Err(e)
-            }
+    let open_for_reading = || {
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(log_path)
+    };
+
+    let file = open_for_reading()
+        .or_else(|e| match e.kind() {
+            ErrorKind::NotFound => OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(log_path)
+                .and_then(|_| open_for_reading()),
+            _ => Err(e),
         })
         .or_panic(format_args!("open {log_path}"));
 
     BufReader::new(file)
 }
 
+/// Longest single wait on the syslog socket.
+const MAX_WAIT: Duration = Duration::from_millis(500);
+
 /// Block until `marker` appears in `reader` or `timeout_secs` expires.
-/// Calls try_poll() to drain /dev/log socket and write messages to file that
-/// we're reading from. This loop is the syslog daemon for our minimal init.
+/// At end of file, waits on /dev/log (forwarding into the file) instead of
+/// sleeping, so the marker is seen as soon as it is logged.
 pub fn wait_for_marker(reader: &mut BufReader<File>, marker: &str, timeout_secs: u32) {
     let deadline = Instant::now() + Duration::from_secs(timeout_secs as u64);
     let mut line = String::new();
 
     loop {
-        crate::syslog::try_poll();
-        if Instant::now() > deadline {
-            panic!("timeout waiting for: {marker}");
-        }
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or_else(|| panic!("timeout waiting for: {marker}"));
         line.clear();
         match reader.read_line(&mut line) {
-            Ok(0) => std::thread::sleep(Duration::from_millis(500)),
-            Ok(_) if line.contains(marker) => {
+            Ok(n) if n > 0 && line.contains(marker) => {
                 info!("{marker}");
                 return;
             }
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(500));
-            }
-            Err(_) => std::thread::sleep(Duration::from_millis(500)),
+            Ok(n) if n > 0 => {}
+            // EOF, WouldBlock or error: wait for the next message.
+            _ => crate::syslog::try_poll_for(remaining.min(MAX_WAIT)),
         }
     }
 }
@@ -276,6 +270,26 @@ mod tests {
             );
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
+    fn test_wait_for_marker_honours_deadline() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut reader = open_kmsg(tmp.path().to_str().unwrap());
+
+        let start = Instant::now();
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            wait_for_marker(&mut reader, "never logged", 1);
+        }));
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err());
+        assert!(elapsed >= Duration::from_secs(1));
+        assert!(elapsed < Duration::from_secs(5), "took {elapsed:?}");
     }
 
     #[test]
