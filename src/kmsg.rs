@@ -77,12 +77,20 @@ pub fn open_kmsg(path: &str) -> BufReader<File> {
     BufReader::new(file)
 }
 
+/// Run `start`, then wait for the `marker` it makes a daemon log. The log is
+/// opened first, so the marker cannot be missed.
+pub fn wait_for_marker_after(marker: &str, timeout_secs: u32, start: impl FnOnce()) {
+    let mut reader = open_kmsg("/dev/kmsg");
+    start();
+    wait_for_marker(&mut reader, marker, timeout_secs);
+}
+
 /// Longest single wait on the syslog socket.
 const MAX_WAIT: Duration = Duration::from_millis(500);
 
 /// Block until `marker` appears in `reader` or `timeout_secs` expires.
-/// At end of file, waits on /dev/log (forwarding into the file) instead of
-/// sleeping, so the marker is seen as soon as it is logged.
+/// At end of file, waits on /dev/log (which forwards into the file) rather
+/// than sleeping, so the marker is seen as soon as it is logged.
 pub fn wait_for_marker(reader: &mut BufReader<File>, marker: &str, timeout_secs: u32) {
     let deadline = Instant::now() + Duration::from_secs(timeout_secs as u64);
     let mut line = String::new();
@@ -116,6 +124,7 @@ fn kmsg_at(path: &str) -> File {
 mod tests {
     use super::*;
     use crate::test_utils::require_root;
+    use rstest::rstest;
     use serial_test::serial;
     use std::io::Write;
     use std::panic;
@@ -214,100 +223,49 @@ mod tests {
 
     // === wait_for_marker tests ===
 
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
-    )]
-    fn test_wait_for_marker_finds_marker() {
+    const MARKER: &str = "FM starting NvLink Inband";
+
+    /// Whether wait_for_marker found the marker in `contents` (a timeout
+    /// panics), and how long it took.
+    fn wait_over(contents: &str, timeout_secs: u32) -> (bool, Duration) {
         let mut tmp = NamedTempFile::new().unwrap();
-        writeln!(tmp, "some noise").unwrap();
-        writeln!(tmp, "FM starting NvLink Inband foo").unwrap();
-        writeln!(tmp, "more noise").unwrap();
+        tmp.write_all(contents.as_bytes()).unwrap();
         tmp.flush().unwrap();
-
-        wait_for_marker(
-            &mut open_kmsg(tmp.path().to_str().unwrap()),
-            "FM starting NvLink Inband",
-            5,
-        );
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
-    )]
-    fn test_wait_for_marker_finds_marker_at_end() {
-        let mut tmp = NamedTempFile::new().unwrap();
-        writeln!(tmp, "line 1").unwrap();
-        writeln!(tmp, "line 2").unwrap();
-        writeln!(tmp, "FM starting NvLink Inband").unwrap();
-        tmp.flush().unwrap();
-
-        wait_for_marker(
-            &mut open_kmsg(tmp.path().to_str().unwrap()),
-            "FM starting NvLink Inband",
-            5,
-        );
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
-    )]
-    fn test_wait_for_marker_no_marker_panics() {
-        let mut tmp = NamedTempFile::new().unwrap();
-        writeln!(tmp, "no match here").unwrap();
-        tmp.flush().unwrap();
-
-        let result = panic::catch_unwind(|| {
-            wait_for_marker(
-                &mut open_kmsg(tmp.path().to_str().unwrap()),
-                "FM starting NvLink Inband",
-                1,
-            );
-        });
-        assert!(result.is_err());
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
-    )]
-    fn test_wait_for_marker_honours_deadline() {
-        let tmp = NamedTempFile::new().unwrap();
         let mut reader = open_kmsg(tmp.path().to_str().unwrap());
 
         let start = Instant::now();
-        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            wait_for_marker(&mut reader, "never logged", 1);
-        }));
-        let elapsed = start.elapsed();
-
-        assert!(result.is_err());
-        assert!(elapsed >= Duration::from_secs(1));
-        assert!(elapsed < Duration::from_secs(5), "took {elapsed:?}");
+        let found = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            wait_for_marker(&mut reader, MARKER, timeout_secs)
+        }))
+        .is_ok();
+        (found, start.elapsed())
     }
 
-    #[test]
+    #[rstest]
+    #[case::amid_noise("some noise\nFM starting NvLink Inband foo\nmore noise\n")]
+    #[case::last_line("line 1\nline 2\nFM starting NvLink Inband\n")]
     #[cfg_attr(
         miri,
         ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
     )]
-    fn test_wait_for_marker_empty_file_panics() {
-        let tmp = NamedTempFile::new().unwrap();
+    fn test_wait_for_marker_finds_marker(#[case] contents: &str) {
+        assert!(wait_over(contents, 5).0);
+    }
 
-        let result = panic::catch_unwind(|| {
-            wait_for_marker(
-                &mut open_kmsg(tmp.path().to_str().unwrap()),
-                "FM starting NvLink Inband",
-                1,
-            );
-        });
-        assert!(result.is_err());
+    #[rstest]
+    #[case::no_marker("no match here\n")]
+    #[case::empty_file("")]
+    #[case::marker_split_across_lines("FM starting\nNvLink Inband\n")]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
+    fn test_wait_for_marker_times_out_on_the_deadline(#[case] contents: &str) {
+        let (found, elapsed) = wait_over(contents, 1);
+
+        assert!(!found);
+        assert!(elapsed >= Duration::from_secs(1));
+        assert!(elapsed < Duration::from_secs(5), "took {elapsed:?}");
     }
 
     #[test]
@@ -325,28 +283,6 @@ mod tests {
     #[test]
     #[cfg_attr(
         miri,
-        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
-    )]
-    fn test_wait_for_marker_partial_match_not_enough() {
-        let mut tmp = NamedTempFile::new().unwrap();
-        writeln!(tmp, "FM starting").unwrap();
-        writeln!(tmp, "NvLink Inband").unwrap();
-        tmp.flush().unwrap();
-
-        // Marker spans two lines — should not match
-        let result = panic::catch_unwind(|| {
-            wait_for_marker(
-                &mut open_kmsg(tmp.path().to_str().unwrap()),
-                "FM starting NvLink Inband",
-                1,
-            );
-        });
-        assert!(result.is_err());
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
         ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
     )]
     #[cfg_attr(not(miri), serial)]
@@ -356,19 +292,16 @@ mod tests {
         // Clear any previous test data to avoid false positives
         let _ = fs::remove_file(crate::syslog::SYSLOG_FILE_PATH);
 
-        // With always-file architecture, open_kmsg("/dev/kmsg") always reads from syslog file
-        let mut reader = open_kmsg("/dev/kmsg");
         let marker = "NVRC_TEST_MARKER_12345";
 
-        // Write directly to the syslog file (simulating what syslog.rs does)
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(crate::syslog::SYSLOG_FILE_PATH)
-            .expect("open syslog file");
-        writeln!(file, "{}", marker).expect("write marker");
-        file.flush().expect("flush");
-
-        wait_for_marker(&mut reader, marker, 5);
+        // /dev/kmsg is read from the syslog file; log the marker as syslog.rs would.
+        wait_for_marker_after(marker, 5, || {
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(crate::syslog::SYSLOG_FILE_PATH)
+                .expect("open syslog file");
+            writeln!(file, "{}", marker).expect("write marker");
+        });
     }
 }
