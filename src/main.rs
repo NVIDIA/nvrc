@@ -41,9 +41,8 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
 
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
 /// Service VM mode for NVLink 4.0 topologies in shared virtualization.
-/// Loads NVIDIA driver and starts fabric manager. GPUs are assigned to service VM.
+/// Starts fabric manager; the caller has already loaded the NVIDIA driver.
 fn mode_nvl4(init: &mut NVRC, fabric_mode: u8) {
-    modprobe::load("nvidia");
     init.nv_fabricmanager(fabric_mode, "greedy");
     init.health_checks();
 }
@@ -91,7 +90,10 @@ fn main() {
     match detected.mode {
         "cpu" => info!("executing cpu mode"),
         "gpu" => mode_gpu(&mut init, detected.nvswitch),
-        "servicevm-nvl4" => mode_nvl4(&mut init, FABRIC_MODE_SHARED),
+        "servicevm-nvl4" => {
+            modprobe::load("nvidia");
+            mode_nvl4(&mut init, FABRIC_MODE_SHARED);
+        }
         "servicevm-nvl5" => mode_nvl5(&mut init, FABRIC_MODE_SHARED),
         unknown => panic!("unknown mode: {unknown}"),
     }
