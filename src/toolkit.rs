@@ -12,7 +12,7 @@ use crate::gpu_extension;
 const NVIDIA_CTK: &str = "/bin/nvidia-ctk";
 
 /// Run nvidia-ctk with given arguments.
-fn ctk(args: &[&str]) {
+fn ctk<S: AsRef<str>>(args: &[S]) {
     foreground(&gpu_extension::path(NVIDIA_CTK), args);
 }
 
@@ -21,9 +21,10 @@ fn ctk(args: &[&str]) {
 /// flags point nvidia-ctk at `/run/kata-extensions/gpu`; see the [`gpu_extension`] helpers
 /// for why each is needed (all no-ops for the monolithic image).
 pub fn nvidia_ctk_cdi() {
-    let args = cdi_args(gpu_extension::driver_root(), gpu_extension::cdi_hook_path());
-    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    ctk(&arg_refs);
+    ctk(&cdi_args(
+        gpu_extension::driver_root(),
+        gpu_extension::cdi_hook_path(),
+    ));
 }
 
 /// Assemble the `nvidia-ctk cdi generate` arguments from the (possibly empty)

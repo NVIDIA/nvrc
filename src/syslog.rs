@@ -38,7 +38,7 @@ pub const SYSLOG_FILE_PATH: &str = SYSLOG_FILE;
 /// Create and bind a Unix datagram socket at the given path.
 fn bind(path: &Path) -> std::io::Result<UnixDatagram> {
     let sock = UnixDatagram::bind(path)?;
-    // poll and recv are not atomic, a blocking recv could hang.
+    // poll and recv are not atomic: a blocking recv could hang.
     sock.set_nonblocking(true)?;
     Ok(sock)
 }
@@ -83,26 +83,29 @@ fn poll_socket(sock: &UnixDatagram, timeout: PollTimeout) -> std::io::Result<Opt
 }
 
 /// Poll the global /dev/log socket, logging any message via trace!().
-/// Lazily initializes /dev/log on first call.
-/// Drains one message per call. The kata-agent handoff loop calls it every
-/// 500ms, which rate-limits flooding; wait_for_marker drains as fast as daemons log.
+/// Lazily initializes /dev/log on first call. Drains one message per call;
+/// the handoff loop's 500ms cadence rate-limits syslog flooding.
 pub fn poll() {
     use crate::macros::ResultExt;
     poll_at(Path::new(DEV_LOG), PollTimeout::ZERO).or_panic("syslog poll");
 }
 
-/// Best-effort syslog drain. Silently ignores errors (e.g. socket not bound yet).
-/// Used by the kata-agent handoff loop, where I/O errors must not power off the VM.
+/// Best-effort [`poll`]: errors are ignored, as in the handoff loop where
+/// they must not power off the VM.
 pub fn try_poll() {
-    let _ = poll_at(Path::new(DEV_LOG), PollTimeout::ZERO);
+    try_poll_for(Duration::ZERO);
 }
 
-/// Like [`try_poll`], but waits up to `timeout` for a message. Sleeps instead
-/// if syslog is broken, so callers never busy-loop.
+/// [`try_poll`] that waits up to `timeout` for a message. Sleeps instead if
+/// syslog is broken, so callers never busy-loop.
 pub fn try_poll_for(timeout: Duration) {
+    poll_for_at(Path::new(DEV_LOG), timeout);
+}
+
+fn poll_for_at(path: &Path, timeout: Duration) {
     let deadline = Instant::now() + timeout;
     let wait = PollTimeout::try_from(timeout).unwrap_or(PollTimeout::MAX);
-    if poll_at(Path::new(DEV_LOG), wait).is_err() {
+    if poll_at(path, wait).is_err() {
         // Only the time the failed poll left over, so the wait never doubles.
         std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
     }
@@ -163,7 +166,7 @@ mod tests {
     use super::*;
     use rstest::rstest;
     use serial_test::serial;
-    use std::time::Instant;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     // === strip_priority tests ===
@@ -231,18 +234,45 @@ mod tests {
 
     // === poll_socket tests ===
 
+    const NO_WAIT: PollTimeout = PollTimeout::ZERO;
+
+    /// A bound socket; the TempDir guard keeps its path alive.
+    fn server() -> (TempDir, PathBuf, UnixDatagram) {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("test.sock");
+        let sock = bind(&path).unwrap();
+        (tmp, path, sock)
+    }
+
+    fn send(path: &Path, msg: &[u8]) {
+        UnixDatagram::unbound().unwrap().send_to(msg, path).unwrap();
+    }
+
     #[test]
     #[cfg_attr(
         miri,
         ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
     )]
     fn test_poll_socket_no_data() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let sock = bind(&path).unwrap();
+        let (_tmp, _path, sock) = server();
+        assert_eq!(poll_socket(&sock, NO_WAIT).unwrap(), None);
+    }
 
-        let result = poll_socket(&sock, PollTimeout::ZERO).unwrap();
-        assert_eq!(result, None);
+    #[rstest]
+    #[case::plain("<6>hello world", "hello world")]
+    #[case::strips_priority("<3>error message", "error message")]
+    #[case::trims_trailing_whitespace("<6>message with newline\n", "message with newline")]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
+    fn test_poll_socket_message(#[case] sent: &str, #[case] expected: &str) {
+        let (_tmp, path, sock) = server();
+        send(&path, sent.as_bytes());
+        assert_eq!(
+            poll_socket(&sock, NO_WAIT).unwrap().as_deref(),
+            Some(expected)
+        );
     }
 
     #[test]
@@ -250,76 +280,18 @@ mod tests {
         miri,
         ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
     )]
-    fn test_poll_socket_with_data() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
+    fn test_poll_socket_drains_one_message_at_a_time() {
+        let (_tmp, path, sock) = server();
+        send(&path, b"<6>first");
+        send(&path, b"<6>second");
 
-        let client = UnixDatagram::unbound().unwrap();
-        client.send_to(b"<6>hello world", &path).unwrap();
-
-        let result = poll_socket(&server, PollTimeout::ZERO).unwrap();
-        assert_eq!(result, Some("hello world".to_string()));
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
-    )]
-    fn test_poll_socket_strips_priority() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
-
-        let client = UnixDatagram::unbound().unwrap();
-        client.send_to(b"<3>error message", &path).unwrap();
-
-        let result = poll_socket(&server, PollTimeout::ZERO).unwrap();
-        assert_eq!(result, Some("error message".to_string()));
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
-    )]
-    fn test_poll_socket_multiple_messages() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
-
-        let client = UnixDatagram::unbound().unwrap();
-        client.send_to(b"<6>first", &path).unwrap();
-        client.send_to(b"<6>second", &path).unwrap();
-
-        // poll_socket drains one at a time
-        let result1 = poll_socket(&server, PollTimeout::ZERO).unwrap();
-        assert_eq!(result1, Some("first".to_string()));
-
-        let result2 = poll_socket(&server, PollTimeout::ZERO).unwrap();
-        assert_eq!(result2, Some("second".to_string()));
-
-        // No more messages
-        let result3 = poll_socket(&server, PollTimeout::ZERO).unwrap();
-        assert_eq!(result3, None);
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
-    )]
-    fn test_poll_socket_trims_trailing_whitespace() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
-
-        let client = UnixDatagram::unbound().unwrap();
-        client.send_to(b"<6>message with newline\n", &path).unwrap();
-
-        let result = poll_socket(&server, PollTimeout::ZERO).unwrap();
-        assert_eq!(result, Some("message with newline".to_string()));
+        let drained: Vec<_> = (0..3)
+            .map(|_| poll_socket(&sock, NO_WAIT).unwrap())
+            .collect();
+        assert_eq!(
+            drained,
+            [Some("first".to_owned()), Some("second".to_owned()), None]
+        );
     }
 
     #[rstest]
@@ -347,11 +319,10 @@ mod tests {
         ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
     )]
     fn test_poll_socket_times_out_when_idle() {
-        let tmp = TempDir::new().unwrap();
-        let server = bind(&tmp.path().join("test.sock")).unwrap();
+        let (_tmp, _path, sock) = server();
 
         let start = Instant::now();
-        let result = poll_socket(&server, PollTimeout::from(50u16)).unwrap();
+        let result = poll_socket(&sock, PollTimeout::from(50u16)).unwrap();
 
         assert_eq!(result, None);
         assert!(start.elapsed() >= Duration::from_millis(50));
@@ -363,23 +334,18 @@ mod tests {
         ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
     )]
     fn test_poll_socket_wakes_when_message_arrives() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
+        let (_tmp, path, sock) = server();
 
         let sender = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(50));
-            UnixDatagram::unbound()
-                .unwrap()
-                .send_to(b"<6>late arrival", &path)
-                .unwrap();
+            send(&path, b"<6>late arrival");
         });
 
         let start = Instant::now();
-        let result = poll_socket(&server, PollTimeout::from(10_000u16)).unwrap();
+        let result = poll_socket(&sock, PollTimeout::from(10_000u16)).unwrap();
         sender.join().unwrap();
 
-        assert_eq!(result, Some("late arrival".to_string()));
+        assert_eq!(result.as_deref(), Some("late arrival"));
         assert!(start.elapsed() < Duration::from_secs(5));
     }
 
@@ -420,16 +386,22 @@ mod tests {
         // /dev/log may be foreign (bind fails) or already ours; both must be
         // non-fatal for the best-effort drain.
         try_poll();
+        try_poll_for(Duration::ZERO);
     }
 
-    #[test]
+    // A private socket path keeps these independent of live /dev/log traffic.
+    #[rstest]
+    #[case::idle_socket("sock")]
+    #[case::bind_failure("missing-dir/sock")]
     #[cfg_attr(
         miri,
         ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
     )]
-    fn test_try_poll_for_waits_out_the_timeout_when_idle() {
+    fn test_poll_for_at_waits_out_the_timeout(#[case] rel: &str) {
+        let tmp = TempDir::new().unwrap();
+
         let start = Instant::now();
-        try_poll_for(Duration::from_millis(100));
+        poll_for_at(&tmp.path().join(rel), Duration::from_millis(100));
         let elapsed = start.elapsed();
 
         assert!(elapsed >= Duration::from_millis(100));
