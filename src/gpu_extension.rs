@@ -166,7 +166,7 @@ fn bind_over(src: &str, dst: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::require_root;
+    use crate::test_utils::{require_root, unmount};
     use std::fs;
     use tempfile::TempDir;
 
@@ -313,7 +313,7 @@ mod tests {
         assert!(visible.exists());
         assert_eq!(fs::read_to_string(visible).unwrap(), "firmware");
 
-        nix::mount::umount(dst.path()).unwrap();
+        unmount(dst.path());
     }
 
     // === ldso_conf ===
@@ -347,6 +347,6 @@ mod tests {
         assert!(visible.exists());
         assert_eq!(fs::read_to_string(visible).unwrap(), "firmware");
 
-        nix::mount::umount(dst.path()).unwrap();
+        unmount(dst.path());
     }
 }
