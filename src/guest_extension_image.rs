@@ -24,6 +24,7 @@ use std::fs;
 
 use crate::execute::foreground;
 use crate::macros::ResultExt;
+use crate::selinux;
 
 const CMDLINE: &str = "/proc/cmdline";
 const SYS_BLOCK: &str = "/sys/block";
@@ -55,8 +56,19 @@ pub fn mount_all() {
     let cmdline = fs::read_to_string(CMDLINE).or_panic(format_args!("read {CMDLINE}"));
     let params = parse_extensions(&cmdline);
     let devices = discover_extensions(SYS_BLOCK);
-    for (name, dev, verity) in plan_mounts(&params, &devices) {
-        mount_extension(name, dev, verity);
+    // The policy must be loaded before the kernel accepts `context=`.
+    let (policy, rest): (Vec<_>, Vec<_>) = plan_mounts(&params, &devices)
+        .into_iter()
+        .partition(|(name, _, _)| *name == selinux::EXTENSION);
+
+    let policy_root = policy.first().map(|(name, dev, verity)| {
+        mount_extension(name, dev, verity, None);
+        format!("{MOUNT_BASE}/{name}")
+    });
+    let contexts = selinux::setup(&cmdline, policy_root.as_deref());
+
+    for (name, dev, verity) in rest {
+        mount_extension(name, dev, verity, contexts.mount_data(name).as_deref());
     }
 }
 
@@ -89,7 +101,7 @@ fn plan_mounts<'a>(
         .collect()
 }
 
-fn mount_extension(name: &str, dev: &str, params: &VerityParams) {
+fn mount_extension(name: &str, dev: &str, params: &VerityParams, mount_data: Option<&str>) {
     let (data, hash) = find_partitions(SYS_BLOCK, dev);
 
     let dm_name = format!("{EXTENSION_PREFIX}{name}");
@@ -108,13 +120,16 @@ fn mount_extension(name: &str, dev: &str, params: &VerityParams) {
         target.as_str(),
         Some("erofs"),
         flags,
-        None::<&str>,
+        mount_data,
     )
     .or_panic(format_args!(
         "mount extension {name} ({mapper}) on {target}"
     ));
 
-    info!("mounted extension {name} at {target}");
+    info!(
+        "mounted extension {name} at {target} {}",
+        mount_data.unwrap_or_default()
+    );
 }
 
 /// Parse `kata.extension.<name>.verity_params` entries into `(name, params)`.

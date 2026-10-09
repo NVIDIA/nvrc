@@ -20,6 +20,7 @@ mod modprobe;
 mod mount;
 mod net;
 mod nvrc;
+mod selinux;
 mod smi;
 mod syslog;
 mod toolkit;

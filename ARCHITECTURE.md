@@ -455,6 +455,12 @@ reconciled:
   layout), off the loader's search path. NVRC rebuilds `ld.so.cache` from the
   extension and binds it over the read-only base copy, so every consumer
   (kata-agent, the CDI hooks it runs, and NVRC's own GPU tools) resolves them.
+* **SELinux**. Extension images are built without SELinux labels on their
+  files, so NVRC labels each one as it mounts it, with the `context=` mount
+  option. The kernel rejects `context=` until a policy is loaded, and the
+  policy itself ships in the `selinux` extension. That extension is therefore
+  mounted first, without `context=`, and its policy loaded before any other
+  extension is mounted.
 
 ### **Linux Kernel Runtime Guard (LKRG)** [#110](https://github.com/NVIDIA/nvrc/issues/110)
 
