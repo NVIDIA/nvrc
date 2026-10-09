@@ -82,7 +82,7 @@ configuration doesn't exist yet.
 | `nvrc.smi.lgc`   | `<MHz>`                                 | -       | Lock GPU core clocks to fixed frequency. Eliminates thermal throttling for consistent performance. |
 | `nvrc.smi.lmc`   | `<MHz>`                                 | -       | Lock memory clocks to fixed frequency. Used alongside lgc for fully deterministic GPU behavior.    |
 | `nvrc.smi.pl`    | `<Watts>`                               | -       | Set GPU power limit. Lower values reduce heat/power; higher allows peak performance.               |
-| `nvrc.smi.srs`   | `enabled`, `disabled`                   | -       | Secure Randomization Seed for GPU memory (passed to nvidia-smi).                                   |
+| `nvrc.smi.srs`   | `on/off`, `true/false`, `1/0`, `yes/no` | -       | Set the Confidential Computing GPU Ready State after attestation (`nvidia-smi conf-compute -srs`). |
 | `nvrc.uvm.tools` | `on/off`, `true/false`, `1/0`, `yes/no` | `false` | Create `/dev/nvidia-uvm-tools` for debugging.                                                      |
 
 `nvrc.uvm.tools=true` (or `1`, `on`, `yes`) creates the tools node after loading
@@ -198,7 +198,7 @@ confidential computing:
 
 1. **Minimal Attack Surface**: 7 direct dependencies, statically linked
 2. **Fail-Fast**: Panic hook powers off VM on any panic (no undefined states)
-3. **Read-Only Root**: Filesystem becomes read-only after initialization
+3. **Read-Only Root**: Root image is read-only by construction, never remounted
 4. **Module Lockdown**: Kernel module loading disabled after GPU setup
 5. **OOM Protection**: kata-agent protected with OOM score adjustment (-997)
 6. **Static Linking**: No dynamic library dependencies to compromise

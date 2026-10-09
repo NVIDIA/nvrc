@@ -46,10 +46,13 @@ impl NVRC {
     /// workloads. After attestation verifies the GPU's integrity, we set
     /// the state to Ready so it can execute compute jobs.
     pub fn nvidia_smi_srs(&self) {
-        let Some(ref state) = self.nvidia_smi_srs else {
+        let Some(ready) = self.nvidia_smi_srs else {
             return;
         };
-        foreground(&nvidia_smi(), &["conf-compute", "-srs", state]);
+        foreground(
+            &nvidia_smi(),
+            &["conf-compute", "-srs", &u8::from(ready).to_string()],
+        );
     }
 }
 
@@ -123,7 +126,7 @@ mod tests {
     #[cfg_attr(miri, ignore = "spawns a process, which miri cannot emulate")]
     fn test_srs_some_fails_without_nvidia_smi() {
         let mut nvrc = NVRC::default();
-        nvrc.nvidia_smi_srs = Some("1".into());
+        nvrc.nvidia_smi_srs = Some(true);
         let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
             nvrc.nvidia_smi_srs();
         }));

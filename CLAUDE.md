@@ -38,12 +38,12 @@ enables:
 
 The rootfs image is read-only. Config files that need modification at runtime
 (e.g. fabricmanager.cfg) must be copied to a writable tmpfs (`/run`) before
-editing. Since `/run` stays writable after `mount::readonly("/")`, the file
-must be sealed after writing: `copy()` -> `write()` -> `set_permissions(0o400)`
--> `seal()`. The `seal()` sets the immutable flag via `FS_IMMFL` ioctl so even
-root cannot modify or delete the file without first clearing the flag.
-`hardened_std` should enforce this copy-write-seal pattern for any file written
-to tmpfs.
+editing. Since `/run` is a writable tmpfs on an otherwise read-only root, the
+file must be sealed after writing: `copy()` -> `write()` ->
+`set_permissions(0o400)` -> `seal()`. The `seal()` sets the immutable flag via
+`FS_IMMFL` ioctl so even root cannot modify or delete the file without first
+clearing the flag. `hardened_std` should enforce this copy-write-seal pattern
+for any file written to tmpfs.
 
 **Dependencies no_std status:**
 
