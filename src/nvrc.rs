@@ -60,6 +60,13 @@ mod tests {
     use std::panic;
     use std::process::Command;
 
+    /// Whether `health_checks` panics. Reaps the last tracked child first so
+    /// `try_wait()` deterministically sees its exit status.
+    fn health_checks_panic(nvrc: &mut NVRC) -> bool {
+        nvrc.children.last_mut().unwrap().1.wait().unwrap();
+        panic::catch_unwind(panic::AssertUnwindSafe(|| nvrc.health_checks())).is_err()
+    }
+
     #[test]
     fn test_default() {
         let nvrc = NVRC::default();
@@ -97,11 +104,7 @@ mod tests {
         // /bin/false exits with 1
         let child = Command::new("/bin/false").spawn().unwrap();
         nvrc.track_daemon("bad-daemon", child);
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            nvrc.health_checks();
-        }));
-        assert!(result.is_err());
+        assert!(health_checks_panic(&mut nvrc));
     }
 
     #[test]

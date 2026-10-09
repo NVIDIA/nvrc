@@ -139,13 +139,14 @@ mod tests {
     use crate::test_utils::require_root;
     use serial_test::serial;
     use std::panic;
-    use std::sync::{LazyLock, Once};
+    use std::sync::Once;
 
-    static LOG: LazyLock<Once> = LazyLock::new(Once::new);
+    static LOG: Once = Once::new();
 
     fn log_setup() {
+        // kmsg's tests install the logger too; whichever runs first wins.
         LOG.call_once(|| {
-            kernlog::init().unwrap();
+            let _ = kernlog::init();
         });
     }
 
