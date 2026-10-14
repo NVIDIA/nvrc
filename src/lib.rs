@@ -13,6 +13,8 @@ pub mod execute;
 pub mod gpu_extension;
 pub mod guest_extension_image;
 pub mod hash;
+#[cfg(kani)]
+pub mod kani_support;
 pub mod kata_agent;
 pub mod kernel_params;
 pub mod kmsg;
