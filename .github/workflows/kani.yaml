@@ -1,0 +1,183 @@
+# Kani formal verification - model-checks the proof harnesses in src/
+#
+# WHY separate workflow:
+# - CBMC is CPU/memory heavy (minutes per harness) - shouldn't block fast checks
+# - Kani bundles its own pinned nightly toolchain + CBMC, independent of the
+#   repo toolchain, so pinning KANI_VERSION pins the whole verification stack
+#
+# WHY --lib: src modules are compiled into both the lib and the bin target;
+# verifying both would run every harness twice.
+#
+# WHY -Z stubbing: the harnesses stub std::fmt::format and core's memchr
+# (see src/kani_support.rs); neither converges under CBMC.
+
+name: Kani
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  KANI_VERSION: 0.68.0
+
+jobs:
+  # Only run the (expensive) proofs when code or proofs changed
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          filters: |
+            code:
+              - '**/*.rs'
+              - '**/*.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - '.github/workflows/kani.yaml'
+
+  verify:
+    name: kani verify
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      # WHY cache + cargo install over model-checking/kani-github-action:
+      # the action is a stale composite (v1.1, 2024) that runs this exact
+      # install via internally UNPINNED actions - SHA-pinning a composite
+      # does not pin its internals. The nightly that `cargo kani setup`
+      # installs is cached too, or every warm run re-downloads it.
+      - name: Cache Kani
+        id: cache-kani
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/kani
+            ~/.cargo/bin/cargo-kani
+            ~/.kani
+            ~/.rustup/toolchains/nightly-*
+          key: kani-${{ env.KANI_VERSION }}-${{ runner.os }}
+
+      - name: Install Kani
+        if: steps.cache-kani.outputs.cache-hit != 'true'
+        run: |
+          cargo install kani-verifier --version "${KANI_VERSION}" --locked
+          cargo kani setup
+
+      - name: Verify proof harnesses
+        run: cargo kani --lib -Z stubbing | tee kani.log
+
+      # Kani reports SUCCESSFUL even when a kani::cover! is unsatisfiable; an
+      # unreachable cover means a harness assumption excluded the inputs the
+      # proof claims to cover, which is exactly what the covers guard against.
+      - name: Fail on unsatisfiable cover checks
+        run: '! grep -q "Status: UNSATISFIABLE" kani.log'
+
+  # Proof coverage is a report to read, not a gate: it detects
+  # over-constrained harnesses (a kani::assume that silently excludes the
+  # inputs a proof claims to cover) by listing source regions no harness
+  # ever explored. kani-cov would be the native reporter, but it panics on
+  # multi-harness profiles (model-checking/kani#3542), so the console
+  # region annotations from --coverage are post-processed instead.
+  coverage:
+    name: kani coverage
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: ./.github/actions/rust-toolchain
+
+      - name: Cache Kani
+        id: cache-kani
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/kani
+            ~/.cargo/bin/cargo-kani
+            ~/.kani
+            ~/.rustup/toolchains/nightly-*
+          key: kani-${{ env.KANI_VERSION }}-${{ runner.os }}
+
+      - name: Install Kani
+        if: steps.cache-kani.outputs.cache-hit != 'true'
+        run: |
+          cargo install kani-verifier --version "${KANI_VERSION}" --locked
+          cargo kani setup
+
+      - name: Generate proof coverage
+        run: cargo kani --lib -Z stubbing --coverage -Z source-coverage | tee kani-coverage.log
+
+      - name: Report uncovered regions in project files
+        run: |
+          {
+            echo "## Kani proof coverage (src/ only)"
+            echo
+            echo "Regions explored by NO harness - either dead code under"
+            echo "the current proofs or an over-constrained harness"
+            echo "assumption. Regions covered by at least one harness are"
+            echo "omitted, as are dependency and toolchain sources."
+            echo
+            echo '```'
+            # Coverage output lists regions per (file, harness) section:
+            #   src/foo.rs (module::proofs::harness_name)
+            #    * 82:5 - 83:2 UNCOVERED
+            # A region is a true gap only if no harness section covers it.
+            awk '
+              /^[^ ].*\.rs \(/ { file = $1; next }
+              / (COVERED|UNCOVERED)$/ && file ~ /^src\// {
+                key = file " " $2 " " $4
+                if ($NF == "COVERED") covered[key] = 1
+                else seen[key] = 1
+              }
+              END {
+                for (k in seen) if (!(k in covered)) print k
+              }
+            ' kani-coverage.log | sort -t: -k1,1 -k2,2n > never-covered.txt
+            if [ -s never-covered.txt ]; then
+              cat never-covered.txt
+            else
+              echo "all reachable src/ regions covered by at least one harness"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kani-coverage
+          path: |
+            kani-coverage.log
+            target/kani/*/kanicov_*/
+          retention-days: 30

@@ -15,11 +15,17 @@ fn parse_boolean(s: &str) -> bool {
     })
 }
 
+/// eq_ignore_ascii_case over to_ascii_lowercase: no allocation per parameter
+/// in PID 1, and the symbolic-length String does not converge under CBMC.
 fn parse_boolean_strict(s: &str) -> Result<bool, String> {
-    match s.to_ascii_lowercase().as_str() {
-        "on" | "true" | "1" | "yes" => Ok(true),
-        "off" | "false" | "0" | "no" => Ok(false),
-        _ => Err(format!("unrecognized boolean '{s}'")),
+    const TRUE: [&str; 4] = ["on", "true", "1", "yes"];
+    const FALSE: [&str; 4] = ["off", "false", "0", "no"];
+    if TRUE.iter().any(|t| s.eq_ignore_ascii_case(t)) {
+        Ok(true)
+    } else if FALSE.iter().any(|t| s.eq_ignore_ascii_case(t)) {
+        Ok(false)
+    } else {
+        Err(format!("unrecognized boolean '{s}'"))
     }
 }
 
@@ -138,6 +144,116 @@ fn uvm_persistenced_mode(value: &str, ctx: &mut NVRC) {
     let enabled = parse_boolean(value);
     ctx.uvm_persistence_mode = Some(enabled);
     debug!("nvrc.uvm.persistence.mode: {enabled}");
+}
+
+/// Kani proof harnesses. NVRC panics by design on invalid state (panic ->
+/// reboot), so the property is not "no panics" but "rejects exactly the
+/// invalid values": a handler returns Err precisely for malformed input and
+/// stores exactly the parsed value otherwise. `#[kani::should_panic]` cannot
+/// express this (it passes if ANY input panics), hence assertions on the
+/// Result twins. The stub set only drops error text and swaps core's memchr
+/// for a byte loop, see kani_support.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+    use crate::kani_support::any_string;
+
+    /// 8 bytes covers every accepted spelling (longest is "false") plus slack.
+    const N: usize = 8;
+
+    /// The eight documented spellings, pinned independently of the parser.
+    /// Allocation-free like the parser: a symbolic-length String does not
+    /// converge under CBMC.
+    fn boolean_spec(s: &str) -> Option<bool> {
+        const TRUE: [&str; 4] = ["on", "true", "1", "yes"];
+        const FALSE: [&str; 4] = ["off", "false", "0", "no"];
+        if TRUE.iter().any(|t| s.eq_ignore_ascii_case(t)) {
+            Some(true)
+        } else if FALSE.iter().any(|t| s.eq_ignore_ascii_case(t)) {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
+    #[kani::proof]
+    #[kani::unwind(9)]
+    #[kani::use_stub_set(crate::kani_support::cbmc)]
+    fn parse_boolean_strict_accepts_exactly_eight_spellings() {
+        let s = any_string::<N>();
+        let expected = boolean_spec(&s);
+        assert_eq!(parse_boolean_strict(&s).ok(), expected);
+        kani::cover!(expected == Some(true), "a true spelling is reachable");
+        kani::cover!(expected == Some(false), "a false spelling is reachable");
+        kani::cover!(expected.is_none(), "a rejected value is reachable");
+    }
+
+    /// Deny by default: an unrecognized value is false, never true, never an error.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    #[kani::use_stub_set(crate::kani_support::cbmc)]
+    fn parse_boolean_denies_by_default() {
+        let s = any_string::<N>();
+        assert_eq!(parse_boolean(&s), boolean_spec(&s) == Some(true));
+    }
+
+    /// The lax handlers store the deny-by-default value and cannot fail boot.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    #[kani::use_stub_set(crate::kani_support::cbmc)]
+    fn lax_boolean_handlers_store_parse_boolean() {
+        let s = any_string::<N>();
+        let mut c = NVRC::default();
+        nvrc_dcgm(&s, &mut c);
+        uvm_persistenced_mode(&s, &mut c);
+        let expected = Some(parse_boolean(&s));
+        assert_eq!(c.dcgm_enabled, expected);
+        assert_eq!(c.uvm_persistence_mode, expected);
+    }
+
+    /// nvrc.smi.srs is strict: Err (a boot panic) outside the eight spellings,
+    /// and a rejected value leaves the field untouched.
+    #[kani::proof]
+    #[kani::unwind(9)]
+    #[kani::use_stub_set(crate::kani_support::cbmc)]
+    fn smi_srs_rejects_exactly_non_booleans() {
+        let s = any_string::<N>();
+        let mut c = NVRC::default();
+        let result = nvidia_smi_srs(&s, &mut c);
+        let expected = boolean_spec(&s);
+        assert_eq!(result.is_ok(), expected.is_some());
+        assert_eq!(c.nvidia_smi_srs, expected);
+    }
+
+    /// Clock and power handlers are exactly `str::parse::<u32>`: Err (a boot
+    /// panic) for every string u32 rejects, the parsed value stored otherwise.
+    /// One harness per entry point so an edit to one parser cannot silently
+    /// relax it.
+    macro_rules! smi_u32_proof {
+        ($name:ident, $handler:ident, $field:ident) => {
+            #[kani::proof]
+            #[kani::unwind(9)]
+            #[kani::use_stub_set(crate::kani_support::cbmc)]
+            fn $name() {
+                let s = any_string::<N>();
+                let mut c = NVRC::default();
+                let result = $handler(&s, &mut c);
+                let expected = s.parse::<u32>().ok();
+                assert_eq!(result.is_ok(), expected.is_some());
+                assert_eq!(c.$field, expected);
+                kani::cover!(expected.is_some(), "an accepted value is reachable");
+                kani::cover!(expected.is_none(), "a rejected value is reachable");
+            }
+        };
+    }
+    smi_u32_proof!(smi_lgc_is_exactly_u32_parse, nvidia_smi_lgc, nvidia_smi_lgc);
+    smi_u32_proof!(smi_lmc_is_exactly_u32_parse, nvidia_smi_lmc, nvidia_smi_lmc);
+    smi_u32_proof!(smi_pl_is_exactly_u32_parse, nvidia_smi_pl, nvidia_smi_pl);
+
+    // process_kernel_params dispatch harnesses are out of reach: a symbolic
+    // value through split_whitespace and split_once does not converge in
+    // CI-viable time (12 min, ASCII-bounded, memchr stubbed). The handlers
+    // are proven above; dispatch stays covered by the kernel_params fuzz target.
 }
 
 #[cfg(test)]
