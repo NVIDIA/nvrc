@@ -185,6 +185,9 @@ cargo llvm-cov --all-features --workspace --ignore-filename-regex 'src/main\.rs$
 # Fuzzing
 cargo +nightly fuzz run kernel_params
 
+# Formal verification (Kani proof harnesses under #[cfg(kani)])
+cargo kani --lib -Z stubbing
+
 # Static analysis
 cargo clippy --all-features -- -D warnings
 cargo audit
