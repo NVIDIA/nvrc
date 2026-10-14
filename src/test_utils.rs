@@ -56,6 +56,17 @@ fn require_root_impl(is_root: bool) {
     }
 }
 
+// Only some management PFs carry the role; siblings must still be discovered.
+pub fn add_management_pf(f: &pcilibs_rs::testfs::Fake, bdf: &str, marked: bool) {
+    f.add_pci_device(bdf, 0x15b3, 0x1021, 0x020700, None);
+    let vpd: &[u8] = if marked {
+        b"\x90\x0e\x00VA\x0bSMDL=SW_MNG\x78"
+    } else {
+        b"\x78"
+    };
+    std::fs::write(f.device(bdf).join("vpd"), vpd).unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
