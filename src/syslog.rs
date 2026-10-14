@@ -142,6 +142,35 @@ fn strip_priority(msg: &str) -> &str {
         .unwrap_or(msg)
 }
 
+#[cfg(kani)]
+mod proofs {
+    use super::strip_priority;
+    use crate::kani_support::any_string;
+
+    /// Daemons write /dev/log, so a panic here would let a crafted message
+    /// power off the VM. The slice after '>' is in bounds and on a char
+    /// boundary for every UTF-8 message, and the result is always a suffix.
+    /// 6 bytes: `find` costs CBMC exponentially more per byte even with the
+    /// memchr stub, and a boundary bug would show within one 4-byte char.
+    #[kani::proof]
+    #[kani::unwind(7)]
+    #[kani::use_stub_set(crate::kani_support::cbmc)]
+    fn strip_priority_is_total_and_keeps_a_suffix() {
+        let msg = any_string::<6>();
+        let stripped = strip_priority(&msg);
+        assert!(msg.ends_with(stripped));
+        let expected = match msg.strip_prefix('<') {
+            Some(s) => match s.bytes().position(|b| b == b'>') {
+                Some(i) => &s[i + 1..],
+                None => &msg,
+            },
+            None => &msg,
+        };
+        assert_eq!(stripped, expected);
+        kani::cover!(stripped.len() < msg.len(), "a priority prefix is stripped");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
