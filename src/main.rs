@@ -1,44 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
 
-mod config;
-mod daemon;
-mod device;
-mod execute;
-mod gpu_extension;
-mod guest_extension_image;
-mod hash;
-mod infiniband;
-mod init;
-mod kata_agent;
-mod kernel_params;
-mod kmsg;
-mod lockdown;
-mod macros;
-mod mode;
-mod modprobe;
-mod mount;
-mod net;
-mod nvrc;
-mod smi;
-mod syslog;
-mod toolkit;
-mod uvm;
-
-pub use macros::ResultExt;
-
-#[cfg(test)]
-mod test_utils;
-
-#[macro_use]
-extern crate log;
-extern crate kernlog;
-
-use daemon::FABRIC_MODE_FULL;
-use daemon::FABRIC_MODE_SHARED;
-use kata_agent::SYSLOG_POLL_FOREVER as POLL_FOREVER;
-use nvrc::NVRC;
-use toolkit::nvidia_ctk_cdi;
+use ::NVRC::daemon::{FABRIC_MODE_FULL, FABRIC_MODE_SHARED};
+use ::NVRC::kata_agent::{self, SYSLOG_POLL_FOREVER as POLL_FOREVER};
+use ::NVRC::nvrc::NVRC;
+use ::NVRC::toolkit::nvidia_ctk_cdi;
+use ::NVRC::{
+    gpu_extension, guest_extension_image, hash, infiniband, init, kmsg, lockdown, mode, modprobe,
+    mount, net, syslog,
+};
+use log::info;
 
 /// VMs with GPU passthrough need driver setup, clock tuning,
 /// and monitoring daemons before workloads can use the GPU.
@@ -70,9 +41,8 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
 
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
 /// Service VM mode for NVLink 4.0 topologies in shared virtualization.
-/// Loads NVIDIA driver and starts fabric manager. GPUs are assigned to service VM.
+/// Starts fabric manager; the caller has already loaded the NVIDIA driver.
 fn mode_nvl4(init: &mut NVRC, fabric_mode: u8) {
-    modprobe::load("nvidia");
     init.nv_fabricmanager(fabric_mode, "greedy");
     init.health_checks();
 }
@@ -120,7 +90,10 @@ fn main() {
     match detected.mode {
         "cpu" => info!("executing cpu mode"),
         "gpu" => mode_gpu(&mut init, detected.nvswitch),
-        "servicevm-nvl4" => mode_nvl4(&mut init, FABRIC_MODE_SHARED),
+        "servicevm-nvl4" => {
+            modprobe::load("nvidia");
+            mode_nvl4(&mut init, FABRIC_MODE_SHARED);
+        }
         "servicevm-nvl5" => mode_nvl5(&mut init, FABRIC_MODE_SHARED),
         unknown => panic!("unknown mode: {unknown}"),
     }

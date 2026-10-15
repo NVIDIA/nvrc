@@ -23,9 +23,9 @@ use nix::mount::MsFlags;
 use std::fs;
 
 use crate::execute::foreground;
+use crate::kernel_params::kernel_cmdline;
 use crate::macros::ResultExt;
 
-const CMDLINE: &str = "/proc/cmdline";
 const SYS_BLOCK: &str = "/sys/block";
 /// Extension mount tree (`<MOUNT_BASE>/<name>`); source of truth for
 /// [`crate::gpu_extension::ROOT`].
@@ -52,8 +52,8 @@ struct VerityParams {
 
 /// Mount every cold-plugged extension; no-op on non-composable images.
 pub fn mount_all() {
-    let cmdline = fs::read_to_string(CMDLINE).or_panic(format_args!("read {CMDLINE}"));
-    let params = parse_extensions(&cmdline);
+    let cmdline = kernel_cmdline().or_panic("read kernel command line");
+    let params = parse_extensions(cmdline);
     let devices = discover_extensions(SYS_BLOCK);
     for (name, dev, verity) in plan_mounts(&params, &devices) {
         mount_extension(name, dev, verity);
@@ -93,9 +93,7 @@ fn mount_extension(name: &str, dev: &str, params: &VerityParams) {
     let (data, hash) = find_partitions(SYS_BLOCK, dev);
 
     let dm_name = format!("{EXTENSION_PREFIX}{name}");
-    let args = verity_args(&dm_name, &data, &hash, params);
-    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    foreground(VERITYSETUP, &arg_refs);
+    foreground(VERITYSETUP, &verity_args(&dm_name, &data, &hash, params));
 
     let mapper = format!("/dev/mapper/{dm_name}");
     let target = format!("{MOUNT_BASE}/{name}");
@@ -424,8 +422,8 @@ mod tests {
         // With no kata.extension.* params and no extension- devices, mount_all()
         // reconciles to an empty plan and mounts nothing. Guarded so it never
         // attempts a real mount on a host that does have extensions configured.
-        let cmdline = fs::read_to_string(CMDLINE).unwrap_or_default();
-        if !parse_extensions(&cmdline).is_empty() || !discover_extensions(SYS_BLOCK).is_empty() {
+        let cmdline = kernel_cmdline().unwrap_or_default();
+        if !parse_extensions(cmdline).is_empty() || !discover_extensions(SYS_BLOCK).is_empty() {
             return;
         }
         mount_all();

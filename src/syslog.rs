@@ -18,6 +18,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixDatagram;
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// Global syslog socket—lazily initialized on first poll().
 /// OnceCell ensures thread-safe one-time init. Ephemeral init runs once,
@@ -36,66 +37,94 @@ pub const SYSLOG_FILE_PATH: &str = SYSLOG_FILE;
 
 /// Create and bind a Unix datagram socket at the given path.
 fn bind(path: &Path) -> std::io::Result<UnixDatagram> {
-    UnixDatagram::bind(path)
+    let sock = UnixDatagram::bind(path)?;
+    // poll and recv are not atomic: a blocking recv could hang.
+    sock.set_nonblocking(true)?;
+    Ok(sock)
 }
 
-/// Check socket for pending messages (non-blocking).
-/// Returns None if no data available, Some(msg) if a message was read.
-fn poll_socket(sock: &UnixDatagram) -> std::io::Result<Option<String>> {
+/// Wait up to `timeout` for the socket to have a message queued.
+fn readable(sock: &UnixDatagram, timeout: PollTimeout) -> std::io::Result<bool> {
     let mut fds = [PollFd::new(sock.as_fd(), PollFlags::POLLIN)];
-    // Non-blocking poll—init loop calls this frequently, can't afford to block
-    let count = nix::poll::poll(&mut fds, PollTimeout::ZERO)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    nix::poll::poll(&mut fds, timeout).map_err(std::io::Error::from)?;
+    ready(fds[0].revents())
+}
 
-    if count == 0 {
-        return Ok(None); // No events, no data waiting
+/// Interpret poll events. A broken socket is an error, not "no message", so
+/// callers back off instead of spinning on a socket that never blocks.
+fn ready(revents: Option<PollFlags>) -> std::io::Result<bool> {
+    let revents = revents.unwrap_or_else(PollFlags::empty);
+    if revents.contains(PollFlags::POLLIN) {
+        return Ok(true);
     }
+    if revents.intersects(PollFlags::POLLERR | PollFlags::POLLHUP | PollFlags::POLLNVAL) {
+        return Err(std::io::Error::other(format!(
+            "syslog socket poll: {revents:?}"
+        )));
+    }
+    Ok(false)
+}
 
-    let Some(revents) = fds[0].revents() else {
-        return Ok(None); // Shouldn't happen, but handle gracefully
-    };
-
-    if !revents.contains(PollFlags::POLLIN) {
-        return Ok(None); // Event wasn't POLLIN (e.g., error flag)
+/// Read one message, waiting up to `timeout` for it to arrive.
+fn poll_socket(sock: &UnixDatagram, timeout: PollTimeout) -> std::io::Result<Option<String>> {
+    if !readable(sock, timeout)? {
+        return Ok(None);
     }
 
     // Read the message—4KB buffer matches typical syslog max message size
     let mut buf = [0u8; 4096];
-    let (len, _) = sock.recv_from(&mut buf)?;
+    let len = match sock.recv_from(&mut buf) {
+        Ok((len, _)) => len,
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
+        Err(e) => return Err(e),
+    };
     let msg = String::from_utf8_lossy(&buf[..len]);
     Ok(Some(strip_priority(msg.trim_end()).to_string()))
 }
 
 /// Poll the global /dev/log socket, logging any message via trace!().
-/// Lazily initializes /dev/log on first call.
-/// Drains one message per call—rate-limited to prevent DoS by syslog flooding.
-/// Caller loops at ~2 msg/sec (500ms sleep between calls).
+/// Lazily initializes /dev/log on first call. Drains one message per call;
+/// the handoff loop's 500ms cadence rate-limits syslog flooding.
 pub fn poll() {
     use crate::macros::ResultExt;
-    poll_at(Path::new(DEV_LOG)).or_panic("syslog poll");
+    poll_at(Path::new(DEV_LOG), PollTimeout::ZERO).or_panic("syslog poll");
 }
 
-/// Best-effort syslog drain. Silently ignores errors (e.g. socket not bound yet).
-/// Used by wait_for_marker where syslog drain is nice-to-have, not critical.
+/// Best-effort [`poll`]: errors are ignored, as in the handoff loop where
+/// they must not power off the VM.
 pub fn try_poll() {
-    let _ = poll_at(Path::new(DEV_LOG));
+    try_poll_for(Duration::ZERO);
+}
+
+/// [`try_poll`] that waits up to `timeout` for a message. Sleeps instead if
+/// syslog is broken, so callers never busy-loop.
+pub fn try_poll_for(timeout: Duration) {
+    poll_for_at(Path::new(DEV_LOG), timeout);
+}
+
+fn poll_for_at(path: &Path, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    let wait = PollTimeout::try_from(timeout).unwrap_or(PollTimeout::MAX);
+    if poll_at(path, wait).is_err() {
+        // Only the time the failed poll left over, so the wait never doubles.
+        std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+    }
 }
 
 /// Internal: poll a specific socket path (for unit tests).
 /// Production code uses poll() which hardcodes /dev/log.
-fn poll_at(path: &Path) -> std::io::Result<()> {
-    let sock: &UnixDatagram = if path == Path::new(DEV_LOG) {
-        SYSLOG.get_or_try_init(|| bind(path))?
+fn poll_at(path: &Path, timeout: PollTimeout) -> std::io::Result<()> {
+    if path == Path::new(DEV_LOG) {
+        forward_next(SYSLOG.get_or_try_init(|| bind(path))?, timeout)
     } else {
         // For testing: create a one-shot socket (caller manages lifecycle)
-        return poll_once(path);
-    };
-
-    if let Some(msg) = poll_socket(sock)? {
-        forward_message(&msg)?;
+        forward_next(&bind(path)?, timeout)
     }
+}
 
-    Ok(())
+/// Move one pending message, if any arrives within `timeout`, into the log file.
+fn forward_next(sock: &UnixDatagram, timeout: PollTimeout) -> std::io::Result<()> {
+    poll_socket(sock, timeout)?.map_or(Ok(()), |msg| forward_message(&msg))
 }
 
 /// Write syslog message to persistent file for daemon synchronization.
@@ -123,16 +152,6 @@ fn forward_message(msg: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// One-shot poll for testing: bind, poll once, return.
-/// Socket is dropped after call—suitable for tests with temp paths.
-fn poll_once(path: &Path) -> std::io::Result<()> {
-    let sock = bind(path)?;
-    if let Some(msg) = poll_socket(&sock)? {
-        forward_message(&msg)?;
-    }
-    Ok(())
-}
-
 /// Strip the syslog priority prefix <N> from a message.
 /// Priority levels are noise for us—all messages go to trace!() equally.
 /// Example: "<6>hello" → "hello"
@@ -145,7 +164,9 @@ fn strip_priority(msg: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
     use serial_test::serial;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     // === strip_priority tests ===
@@ -213,18 +234,98 @@ mod tests {
 
     // === poll_socket tests ===
 
+    const NO_WAIT: PollTimeout = PollTimeout::ZERO;
+
+    /// A bound socket; the TempDir guard keeps its path alive.
+    fn server() -> (TempDir, PathBuf, UnixDatagram) {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("test.sock");
+        let sock = bind(&path).unwrap();
+        (tmp, path, sock)
+    }
+
+    fn send(path: &Path, msg: &[u8]) {
+        UnixDatagram::unbound().unwrap().send_to(msg, path).unwrap();
+    }
+
     #[test]
     #[cfg_attr(
         miri,
         ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
     )]
     fn test_poll_socket_no_data() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let sock = bind(&path).unwrap();
+        let (_tmp, _path, sock) = server();
+        assert_eq!(poll_socket(&sock, NO_WAIT).unwrap(), None);
+    }
 
-        let result = poll_socket(&sock).unwrap();
+    #[rstest]
+    #[case::plain("<6>hello world", "hello world")]
+    #[case::strips_priority("<3>error message", "error message")]
+    #[case::trims_trailing_whitespace("<6>message with newline\n", "message with newline")]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
+    fn test_poll_socket_message(#[case] sent: &str, #[case] expected: &str) {
+        let (_tmp, path, sock) = server();
+        send(&path, sent.as_bytes());
+        assert_eq!(
+            poll_socket(&sock, NO_WAIT).unwrap().as_deref(),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
+    fn test_poll_socket_drains_one_message_at_a_time() {
+        let (_tmp, path, sock) = server();
+        send(&path, b"<6>first");
+        send(&path, b"<6>second");
+
+        let drained: Vec<_> = (0..3)
+            .map(|_| poll_socket(&sock, NO_WAIT).unwrap())
+            .collect();
+        assert_eq!(
+            drained,
+            [Some("first".to_owned()), Some("second".to_owned()), None]
+        );
+    }
+
+    #[rstest]
+    #[case::nothing(None, false)]
+    #[case::idle(Some(PollFlags::empty()), false)]
+    #[case::message(Some(PollFlags::POLLIN), true)]
+    #[case::message_then_hangup(Some(PollFlags::POLLIN | PollFlags::POLLHUP), true)]
+    fn test_ready_ok(#[case] revents: Option<PollFlags>, #[case] expected: bool) {
+        assert_eq!(ready(revents).unwrap(), expected);
+    }
+
+    #[rstest]
+    #[case::error(PollFlags::POLLERR)]
+    #[case::hangup(PollFlags::POLLHUP)]
+    #[case::invalid(PollFlags::POLLNVAL)]
+    fn test_ready_broken_socket_is_an_error(#[case] revents: PollFlags) {
+        assert!(ready(Some(revents)).is_err());
+    }
+
+    // === blocking wait ===
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
+    fn test_poll_socket_times_out_when_idle() {
+        let (_tmp, _path, sock) = server();
+
+        let start = Instant::now();
+        let result = poll_socket(&sock, PollTimeout::from(50u16)).unwrap();
+
         assert_eq!(result, None);
+        assert!(start.elapsed() >= Duration::from_millis(50));
     }
 
     #[test]
@@ -232,114 +333,23 @@ mod tests {
         miri,
         ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
     )]
-    fn test_poll_socket_with_data() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
+    fn test_poll_socket_wakes_when_message_arrives() {
+        let (_tmp, path, sock) = server();
 
-        let client = UnixDatagram::unbound().unwrap();
-        client.send_to(b"<6>hello world", &path).unwrap();
+        let sender = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            send(&path, b"<6>late arrival");
+        });
 
-        let result = poll_socket(&server).unwrap();
-        assert_eq!(result, Some("hello world".to_string()));
+        let start = Instant::now();
+        let result = poll_socket(&sock, PollTimeout::from(10_000u16)).unwrap();
+        sender.join().unwrap();
+
+        assert_eq!(result.as_deref(), Some("late arrival"));
+        assert!(start.elapsed() < Duration::from_secs(5));
     }
 
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
-    )]
-    fn test_poll_socket_strips_priority() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
-
-        let client = UnixDatagram::unbound().unwrap();
-        client.send_to(b"<3>error message", &path).unwrap();
-
-        let result = poll_socket(&server).unwrap();
-        assert_eq!(result, Some("error message".to_string()));
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
-    )]
-    fn test_poll_socket_multiple_messages() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
-
-        let client = UnixDatagram::unbound().unwrap();
-        client.send_to(b"<6>first", &path).unwrap();
-        client.send_to(b"<6>second", &path).unwrap();
-
-        // poll_socket drains one at a time
-        let result1 = poll_socket(&server).unwrap();
-        assert_eq!(result1, Some("first".to_string()));
-
-        let result2 = poll_socket(&server).unwrap();
-        assert_eq!(result2, Some("second".to_string()));
-
-        // No more messages
-        let result3 = poll_socket(&server).unwrap();
-        assert_eq!(result3, None);
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
-    )]
-    fn test_poll_socket_trims_trailing_whitespace() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-        let server = bind(&path).unwrap();
-
-        let client = UnixDatagram::unbound().unwrap();
-        client.send_to(b"<6>message with newline\n", &path).unwrap();
-
-        let result = poll_socket(&server).unwrap();
-        assert_eq!(result, Some("message with newline".to_string()));
-    }
-
-    // === poll_at / poll_once tests ===
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
-    )]
-    fn test_poll_once_no_data() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-
-        // poll_once will bind and poll - should succeed with no messages
-        let result = poll_once(&path);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    #[cfg_attr(
-        miri,
-        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
-    )]
-    fn test_poll_once_with_data() {
-        let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("test.sock");
-
-        // Create server socket first
-        let server = bind(&path).unwrap();
-
-        // Send data
-        let client = UnixDatagram::unbound().unwrap();
-        client.send_to(b"<6>poll_once test", &path).unwrap();
-
-        // poll_socket on the server
-        let result = poll_socket(&server).unwrap();
-        assert_eq!(result, Some("poll_once test".to_string()));
-    }
+    // === poll_at tests ===
 
     #[test]
     #[cfg_attr(
@@ -350,8 +360,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("custom.sock");
 
-        // poll_at with non-/dev/log path uses poll_once internally
-        let result = poll_at(&path);
+        // poll_at with non-/dev/log path binds a one-shot socket
+        let result = poll_at(&path, PollTimeout::ZERO);
         assert!(result.is_ok());
     }
 
@@ -376,6 +386,26 @@ mod tests {
         // /dev/log may be foreign (bind fails) or already ours; both must be
         // non-fatal for the best-effort drain.
         try_poll();
+        try_poll_for(Duration::ZERO);
+    }
+
+    // A private socket path keeps these independent of live /dev/log traffic.
+    #[rstest]
+    #[case::idle_socket("sock")]
+    #[case::bind_failure("missing-dir/sock")]
+    #[cfg_attr(
+        miri,
+        ignore = "fork/socket syscalls are foreign functions miri cannot emulate"
+    )]
+    fn test_poll_for_at_waits_out_the_timeout(#[case] rel: &str) {
+        let tmp = TempDir::new().unwrap();
+
+        let start = Instant::now();
+        poll_for_at(&tmp.path().join(rel), Duration::from_millis(100));
+        let elapsed = start.elapsed();
+
+        assert!(elapsed >= Duration::from_millis(100));
+        assert!(elapsed < Duration::from_secs(5));
     }
 
     // Serialized with the kmsg test that removes and recreates the same file.

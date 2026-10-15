@@ -3,9 +3,14 @@
 
 //! Shared test utilities. Only compiled during tests.
 
+use nix::mount::MntFlags;
 use nix::unistd::Uid;
 use std::env;
+use std::panic::{self, AssertUnwindSafe, PanicHookInfo};
+use std::path::Path;
 use std::process::Command;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::thread;
 
 /// Ensure test runs as root.
 ///
@@ -17,6 +22,41 @@ use std::process::Command;
 /// the child's exit code. This allows `cargo test` to work without sudo.
 pub fn require_root() {
     require_root_impl(Uid::effective().is_root())
+}
+
+/// Lazy unmount: a parallel test's fork can hold the mount busy (EBUSY).
+pub fn unmount(path: &Path) {
+    nix::mount::umount2(path, MntFlags::MNT_DETACH).unwrap();
+}
+
+/// Serializes panic hook swaps.
+static HOOK_SWAP: Mutex<()> = Mutex::new(());
+
+/// Hold while swapping the panic hook.
+pub fn hook_swap_guard() -> MutexGuard<'static, ()> {
+    HOOK_SWAP.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Run `f` and report whether it panicked, with `hook` handling this thread's
+/// panics only: the hook is process-global, so a slow (`sync()`) or fatal
+/// (power-off) one would hit parallel tests.
+pub fn panics_under_hook(
+    hook: impl Fn(&PanicHookInfo<'_>) + Send + Sync + 'static,
+    f: impl FnOnce(),
+) -> bool {
+    let _swap = hook_swap_guard();
+    let this_thread = thread::current().id();
+    let previous: Arc<dyn Fn(&PanicHookInfo<'_>) + Send + Sync> = Arc::from(panic::take_hook());
+    let for_others = Arc::clone(&previous);
+    panic::set_hook(Box::new(move |info| match thread::current().id() {
+        id if id == this_thread => hook(info),
+        _ => for_others(info),
+    }));
+
+    let panicked = panic::catch_unwind(AssertUnwindSafe(f)).is_err();
+
+    panic::set_hook(Box::new(move |info| previous(info)));
+    panicked
 }
 
 /// Internal: testable implementation with injected root status.

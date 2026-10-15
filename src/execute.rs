@@ -6,37 +6,38 @@ use std::process::{Child, Command, Stdio};
 use crate::kmsg::kmsg;
 use crate::macros::ResultExt;
 
-/// Run a command and block until completion. Output goes to kmsg so it appears
-/// in dmesg/kernel log - the only reliable log destination in minimal VMs.
-/// Used for setup commands that must succeed before continuing (nvidia-smi, modprobe).
-pub fn foreground(command: &str, args: &[&str]) {
-    debug!("{} {}", command, args.join(" "));
+/// Command with output sent to kmsg.
+fn command<S: AsRef<str>>(program: &str, args: &[S]) -> Command {
+    let args = args.iter().map(AsRef::as_ref);
+    debug!("{} {}", program, args.clone().collect::<Vec<_>>().join(" "));
 
     let kmsg_file = kmsg();
-    let status = Command::new(command)
-        .args(args)
+    let mut cmd = Command::new(program);
+    cmd.args(args)
         .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg_file))
+        .stderr(Stdio::from(kmsg_file));
+    cmd
+}
+
+/// Run a command and block until completion.
+/// Used for setup commands that must succeed before continuing (nvidia-smi, modprobe).
+pub fn foreground<S: AsRef<str>>(program: &str, args: &[S]) {
+    let status = command(program, args)
         .status()
-        .or_panic(format_args!("execute {command}"));
+        .or_panic(format_args!("execute {program}"));
 
     if !status.success() {
-        panic!("{command} failed with status: {status}");
+        panic!("{program} failed with status: {status}");
     }
 }
 
 /// Spawn a daemon without waiting. Returns Child so caller can track it later.
 /// Used for long-running services (nvidia-persistenced, fabricmanager) that run
-/// alongside kata-agent. Output to kmsg for visibility in kernel log.
-pub fn background(command: &str, args: &[&str]) -> Child {
-    debug!("{} {}", command, args.join(" "));
-    let kmsg_file = kmsg();
-    Command::new(command)
-        .args(args)
-        .stdout(Stdio::from(kmsg_file.try_clone().unwrap()))
-        .stderr(Stdio::from(kmsg_file))
+/// alongside kata-agent.
+pub fn background<S: AsRef<str>>(program: &str, args: &[S]) -> Child {
+    command(program, args)
         .spawn()
-        .or_panic(format_args!("start {command}"))
+        .or_panic(format_args!("start {program}"))
 }
 
 #[cfg(test)]
@@ -49,7 +50,7 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_foreground_success() {
-        foreground("/bin/true", &[]);
+        foreground::<&str>("/bin/true", &[]);
     }
 
     #[test]
@@ -57,7 +58,7 @@ mod tests {
     fn test_foreground_failure_exit_code() {
         // Command runs but exits non-zero - should panic
         let result = panic::catch_unwind(|| {
-            foreground("/bin/false", &[]);
+            foreground::<&str>("/bin/false", &[]);
         });
         assert!(result.is_err());
     }
@@ -67,7 +68,7 @@ mod tests {
     fn test_foreground_not_found() {
         // Command doesn't exist - should panic
         let result = panic::catch_unwind(|| {
-            foreground("/nonexistent/command", &[]);
+            foreground::<&str>("/nonexistent/command", &[]);
         });
         assert!(result.is_err());
     }
@@ -100,7 +101,7 @@ mod tests {
     fn test_background_not_found() {
         // Command doesn't exist - should panic
         let result = panic::catch_unwind(|| {
-            background("/nonexistent/command", &[]);
+            background::<&str>("/nonexistent/command", &[]);
         });
         assert!(result.is_err());
     }
