@@ -41,7 +41,7 @@ jobs:
       - name: Install Rust nightly
         # WHY nightly: libFuzzer instrumentation requires nightly compiler features
         # WHY toolchain input: a SHA-pinned ref no longer selects the channel
-        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master 2026-06-30
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master 2026-06-30
         with:
           toolchain: nightly
           components: llvm-tools-preview
