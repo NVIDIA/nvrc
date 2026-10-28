@@ -50,10 +50,11 @@ fn mode_nvl4(init: &mut NVRC, fabric_mode: u8) {
 /// HGX Bx00 systems use CX7 bridges for NVLink management instead of direct GPU access.
 /// GPUs are passed to tenant VMs; only the CX7 IB devices are visible here.
 fn mode_nvl5(init: &mut NVRC, fabric_mode: u8) {
-    // ib_umad exposes /dev/umad* for InfiniBand MAD protocol access;
-    // mlx5_ib creates /sys/class/infiniband/mlx5_* entries for the CX7 bridges.
-    modprobe::load("ib_umad");
-    modprobe::load("mlx5_ib");
+    // Port GUIDs exist only once the RDMA drivers have registered the CX7
+    // bridges. Both drivers are in-tree and may be built in, leaving no module
+    // tree for modprobe; their sysfs nodes show they are present.
+    modprobe::load_unless_present("ib_umad", "/sys/class/infiniband_mad");
+    modprobe::load_unless_present("mlx5_ib", "/sys/bus/auxiliary/drivers/mlx5_ib.rdma");
 
     // CX7 port GUID identifies which bridge to use for fabric management
     init.port_guid = Some(
