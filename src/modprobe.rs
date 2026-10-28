@@ -1,20 +1,17 @@
-use std::fs;
-use std::path::Path;
-
 use crate::execute::foreground;
 use crate::gpu_extension;
 use log::debug;
+use std::path::Path;
 
 const MODPROBE: &str = "/sbin/modprobe";
 
-/// Load a kernel module. Disables NVLink for single-GPU nvidia; NVIDIA modules
-/// come from the `gpu` extension (`--dirname`) when present.
 pub fn load(module: &str) {
-    let single_gpu = module == "nvidia" && count_nvidia_gpus_from("/sys/bus/pci/devices") == 1;
-    let dirname = gpu_extension::modprobe_dirname(module);
-    let args = build_args(module, dirname.as_deref(), single_gpu);
-    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    foreground(MODPROBE, &arg_refs);
+    run(module, false)
+}
+
+/// Mode detection already knows whether the GPU has an NVLink peer.
+pub fn load_nvidia(isolated_gpu: bool) {
+    run("nvidia", isolated_gpu)
 }
 
 /// In-tree drivers may be built into the kernel, where no module tree exists
@@ -25,38 +22,32 @@ pub fn load_unless_present(module: &str, marker: &str) {
         debug!("{module}: {marker} exists, not loading");
         return;
     }
-    load(module)
+    run(module, false)
 }
 
 fn present(marker: &str) -> bool {
     Path::new(marker).exists()
 }
 
-fn build_args(module: &str, dirname: Option<&str>, single_gpu: bool) -> Vec<String> {
+/// The GPU extension supplies modules matching its userspace driver stack.
+fn run(module: &str, nvlink_disabled: bool) {
+    let dirname = gpu_extension::modprobe_dirname(module);
+    let args = build_args(module, dirname.as_deref(), nvlink_disabled);
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    foreground(MODPROBE, &arg_refs);
+}
+
+fn build_args(module: &str, dirname: Option<&str>, nvlink_disabled: bool) -> Vec<String> {
     let mut args = Vec::new();
     if let Some(dir) = dirname {
         args.push("--dirname".to_owned());
         args.push(dir.to_owned());
     }
     args.push(module.to_owned());
-    if single_gpu {
+    if nvlink_disabled {
         args.push("NVreg_NvLinkDisable=1".to_owned());
     }
     args
-}
-
-fn count_nvidia_gpus_from(pci_path: &str) -> usize {
-    let Ok(entries) = fs::read_dir(pci_path) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .filter(|e| {
-            let vendor = fs::read_to_string(e.path().join("vendor")).unwrap_or_default();
-            let class = fs::read_to_string(e.path().join("class")).unwrap_or_default();
-            vendor.trim() == "0x10de" && class.trim().starts_with("0x03")
-        })
-        .count()
 }
 
 #[cfg(test)]
@@ -65,7 +56,6 @@ mod tests {
     use crate::test_utils::require_root;
     use serial_test::serial;
     use std::panic;
-    use tempfile::TempDir;
 
     // Kernel module loading must be serialized - parallel modprobe
     // calls can race and cause spurious failures.
@@ -119,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_args_single_gpu() {
+    fn test_build_args_nvlink_disabled() {
         assert_eq!(
             build_args("nvidia", None, true),
             vec!["nvidia", "NVreg_NvLinkDisable=1"]
@@ -135,7 +125,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_args_extension_dirname_single_gpu() {
+    fn test_build_args_extension_dirname_nvlink_disabled() {
         assert_eq!(
             build_args("nvidia", Some(gpu_extension::ROOT), true),
             vec![
@@ -145,49 +135,5 @@ mod tests {
                 "NVreg_NvLinkDisable=1"
             ]
         );
-    }
-
-    fn create_pci_device(tmpdir: &TempDir, name: &str, vendor: &str, class: &str) {
-        let dev = tmpdir.path().join(name);
-        fs::create_dir_all(&dev).unwrap();
-        fs::write(dev.join("vendor"), vendor).unwrap();
-        fs::write(dev.join("class"), class).unwrap();
-    }
-
-    #[test]
-    fn test_count_nvidia_gpus_single() {
-        let tmpdir = TempDir::new().unwrap();
-        create_pci_device(&tmpdir, "0000:41:00.0", "0x10de\n", "0x030200\n");
-        assert_eq!(count_nvidia_gpus_from(tmpdir.path().to_str().unwrap()), 1);
-    }
-
-    #[test]
-    fn test_count_nvidia_gpus_multiple() {
-        let tmpdir = TempDir::new().unwrap();
-        create_pci_device(&tmpdir, "0000:41:00.0", "0x10de\n", "0x030200\n");
-        create_pci_device(&tmpdir, "0000:42:00.0", "0x10de\n", "0x030000\n");
-        assert_eq!(count_nvidia_gpus_from(tmpdir.path().to_str().unwrap()), 2);
-    }
-
-    #[test]
-    fn test_count_nvidia_gpus_skips_non_gpu() {
-        let tmpdir = TempDir::new().unwrap();
-        create_pci_device(&tmpdir, "0000:41:00.0", "0x10de\n", "0x030200\n");
-        // NVIDIA audio device (class 0x0403)
-        create_pci_device(&tmpdir, "0000:41:00.1", "0x10de\n", "0x040300\n");
-        // Non-NVIDIA device
-        create_pci_device(&tmpdir, "0000:00:02.0", "0x8086\n", "0x030000\n");
-        assert_eq!(count_nvidia_gpus_from(tmpdir.path().to_str().unwrap()), 1);
-    }
-
-    #[test]
-    fn test_count_nvidia_gpus_empty() {
-        let tmpdir = TempDir::new().unwrap();
-        assert_eq!(count_nvidia_gpus_from(tmpdir.path().to_str().unwrap()), 0);
-    }
-
-    #[test]
-    fn test_count_nvidia_gpus_nonexistent() {
-        assert_eq!(count_nvidia_gpus_from("/nonexistent/path"), 0);
     }
 }
