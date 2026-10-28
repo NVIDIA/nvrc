@@ -44,7 +44,7 @@ fn mode_gpu(init: &mut NVRC, fabric: Option<Fabric>) {
 /// both on the selected management port's GUID.
 fn start_fabric(init: &mut NVRC, fabric: Fabric, fabric_mode: u8) {
     match fabric {
-        Fabric::DirectNvSwitch => init.nv_fabricmanager(fabric_mode, "greedy"),
+        Fabric::DirectNvSwitch => init.nv_fabricmanager(fabric_mode, "greedy", None),
         Fabric::ConnectX => {
             // Port GUIDs exist only once the RDMA drivers have registered the
             // management PFs. Both drivers are in-tree and may be built in, leaving
@@ -58,15 +58,15 @@ fn start_fabric(init: &mut NVRC, fabric: Fabric, fabric_mode: u8) {
             let port = ports
                 .first()
                 .expect("ConnectX fabric management requires an SM-enabled management port");
-            init.port_guid = Some(format!("0x{:016x}", port.guid));
+            let guid = format!("0x{:016x}", port.guid);
             debug!(
-                "{} {} port {}: GUID {:#018x}",
-                port.pci_bdf, port.ib_device, port.port, port.guid
+                "{} {} port {}: GUID {guid}",
+                port.pci_bdf, port.ib_device, port.port
             );
 
-            init.nv_nvlsm();
+            init.nv_nvlsm(&guid);
             init.health_checks();
-            init.nv_fabricmanager(fabric_mode, "symmetric");
+            init.nv_fabricmanager(fabric_mode, "symmetric", Some(&guid));
         }
     }
     init.health_checks();
