@@ -28,8 +28,6 @@ pub struct NVRC {
     /// Enable DCGM exporter for GPU metrics
     pub dcgm_enabled: Option<bool>,
 
-    /// Port GUID for NVL5+ systems (0x-prefixed hex string)
-    pub port_guid: Option<String>,
     /// Tracked background daemons for health monitoring
     children: Vec<(String, Child)>,
 }
