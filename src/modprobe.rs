@@ -10,23 +10,19 @@ pub fn load(module: &str) {
 }
 
 /// Mode detection already knows whether the GPU has an NVLink peer.
-pub fn load_nvidia(isolated_gpu: bool) {
-    run("nvidia", isolated_gpu)
+pub fn load_nvidia(nvlink_disabled: bool) {
+    run("nvidia", nvlink_disabled)
 }
 
 /// In-tree drivers may be built into the kernel, where no module tree exists
 /// for modprobe to resolve them against. `marker` is the sysfs node the driver
 /// registers once it is present, built in or loaded.
 pub fn load_unless_present(module: &str, marker: &str) {
-    if present(marker) {
+    if Path::new(marker).exists() {
         debug!("{module}: {marker} exists, not loading");
         return;
     }
     run(module, false)
-}
-
-fn present(marker: &str) -> bool {
-    Path::new(marker).exists()
 }
 
 /// The GPU extension supplies modules matching its userspace driver stack.
