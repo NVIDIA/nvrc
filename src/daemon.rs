@@ -96,7 +96,12 @@ impl NVRC {
 
     /// NVSwitch fabric manager is only needed for multi-GPU NVLink topologies.
     /// Disabled by default since most VMs have single GPUs.
-    pub fn nv_fabricmanager(&mut self, fabric_mode: u8, rail_policy: &str) {
+    pub fn nv_fabricmanager(
+        &mut self,
+        fabric_mode: u8,
+        rail_policy: &str,
+        port_guid: Option<&str>,
+    ) {
         // The stock config ships in the gpu extension; the editable runtime copy
         // stays on the writable /run tmpfs.
         let fm_config = gpu_extension::path(FM_CONFIG);
@@ -106,30 +111,27 @@ impl NVRC {
         fs::set_permissions(FM_RUNTIME_CONFIG, fs::Permissions::from_mode(0o400))
             .or_panic(format_args!("set permissions {FM_RUNTIME_CONFIG}"));
         kmsg::wait_for_marker_after("FM starting NvLink Inband", 120, || {
-            self.spawn_fabricmanager(&gpu_extension::path("/bin/nv-fabricmanager"))
+            self.spawn_fabricmanager(&gpu_extension::path("/bin/nv-fabricmanager"), port_guid)
         });
     }
 
-    fn spawn_fabricmanager(&mut self, bin: &str) {
-        let guid = self.port_guid.clone();
+    fn spawn_fabricmanager(&mut self, bin: &str, port_guid: Option<&str>) {
         let args: Vec<&str> = ["-c", FM_RUNTIME_CONFIG]
             .into_iter()
-            .chain(guid.iter().flat_map(|g| ["-g", g.as_str()]))
+            .chain(port_guid.into_iter().flat_map(|g| ["-g", g]))
             .collect();
         self.spawn_daemon("nv-fabricmanager", bin, &args);
     }
 
-    /// CX7 bridges require NVLSM to manage NVLink subnet before FM can initialize the fabric.
-    pub fn nv_nvlsm(&mut self) {
-        self.spawn_nvlsm(&gpu_extension::path("/sbin/nvlsm"))
+    /// ConnectX management PFs need NVLSM on the management port's GUID to
+    /// bring up the NVLink subnet before FM can initialize the fabric.
+    pub fn nv_nvlsm(&mut self, port_guid: &str) {
+        self.spawn_nvlsm(&gpu_extension::path("/sbin/nvlsm"), port_guid)
     }
 
-    fn spawn_nvlsm(&mut self, bin: &str) {
-        let Some(guid) = self.port_guid.clone() else {
-            return;
-        };
+    fn spawn_nvlsm(&mut self, bin: &str, port_guid: &str) {
         let nvlsm_config = gpu_extension::path(NVLSM_CONFIG);
-        let args = ["-F", &nvlsm_config, "-g", &guid, "-f", "stdout"];
+        let args = ["-F", &nvlsm_config, "-g", port_guid, "-f", "stdout"];
         self.spawn_daemon("nvlsm", bin, &args);
     }
 
@@ -208,7 +210,7 @@ mod tests {
 
         let mut nvrc = NVRC::default();
         nvrc.configure_fabricmanager(cfg, FABRIC_MODE_FULL, "greedy");
-        nvrc.spawn_fabricmanager("/bin/true");
+        nvrc.spawn_fabricmanager("/bin/true", None);
 
         let content = fs::read_to_string(cfg).unwrap();
         assert!(content.contains("FABRIC_MODE=0"));
@@ -263,15 +265,14 @@ mod tests {
     #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_fabricmanager_success() {
         let mut nvrc = NVRC::default();
-        nvrc.spawn_fabricmanager("/bin/true");
+        nvrc.spawn_fabricmanager("/bin/true", None);
     }
 
     #[test]
     #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_fabricmanager_with_port_guid() {
         let mut nvrc = NVRC::default();
-        nvrc.port_guid = Some("0xdeadbeef".to_string());
-        nvrc.spawn_fabricmanager("/bin/true");
+        nvrc.spawn_fabricmanager("/bin/true", Some("0xdeadbeef"));
         nvrc.health_checks();
     }
 
@@ -279,24 +280,38 @@ mod tests {
     #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_nvlsm_success() {
         let mut nvrc = NVRC::default();
-        nvrc.port_guid = Some("0xdeadbeef".to_string());
-        nvrc.spawn_nvlsm("/bin/true");
+        nvrc.spawn_nvlsm("/bin/true", "0xdeadbeef");
         nvrc.health_checks();
     }
 
+    // The wrappers resolve the real binaries and config. A host that has them
+    // installed must not get a daemon started by a unit test, so these step
+    // aside there and check the fail-closed path everywhere else.
+
     #[test]
     #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
-    fn test_spawn_nvlsm_skipped_without_guid() {
-        let mut nvrc = NVRC::default();
-        // port_guid is None, should be a no-op
-        nvrc.spawn_nvlsm("/bin/true");
+    fn nv_nvlsm_fails_closed_without_the_binary() {
+        if std::path::Path::new(&gpu_extension::path("/sbin/nvlsm")).exists() {
+            return;
+        }
+        let err = std::panic::catch_unwind(|| NVRC::default().nv_nvlsm("0xdeadbeef")).unwrap_err();
+        assert!(err.downcast_ref::<String>().unwrap().contains("nvlsm"));
     }
 
     #[test]
-    fn test_nv_nvlsm_skipped_without_guid() {
-        // Resolves the nvlsm binary path, then no-ops without a port GUID.
-        let mut nvrc = NVRC::default();
-        nvrc.nv_nvlsm();
+    #[cfg_attr(miri, ignore = "miri does not implement the copy syscalls")]
+    fn nv_fabricmanager_fails_closed_without_the_stock_config() {
+        if std::path::Path::new(&gpu_extension::path(FM_CONFIG)).exists() {
+            return;
+        }
+        let err = std::panic::catch_unwind(|| {
+            NVRC::default().nv_fabricmanager(FABRIC_MODE_SHARED, "greedy", None)
+        })
+        .unwrap_err();
+        assert!(err
+            .downcast_ref::<String>()
+            .unwrap()
+            .contains(FM_RUNTIME_CONFIG));
     }
 
     #[test]
