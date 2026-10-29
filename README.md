@@ -146,7 +146,7 @@ skips setup.
 ### Example Configurations
 
 Mode selection is automatic: assign GPUs for GPU services, or fabric management
-devices without GPUs for a ServiceVM. `nvrc.mode` is not a supported parameter.
+devices without GPUs for a ServiceVM.
 
 **GPU with locked clocks for benchmarking:**
 
