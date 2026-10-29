@@ -107,6 +107,21 @@ pub fn add_management_pf(f: &pcilibs_rs::testfs::Fake, bdf: &str, marked: bool) 
     std::fs::write(f.device(bdf).join("vpd"), vpd).unwrap();
 }
 
+/// A port of a registered InfiniBand device; `cap_mask` bit 10 set means its
+/// SM is disabled, and the GUID is the low half of GID 0.
+pub fn add_ib_port(f: &pcilibs_rs::testfs::Fake, ib: &str, port: u32, cap_mask: &str, gid: &str) {
+    let path = f
+        .sysfs
+        .infiniband()
+        .join(ib)
+        .join("ports")
+        .join(port.to_string());
+    std::fs::create_dir_all(path.join("gids")).unwrap();
+    std::fs::write(path.join("link_layer"), "InfiniBand\n").unwrap();
+    std::fs::write(path.join("cap_mask"), cap_mask).unwrap();
+    std::fs::write(path.join("gids/0"), gid).unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
