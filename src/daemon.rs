@@ -284,6 +284,36 @@ mod tests {
         nvrc.health_checks();
     }
 
+    // The wrappers resolve the real binaries and config. A host that has them
+    // installed must not get a daemon started by a unit test, so these step
+    // aside there and check the fail-closed path everywhere else.
+
+    #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
+    fn nv_nvlsm_fails_closed_without_the_binary() {
+        if std::path::Path::new(&gpu_extension::path("/sbin/nvlsm")).exists() {
+            return;
+        }
+        let err = std::panic::catch_unwind(|| NVRC::default().nv_nvlsm("0xdeadbeef")).unwrap_err();
+        assert!(err.downcast_ref::<String>().unwrap().contains("nvlsm"));
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "miri does not implement the copy syscalls")]
+    fn nv_fabricmanager_fails_closed_without_the_stock_config() {
+        if std::path::Path::new(&gpu_extension::path(FM_CONFIG)).exists() {
+            return;
+        }
+        let err = std::panic::catch_unwind(|| {
+            NVRC::default().nv_fabricmanager(FABRIC_MODE_SHARED, "greedy", None)
+        })
+        .unwrap_err();
+        assert!(err
+            .downcast_ref::<String>()
+            .unwrap()
+            .contains(FM_RUNTIME_CONFIG));
+    }
+
     #[test]
     #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn test_spawn_persistenced_binary_not_found() {
