@@ -6,7 +6,7 @@
 use crate::macros::ResultExt;
 use log::{debug, info};
 use pcilibs_rs::{
-    nvlink::NVIDIA,
+    nvlink::{self, NVIDIA},
     platform::{self, FabricInterface, Topology},
     Sysfs,
 };
@@ -77,10 +77,32 @@ fn select(topology: &Topology) -> Mode {
     mode
 }
 
+/// The port NVLSM and FM manage the fabric on: the first SM-enabled port of a
+/// management PF, in the PCI address then port order pcilibs-rs returns them
+/// in. Port GUIDs exist only once the RDMA drivers have registered the PFs, so
+/// this scans again after `detect`.
+pub fn management_port_guid() -> String {
+    management_port_guid_from(&Sysfs::default())
+}
+
+fn management_port_guid_from(sysfs: &Sysfs) -> String {
+    let ports =
+        nvlink::discover_management_ports(sysfs).or_panic("discover NVLink management ports");
+    let port = ports
+        .first()
+        .expect("ConnectX fabric management requires an SM-enabled management port");
+    let guid = format!("0x{:016x}", port.guid);
+    debug!(
+        "{} {} port {}: GUID {guid}",
+        port.pci_bdf, port.ib_device, port.port
+    );
+    guid
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::add_management_pf;
+    use crate::test_utils::{add_ib_port, add_management_pf};
     use pcilibs_rs::testfs::fake;
     use rstest::rstest;
     use std::fs;
@@ -208,5 +230,41 @@ mod tests {
         add_management_pf(&f, "0000:03:00.0", true);
         fs::write(f.device("0000:03:00.0").join("vpd"), [0x90]).unwrap();
         detect_from(&f.sysfs);
+    }
+
+    #[test]
+    fn management_port_is_the_first_sm_enabled_port_of_a_management_pf() {
+        let f = fake();
+        // An ordinary NIC with an SM-enabled port on the lowest address.
+        add_management_pf(&f, "0000:01:00.0", false);
+        f.add_infiniband("mlx5_0", "0000:01:00.0", "1: CA", "");
+        add_ib_port(&f, "mlx5_0", 1, "0x0", "fe80::9");
+        add_management_pf(&f, "0000:05:00.0", true);
+        f.add_infiniband("mlx5_1", "0000:05:00.0", "1: CA", "");
+        add_ib_port(&f, "mlx5_1", 1, "0x0", "fe80::5");
+        add_management_pf(&f, "0000:03:00.0", true);
+        f.add_infiniband("mlx5_2", "0000:03:00.0", "1: CA", "");
+        // SM disabled on the first port of the lowest management PF.
+        add_ib_port(&f, "mlx5_2", 1, "0x400", "fe80::2");
+        add_ib_port(&f, "mlx5_2", 2, "0x0", "fe80::3");
+        assert_eq!(management_port_guid_from(&f.sysfs), "0x0000000000000003");
+    }
+
+    #[test]
+    #[should_panic(expected = "SM-enabled management port")]
+    fn sm_disabled_ports_cannot_start_nvlsm() {
+        let f = fake();
+        add_management_pf(&f, "0000:05:00.0", true);
+        f.add_infiniband("mlx5_0", "0000:05:00.0", "1: CA", "");
+        add_ib_port(&f, "mlx5_0", 1, "0x400", "fe80::5");
+        management_port_guid_from(&f.sysfs);
+    }
+
+    #[test]
+    #[should_panic(expected = "discover NVLink management ports")]
+    fn missing_rdma_tree_is_an_error_not_an_empty_fabric() {
+        let f = fake();
+        add_management_pf(&f, "0000:05:00.0", true);
+        management_port_guid_from(&f.sysfs);
     }
 }
