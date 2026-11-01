@@ -5,6 +5,7 @@ use crate::config::update_config_file;
 use crate::gpu_extension;
 use crate::kmsg;
 use crate::macros::ResultExt;
+use crate::mode::Fabric;
 use crate::nvrc::NVRC;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -46,6 +47,47 @@ const DCGM_EXPORTER_COUNTERS: &str = "/etc/dcgm-exporter/default-counters.csv";
 pub const FABRIC_MODE_FULL: u8 = 0;
 /// FABRIC_MODE=1: shared NVSwitch virtualization, GPUs in tenant VMs.
 pub const FABRIC_MODE_SHARED: u8 = 1;
+
+/// What Fabric Manager logs once the fabric is configured depends on the
+/// switch generation. On NVL4 FM drives the NVLink inband path itself and
+/// announces it. On NVL5 the subnet belongs to NVLSM and FM reports its own
+/// state machine instead; the full literal keeps the "global fabric manager
+/// state" and "subnet manager state" lines, logged by the same monitor, from
+/// matching. Both arrive through syslog: FM mirrors INFO and above there
+/// whatever LOG_USE_SYSLOG says, and NVRC's shim forwards /dev/log to kmsg.
+/// Measured on a DGX with FM 615.71.09 in Service VM mode: configured 26 s
+/// after start. The configured state also covers NVLSM: on NVL5 the subnet
+/// manager becomes master only after FM has connected and synced partitions
+/// with it (70 ms after FM's sync request on that DGX), so NVLSM cannot be
+/// waited for before FM starts, and FM configured implies NVLSM master.
+pub const FM_READY_NVL4: &str = "FM starting NvLink Inband";
+pub const FM_READY_NVL5: &str = "fabric manager state is `3` (configured)";
+
+/// The binary of a service NVRC waits on, checked before the log is opened:
+/// a gpu extension without it is then reported as that, not as a log NVRC
+/// could not open.
+fn require(bin: String) -> String {
+    if !std::path::Path::new(&bin).exists() {
+        panic!("{bin}: not in the gpu extension");
+    }
+    bin
+}
+
+fn fm_ready_marker(fabric: Fabric) -> &'static str {
+    match fabric {
+        Fabric::DirectNvSwitch => FM_READY_NVL4,
+        Fabric::ConnectX => FM_READY_NVL5,
+    }
+}
+
+/// PARTITION_RAIL_POLICY: greedy on NVL4; symmetric on NVL5, where CC on
+/// Blackwell requires it.
+fn rail_policy(fabric: Fabric) -> &'static str {
+    match fabric {
+        Fabric::DirectNvSwitch => "greedy",
+        Fabric::ConnectX => "symmetric",
+    }
+}
 
 /// Configurable path parameters allow testing with /bin/true instead of real
 /// NVIDIA binaries that don't exist in the test environment.
@@ -96,22 +138,18 @@ impl NVRC {
 
     /// NVSwitch fabric manager is only needed for multi-GPU NVLink topologies.
     /// Disabled by default since most VMs have single GPUs.
-    pub fn nv_fabricmanager(
-        &mut self,
-        fabric_mode: u8,
-        rail_policy: &str,
-        port_guid: Option<&str>,
-    ) {
+    pub fn nv_fabricmanager(&mut self, fabric: Fabric, fabric_mode: u8, port_guid: Option<&str>) {
         // The stock config ships in the gpu extension; the editable runtime copy
         // stays on the writable /run tmpfs.
         let fm_config = gpu_extension::path(FM_CONFIG);
         fs::copy(&fm_config, FM_RUNTIME_CONFIG)
             .or_panic(format_args!("copy {fm_config} to {FM_RUNTIME_CONFIG}"));
-        self.configure_fabricmanager(FM_RUNTIME_CONFIG, fabric_mode, rail_policy);
+        self.configure_fabricmanager(FM_RUNTIME_CONFIG, fabric_mode, rail_policy(fabric));
         fs::set_permissions(FM_RUNTIME_CONFIG, fs::Permissions::from_mode(0o400))
             .or_panic(format_args!("set permissions {FM_RUNTIME_CONFIG}"));
-        kmsg::wait_for_marker_after("FM starting NvLink Inband", 120, || {
-            self.spawn_fabricmanager(&gpu_extension::path("/bin/nv-fabricmanager"), port_guid)
+        let bin = require(gpu_extension::path("/bin/nv-fabricmanager"));
+        kmsg::wait_for_marker_after(fm_ready_marker(fabric), 120, || {
+            self.spawn_fabricmanager(&bin, port_guid)
         });
     }
 
@@ -126,7 +164,8 @@ impl NVRC {
     /// ConnectX management PFs need NVLSM on the management port's GUID to
     /// bring up the NVLink subnet before FM can initialize the fabric.
     pub fn nv_nvlsm(&mut self, port_guid: &str) {
-        self.spawn_nvlsm(&gpu_extension::path("/sbin/nvlsm"), port_guid)
+        let bin = require(gpu_extension::path("/sbin/nvlsm"));
+        self.spawn_nvlsm(&bin, port_guid)
     }
 
     fn spawn_nvlsm(&mut self, bin: &str, port_guid: &str) {
@@ -289,6 +328,19 @@ mod tests {
     // aside there and check the fail-closed path everywhere else.
 
     #[test]
+    fn fabric_markers_and_rail_policy_follow_the_switch_generation() {
+        assert_eq!(fm_ready_marker(Fabric::DirectNvSwitch), FM_READY_NVL4);
+        assert_eq!(fm_ready_marker(Fabric::ConnectX), FM_READY_NVL5);
+        assert_eq!(rail_policy(Fabric::DirectNvSwitch), "greedy");
+        assert_eq!(rail_policy(Fabric::ConnectX), "symmetric");
+    }
+
+    #[test]
+    fn require_returns_a_binary_that_exists() {
+        assert_eq!(require("/".to_string()), "/");
+    }
+
+    #[test]
     #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
     fn nv_nvlsm_fails_closed_without_the_binary() {
         if std::path::Path::new(&gpu_extension::path("/sbin/nvlsm")).exists() {
@@ -305,7 +357,7 @@ mod tests {
             return;
         }
         let err = std::panic::catch_unwind(|| {
-            NVRC::default().nv_fabricmanager(FABRIC_MODE_SHARED, "greedy", None)
+            NVRC::default().nv_fabricmanager(Fabric::DirectNvSwitch, FABRIC_MODE_SHARED, None)
         })
         .unwrap_err();
         assert!(err
