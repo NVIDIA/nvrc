@@ -43,7 +43,7 @@ fn mode_gpu(init: &mut NVRC, fabric: Option<Fabric>) {
 /// both on the selected management port's GUID.
 fn start_fabric(init: &mut NVRC, fabric: Fabric, fabric_mode: u8) {
     match fabric {
-        Fabric::DirectNvSwitch => init.nv_fabricmanager(fabric_mode, "greedy", None),
+        Fabric::DirectNvSwitch => init.nv_fabricmanager(fabric, fabric_mode, None),
         Fabric::ConnectX => {
             // Port GUIDs exist only once the RDMA drivers have registered the
             // management PFs. Both drivers are in-tree and may be built in, leaving
@@ -54,7 +54,7 @@ fn start_fabric(init: &mut NVRC, fabric: Fabric, fabric_mode: u8) {
             let guid = mode::management_port_guid();
             init.nv_nvlsm(&guid);
             init.health_checks();
-            init.nv_fabricmanager(fabric_mode, "symmetric", Some(&guid));
+            init.nv_fabricmanager(fabric, fabric_mode, Some(&guid));
         }
     }
     init.health_checks();
