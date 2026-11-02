@@ -278,6 +278,10 @@ mod tests {
     const SM_MASTER_SEEN_BY_FM_LINE: &str = "[   29.2] NVRC::syslog[1]: Nov  1 02:00:28 nv-fabricmanager: [Nov 01 2026 02:00:28] [INFO] [tid 279] subnet manager state monitor received subnet manager get state response with ok status; subnet manager state is `4` (master)\n";
 
     #[rstest]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
     #[case::fm_configured_on_nvl5(crate::daemon::FM_READY_NVL5, FM_CONFIGURED_LINE)]
     fn test_each_fabric_marker_matches_its_captured_line(#[case] marker: &str, #[case] line: &str) {
         assert!(wait_over_marker(line, marker, 5).0);
