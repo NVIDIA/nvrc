@@ -6,7 +6,7 @@
 use crate::macros::ResultExt;
 use log::{debug, info};
 use pcilibs_rs::{
-    nvlink::{self, NVIDIA},
+    nvlink::NVIDIA,
     platform::{self, FabricInterface, Topology},
     Sysfs,
 };
@@ -86,12 +86,14 @@ pub fn management_port_guid() -> String {
 }
 
 fn management_port_guid_from(sysfs: &Sysfs) -> String {
-    let ports =
-        nvlink::discover_management_ports(sysfs).or_panic("discover NVLink management ports");
+    let topology = platform::discover_topology(sysfs).or_panic("discover PCI topology");
+    let ports = topology
+        .management_ports(sysfs)
+        .or_panic("discover NVLink management ports");
     let port = ports
         .first()
         .expect("ConnectX fabric management requires an SM-enabled management port");
-    let guid = format!("0x{:016x}", port.guid);
+    let guid = port.guid_string();
     debug!(
         "{} {} port {}: GUID {guid}",
         port.pci_bdf, port.ib_device, port.port
