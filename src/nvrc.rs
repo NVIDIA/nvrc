@@ -27,6 +27,10 @@ pub struct NVRC {
     pub uvm_tools_enabled: bool,
     /// Enable DCGM exporter for GPU metrics
     pub dcgm_enabled: Option<bool>,
+    /// Fabric Manager listens on vsock for a publisher on the host; off
+    /// unless the kernel command line asks, so a Service VM whose owner
+    /// wants no host control path never opens one.
+    pub fm_vsock: bool,
 
     /// Tracked background daemons for health monitoring
     children: Vec<(String, Child)>,

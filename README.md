@@ -157,6 +157,13 @@ skips setup.
 | --------------------------- | --------------------------------------- | -------- | -------------------------------------------------------------------------------------------------- |
 | `nvrc.uvm.persistence.mode` | `on/off`, `true/false`, `1/0`, `yes/no` | `true`   | UVM persistence mode keeps unified memory state across CUDA context teardowns.                     |
 | `nvrc.dcgm`                 | `on/off`, `true/false`, `1/0`, `yes/no` | `false`  | Enable DCGM (Data Center GPU Manager) for telemetry and health monitoring.                         |
+| `nvrc.fm.vsock`             | `on/off`, `true/false`, `1/0`, `yes/no` | `false`  | Fabric Manager also listens on vsock (`FM_CMD_VSOCK_CID=VMADDR_CID_ANY`) for a host publisher.     |
+
+`nvrc.fm.vsock` is for the out-of-band Service VM: the host publishes the
+partition view and activates partitions without entering the VM. A vsock
+connect needs no privilege on the host, so any host process can reach the
+Fabric Manager API while it is on; leave it off where the host must have no
+Fabric Manager control path.
 
 ### Example Configurations
 

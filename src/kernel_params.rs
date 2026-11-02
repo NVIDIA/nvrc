@@ -71,6 +71,7 @@ impl NVRC {
                     debug!("nvrc.uvm.tools: {}", self.uvm_tools_enabled);
                 }
                 "nvrc.dcgm" => nvrc_dcgm(v, self),
+                "nvrc.fm.vsock" => nvrc_fm_vsock(v, self),
 
                 "nvrc.smi.srs" => nvidia_smi_srs(v, self)?,
                 "nvrc.smi.lgc" => self.nvidia_smi_lgc = Some(parse_u32(k, "frequency", v)?),
@@ -89,6 +90,15 @@ fn nvrc_dcgm(value: &str, ctx: &mut NVRC) {
     let dcgm = parse_boolean(value);
     ctx.dcgm_enabled = Some(dcgm);
     debug!("nvrc.dcgm: {dcgm}");
+}
+
+/// Fabric Manager's vsock listener, for the out-of-band Service VM: the host
+/// publishes the partition view and activates partitions over vsock instead
+/// of from inside the VM. Any host process can connect, so it is off unless
+/// the Service VM's owner asks.
+fn nvrc_fm_vsock(value: &str, ctx: &mut NVRC) {
+    ctx.fm_vsock = parse_boolean(value);
+    debug!("nvrc.fm.vsock: {}", ctx.fm_vsock);
 }
 
 /// Control log verbosity at runtime. Defaults to off to minimize noise.
@@ -255,6 +265,18 @@ mod tests {
         // Unknown log level should default to Off
         init.process_kernel_params(Some("nvrc.log=garbage"));
         assert_eq!(log::max_level(), log::LevelFilter::Off);
+    }
+
+    #[test]
+    fn test_nvrc_fm_vsock_parameter_handling() {
+        let mut c = NVRC::default();
+        assert!(!c.fm_vsock);
+        nvrc_fm_vsock("on", &mut c);
+        assert!(c.fm_vsock);
+        nvrc_fm_vsock("off", &mut c);
+        assert!(!c.fm_vsock);
+        c.process_kernel_params(Some("nvrc.fm.vsock=1 nvrc.smi.pl=300"));
+        assert!(c.fm_vsock);
     }
 
     #[test]

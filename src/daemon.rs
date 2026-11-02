@@ -47,6 +47,8 @@ const DCGM_EXPORTER_COUNTERS: &str = "/etc/dcgm-exporter/default-counters.csv";
 pub const FABRIC_MODE_FULL: u8 = 0;
 /// FABRIC_MODE=1: shared NVSwitch virtualization, GPUs in tenant VMs.
 pub const FABRIC_MODE_SHARED: u8 = 1;
+/// `VMADDR_CID_ANY` (`-1U` in linux/vm_sockets.h) as FM's `FM_CMD_VSOCK_CID`.
+const FM_VSOCK_CID_ANY: &str = "4294967295";
 
 /// What Fabric Manager logs once the fabric is configured depends on the
 /// switch generation. On NVL4 FM drives the NVLink inband path itself and
@@ -177,13 +179,19 @@ impl NVRC {
     /// Write FABRIC_MODE and PARTITION_RAIL_POLICY to fabricmanager.cfg.
     /// FABRIC_MODE: 0 = bare metal (GPUs local), 1 = service VM (GPUs in tenant VMs)
     /// PARTITION_RAIL_POLICY: "greedy" (NVL4) or "symmetric" (NVL5, required for CC on Blackwell)
+    /// With `fm_vsock`, FM also listens on vsock: the bind CID is
+    /// VMADDR_CID_ANY, since a guest has one CID and does not know it, and
+    /// the port stays FM's default, which the host side dials.
     fn configure_fabricmanager(&self, cfg_path: &str, fabric_mode: u8, rail_policy: &str) {
         let fm = &fabric_mode.to_string();
-        let updates = &[
+        let mut updates = vec![
             ("FABRIC_MODE", fm.as_str()),
             ("PARTITION_RAIL_POLICY", rail_policy),
         ];
-        update_config_file(cfg_path, updates);
+        if self.fm_vsock {
+            updates.push(("FM_CMD_VSOCK_CID", FM_VSOCK_CID_ANY));
+        }
+        update_config_file(cfg_path, &updates);
     }
 }
 
@@ -391,15 +399,37 @@ mod tests {
 
     /// Run configure_fabricmanager over a config seeded with `initial`.
     fn configured(initial: &str, fabric_mode: u8, rail_policy: &str) -> String {
+        configured_by(&NVRC::default(), initial, fabric_mode, rail_policy)
+    }
+
+    fn configured_by(nvrc: &NVRC, initial: &str, fabric_mode: u8, rail_policy: &str) -> String {
         use tempfile::NamedTempFile;
 
         let tmpfile = NamedTempFile::new().unwrap();
         let path = tmpfile.path().to_str().unwrap();
         fs::write(path, initial).unwrap();
 
-        NVRC::default().configure_fabricmanager(path, fabric_mode, rail_policy);
+        nvrc.configure_fabricmanager(path, fabric_mode, rail_policy);
 
         fs::read_to_string(path).unwrap()
+    }
+
+    /// The listener is written only when asked, and over the stock empty
+    /// value, so an unasked Service VM keeps FM on loopback TCP only.
+    #[rstest]
+    #[case::off(false)]
+    #[case::on(true)]
+    fn test_configure_fabricmanager_vsock_only_when_asked(#[case] vsock: bool) {
+        let mut nvrc = NVRC::default();
+        nvrc.fm_vsock = vsock;
+        let content = configured_by(
+            &nvrc,
+            "FM_CMD_VSOCK_CID=\n",
+            FABRIC_MODE_SHARED,
+            "symmetric",
+        );
+        assert_eq!(content.contains("FM_CMD_VSOCK_CID=4294967295"), vsock);
+        assert!(!content.contains("FM_CMD_VSOCK_PORT_NUMBER"));
     }
 
     #[rstest]
