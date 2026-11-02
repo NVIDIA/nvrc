@@ -19,9 +19,12 @@ use crate::macros::ResultExt;
 /// The `gpu` extension mount ([`crate::guest_extension_image::MOUNT_BASE`]`/gpu`).
 pub const ROOT: &str = "/run/kata-extensions/gpu";
 
-/// Kernel firmware loader's default search path: an empty dir baked into the
-/// read-only base image, over which the extension's firmware tree is bound.
+/// Fixed paths the kernel and the NVIDIA daemons read, baked into the read-only
+/// base image as empty dirs so the extension's trees can be bound over them:
+/// the firmware loader's default search path, and the configs fabricmanager and
+/// OpenSM's `grpc_mgr` plugin open without any path option.
 const FIRMWARE_DST: &str = "/lib/firmware/nvidia";
+const SHARE_DST: &str = "/usr/share/nvidia";
 
 /// Loader cache regeneration. `ldconfig`/`LDSO_CACHE` come from the base rootfs;
 /// the `_TMP` outputs go to the writable `/run`.
@@ -114,7 +117,8 @@ fn attester_variant_in(present: bool) -> Option<&'static str> {
 }
 
 pub fn setup() {
-    bind_firmware();
+    bind_tree("lib/firmware/nvidia", FIRMWARE_DST);
+    bind_tree("usr/share/nvidia", SHARE_DST);
     refresh_ldcache();
 }
 
@@ -142,18 +146,19 @@ fn ldso_conf(lib_dir: &str) -> String {
     format!("include /etc/ld.so.conf.d/*.conf\n{lib_dir}\n")
 }
 
-/// Bind the extension firmware onto the kernel's default search path so
-/// `request_firmware` (e.g. GSP) finds it. Skipped when the extension ships none.
-fn bind_firmware() {
-    bind_firmware_in(&format!("{ROOT}/lib/firmware/nvidia"), FIRMWARE_DST);
+/// Bind the extension's `sub` tree onto `dst`, where its reader looks for it:
+/// `request_firmware` (e.g. GSP) and the fabricmanager and OpenSM configs.
+/// Skipped when the extension ships none.
+fn bind_tree(sub: &str, dst: &str) {
+    bind_tree_in(&format!("{ROOT}/{sub}"), dst);
 }
 
-fn bind_firmware_in(src: &str, dst: &str) {
+fn bind_tree_in(src: &str, dst: &str) {
     if !Path::new(src).is_dir() {
         return;
     }
     bind_over(src, dst);
-    info!("gpu extension: bound firmware {src} -> {dst}");
+    info!("gpu extension: bound {src} -> {dst}");
 }
 
 /// Bind `src` (file or dir) onto `dst`. `dst` must already exist: the base
@@ -287,13 +292,13 @@ mod tests {
         setup(); // no-op without the extension
     }
 
-    // === bind_firmware ===
+    // === bind_tree ===
 
     #[test]
-    fn test_bind_firmware_skips_without_src() {
-        // No firmware tree in the extension: no-op, and in particular no attempt
+    fn test_bind_tree_skips_without_src() {
+        // No such tree in the extension: no-op, and in particular no attempt
         // to bind onto the (nonexistent) destination. Needs no root.
-        bind_firmware_in("/nonexistent/firmware/src", "/nonexistent/firmware/dst");
+        bind_tree_in("/nonexistent/firmware/src", "/nonexistent/firmware/dst");
     }
 
     #[test]
@@ -301,13 +306,13 @@ mod tests {
         miri,
         ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
     )]
-    fn test_bind_firmware_binds_when_src_present() {
+    fn test_bind_tree_binds_when_src_present() {
         require_root();
         let src = TempDir::new().unwrap();
         let dst = TempDir::new().unwrap();
         fs::write(src.path().join("gsp.bin.txt"), "firmware").unwrap();
 
-        bind_firmware_in(src.path().to_str().unwrap(), dst.path().to_str().unwrap());
+        bind_tree_in(src.path().to_str().unwrap(), dst.path().to_str().unwrap());
 
         let visible = dst.path().join("gsp.bin.txt");
         assert!(visible.exists());
