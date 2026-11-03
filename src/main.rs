@@ -7,8 +7,8 @@ use ::NVRC::mode::{Fabric, Mode};
 use ::NVRC::nvrc::NVRC;
 use ::NVRC::toolkit::nvidia_ctk_cdi;
 use ::NVRC::{
-    gpu_extension, guest_extension_image, hash, init, kmsg, lockdown, mode, modprobe, mount, net,
-    syslog,
+    cdi, gpu_extension, guest_extension_image, hash, init, kmsg, lockdown, mode, modprobe, mount,
+    net, syslog,
 };
 use log::info;
 
@@ -46,11 +46,8 @@ fn start_fabric(init: &mut NVRC, fabric: Fabric, fabric_mode: u8) {
         Fabric::DirectNvSwitch => init.nv_fabricmanager(fabric, fabric_mode, None),
         Fabric::ConnectX => {
             // Port GUIDs exist only once the RDMA drivers have registered the
-            // management PFs. Both drivers are in-tree and may be built in, leaving
-            // no module tree for modprobe; their sysfs nodes show they are present.
-            modprobe::load_unless_present("ib_umad", "/sys/class/infiniband_mad");
-            modprobe::load_unless_present("mlx5_ib", "/sys/bus/auxiliary/drivers/mlx5_ib.rdma");
-
+            // management PFs; cdi::write_nic_spec loaded them, a ConnectX
+            // fabric being ConnectX functions.
             let guid = mode::management_port_guid();
             init.nv_nvlsm(&guid);
             init.health_checks();
@@ -77,6 +74,10 @@ fn main() {
 
     // Expose gpu-extension libs/firmware before any driver load. No-op if absent.
     gpu_extension::setup();
+
+    // A NIC can be assigned to any VM; the spec needs the RDMA drivers, loaded
+    // while modules still may be.
+    cdi::write_nic_spec();
 
     let mode = mode::detect();
     if mode.needs_nvidia_driver() {

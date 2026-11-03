@@ -158,6 +158,20 @@ skips setup.
 | `nvrc.uvm.persistence.mode` | `on/off`, `true/false`, `1/0`, `yes/no` | `true`   | UVM persistence mode keeps unified memory state across CUDA context teardowns.                     |
 | `nvrc.dcgm`                 | `on/off`, `true/false`, `1/0`, `yes/no` | `false`  | Enable DCGM (Data Center GPU Manager) for telemetry and health monitoring.                         |
 
+### CDI specs
+
+Two specs under `/var/run/cdi` let kata-agent resolve the device names the
+runtime annotates containers with. `nvidia-ctk cdi generate` writes
+`nvidia.yaml` for the GPUs. NVRC writes `nvidia-nic.json` for the VM's ConnectX
+functions, PF or VF, Ethernet or InfiniBand: one `nvidia.com/nic=<index>`
+device per function in PCI order, the order kata runtime-rs indexes them in,
+with the function's `uverbs`, `umad` and `issm` nodes, `rdma_cm`, and
+`NVIDIA_NIC_<index>=<PCI address>` in the container's environment. The agent
+fails a container after 100 s when a name has no spec, so the spec is written
+before the agent starts. This is a bridge until `nvidia-ctk cdi generate` gains
+a NIC mode (NVIDIA/nvidia-container-toolkit#2197); then NVRC runs that, as it
+does for the GPUs.
+
 ### Example Configurations
 
 Mode selection is automatic: assign GPUs for GPU services, or fabric management

@@ -5,6 +5,7 @@
 
 #![allow(non_snake_case)]
 
+pub mod cdi;
 pub mod config;
 pub mod daemon;
 pub mod device;
