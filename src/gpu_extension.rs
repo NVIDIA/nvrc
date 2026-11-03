@@ -118,6 +118,39 @@ pub fn setup() {
     refresh_ldcache();
 }
 
+/// Make a daemon's runtime directory (its socket lives inside) visible to
+/// `nvidia-ctk cdi generate` under the extension root. nvidia-ctk discovers
+/// IPC sockets below `<driver-root>/run` and `<driver-root>/var/run`
+/// (internal/discover/ipc.go), so with `--driver-root` it never sees
+/// `/var/run/nvidia-persistenced/socket` and the spec carries no socket
+/// mount. NVML in the container then falls back to the driver's own
+/// persistence query, which under CC answers Off while the daemon holds the
+/// GPU. The daemon's path is compiled in and the extension is read-only, so
+/// the Kata builder bakes an empty `run/<daemon>` mount point into the
+/// extension and the directory is bound there before the daemon starts. An
+/// extension without the mount point predates that contract: the GPU still
+/// works, only the report is wrong, so this warns instead of failing.
+pub fn expose_run_dir(src: &str) {
+    expose_run_dir_in(present(), ROOT, src);
+}
+
+fn expose_run_dir_in(present: bool, root: &str, src: &str) {
+    if !present {
+        return;
+    }
+    let name = Path::new(src)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_else(|| panic!("{src}: no directory name"));
+    let dst = format!("{root}/run/{name}");
+    if !Path::new(&dst).is_dir() {
+        warn!("gpu extension: no {dst}; nvidia-ctk will not find the socket in {src}");
+        return;
+    }
+    bind_over(src, &dst);
+    info!("gpu extension: bound {src} -> {dst}");
+}
+
 /// Add the extension's lib dir to the loader cache so kata-agent and the CDI
 /// hooks it runs resolve the GPU libraries without an inherited `LD_LIBRARY_PATH`.
 /// Base rootfs is read-only, so build on `/run` and bind over the cache.
@@ -314,6 +347,49 @@ mod tests {
         assert_eq!(fs::read_to_string(visible).unwrap(), "firmware");
 
         unmount(dst.path());
+    }
+
+    // === expose_run_dir ===
+
+    #[test]
+    fn test_expose_run_dir_skips_without_extension() {
+        expose_run_dir_in(false, "/nonexistent", "/nonexistent/run/nvidia-persistenced");
+    }
+
+    #[test]
+    fn test_expose_run_dir_warns_without_mount_point() {
+        // Extension built before the run/<daemon> contract: no bind, no panic.
+        let root = TempDir::new().unwrap();
+        expose_run_dir_in(
+            true,
+            root.path().to_str().unwrap(),
+            "/nonexistent/run/nvidia-persistenced",
+        );
+        assert!(!root.path().join("run").exists());
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "root-gated: require_root re-execs the test binary via sudo, which miri cannot emulate"
+    )]
+    fn test_expose_run_dir_binds_onto_baked_mount_point() {
+        require_root();
+        let root = TempDir::new().unwrap();
+        let src = TempDir::new().unwrap();
+        let name = src.path().file_name().unwrap();
+        let dst = root.path().join("run").join(name);
+        fs::create_dir_all(&dst).unwrap();
+        fs::write(src.path().join("socket"), "").unwrap();
+
+        expose_run_dir_in(
+            true,
+            root.path().to_str().unwrap(),
+            src.path().to_str().unwrap(),
+        );
+
+        assert!(dst.join("socket").exists());
+        unmount(&dst);
     }
 
     // === ldso_conf ===

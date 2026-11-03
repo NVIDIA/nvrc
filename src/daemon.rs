@@ -64,6 +64,7 @@ impl NVRC {
 
     fn spawn_persistenced(&mut self, run_dir: &str, bin: &str) {
         fs::create_dir_all(run_dir).or_panic(format_args!("create_dir_all {run_dir}"));
+        gpu_extension::expose_run_dir(run_dir);
         let args = persistenced_args(self.uvm_persistence_mode.unwrap_or(true));
         self.spawn_daemon("nvidia-persistenced", bin, &args);
     }
