@@ -23,7 +23,7 @@ use crate::macros::ResultExt;
 use crate::modprobe;
 
 pub const DIR: &str = "/var/run/cdi";
-pub const SPEC: &str = "/var/run/cdi/nvidia-nic.json";
+const FILE: &str = "nvidia-nic.json";
 pub const KIND: &str = "nvidia.com/nic";
 const MELLANOX: u16 = 0x15b3;
 /// PCI base class of network controllers: Ethernet (0x0200) and InfiniBand
@@ -54,17 +54,29 @@ pub fn write_nic_spec() {
     modprobe::load_unless_present("mlx5_ib", "/sys/bus/auxiliary/drivers/mlx5_ib.rdma");
     modprobe::load_unless_present("ib_umad", "/sys/class/infiniband_mad");
     modprobe::load_unless_present("rdma_ucm", "/sys/class/misc/rdma_cm");
+    write(&sysfs, bdfs, Path::new(DIR));
+}
+
+/// The spec for `bdfs` as `<dir>/nvidia-nic.json`.  `dir` is created here:
+/// this is the first writer under it, and a directory that already exists
+/// means another writer got there first.
+fn write(sysfs: &Sysfs, bdfs: Vec<String>, dir: &Path) {
     let functions: Vec<Function> = bdfs
         .into_iter()
         .map(|bdf| Function {
-            nodes: rdma_nodes(&sysfs, &bdf),
+            nodes: rdma_nodes(sysfs, &bdf),
             bdf,
         })
         .collect();
-    let spec = nic_spec(&functions, has_rdma_cm(&sysfs));
-    fs::create_dir(DIR).or_panic(format_args!("create {DIR}"));
-    fs::write(SPEC, spec).or_panic(format_args!("write {SPEC}"));
-    info!("cdi: {SPEC}: {} {KIND} device(s)", functions.len());
+    let spec = nic_spec(&functions, has_rdma_cm(sysfs));
+    let path = dir.join(FILE);
+    fs::create_dir(dir).or_panic(format_args!("create {}", dir.display()));
+    fs::write(&path, spec).or_panic(format_args!("write {}", path.display()));
+    info!(
+        "cdi: {}: {} {KIND} device(s)",
+        path.display(),
+        functions.len()
+    );
 }
 
 /// The VM's ConnectX functions in PCI order, the order runtime-rs indexes
@@ -216,6 +228,34 @@ mod tests {
             vec!["uverbs1".to_owned()]
         );
         assert!(rdma_nodes(&f.sysfs, "0000:07:00.0").is_empty());
+    }
+
+    #[test]
+    fn the_spec_is_written_under_a_directory_created_here() {
+        let f = fake();
+        f.add_infiniband("mlx5_0", "0000:01:00.0", "1: CA", "");
+        f.add_infiniband_verbs("uverbs0", "mlx5_0", "231:192");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("cdi");
+        write(
+            &f.sysfs,
+            vec!["0000:01:00.0".to_owned(), "0000:05:00.0".to_owned()],
+            &dir,
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("nvidia-nic.json")).unwrap(),
+            nic_spec(
+                &[nic("0000:01:00.0", &["uverbs0"]), nic("0000:05:00.0", &[])],
+                false
+            )
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn a_directory_that_already_exists_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(&fake().sysfs, vec!["0000:01:00.0".to_owned()], tmp.path());
     }
 
     #[test]
