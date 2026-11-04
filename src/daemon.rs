@@ -28,12 +28,15 @@ fn hostengine_args() -> &'static [&'static str] {
 
 /// Kubernetes mode disables standalone HTTP server (we're behind kata-agent).
 /// The collectors file ships with the exporter, so it follows the gpu extension.
+/// The PCI map is read on every scrape, as the HPC job mapping is, so it may
+/// appear after the exporter started: kata-agent writes it with the first
+/// container that holds a passed-through device.
 fn dcgm_exporter_args() -> &'static [&'static str] {
     static COUNTERS: OnceLock<String> = OnceLock::new();
     static ARGS: OnceLock<Vec<&'static str>> = OnceLock::new();
     ARGS.get_or_init(|| {
         let counters = COUNTERS.get_or_init(|| gpu_extension::path(DCGM_EXPORTER_COUNTERS));
-        vec!["-k", "-f", counters.as_str()]
+        vec!["-k", "-f", counters.as_str(), "--pci-mapping-file", PCI_MAP]
     })
 }
 
@@ -41,6 +44,10 @@ const FM_CONFIG: &str = "/usr/share/nvidia/nvswitch/fabricmanager.cfg";
 const FM_RUNTIME_CONFIG: &str = "/run/fabricmanager.cfg";
 const NVLSM_CONFIG: &str = "/usr/share/nvidia/nvlsm/nvlsm.conf";
 const DCGM_EXPORTER_COUNTERS: &str = "/etc/dcgm-exporter/default-counters.csv";
+/// kata-agent's host to guest PCI address pairs of the VM, one `<host> <guest>`
+/// per line. The exporter labels a passed-through GPU's metrics with the host
+/// address behind the guest one it reports.
+const PCI_MAP: &str = "/run/kata-containers/pci-map";
 
 /// FABRIC_MODE=0: full GPU passthrough, FM manages NVSwitches directly.
 pub const FABRIC_MODE_FULL: u8 = 0;
@@ -178,7 +185,10 @@ mod tests {
     #[test]
     fn test_dcgm_exporter_args() {
         let counters = gpu_extension::path(DCGM_EXPORTER_COUNTERS);
-        assert_eq!(dcgm_exporter_args(), &["-k", "-f", counters.as_str()]);
+        assert_eq!(
+            dcgm_exporter_args(),
+            &["-k", "-f", counters.as_str(), "--pci-mapping-file", PCI_MAP]
+        );
     }
 
     // === Skip path tests ===
