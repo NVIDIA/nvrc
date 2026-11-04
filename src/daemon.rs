@@ -46,7 +46,7 @@ const NVLSM_CONFIG: &str = "/usr/share/nvidia/nvlsm/nvlsm.conf";
 const DCGM_EXPORTER_COUNTERS: &str = "/etc/dcgm-exporter/default-counters.csv";
 /// kata-agent's host to guest PCI address pairs of the VM, one `<host> <guest>`
 /// per line. The exporter labels a passed-through GPU's metrics with the host
-/// address behind the guest one it reports.
+/// address of the GPU it reports by guest address.
 const PCI_MAP: &str = "/run/kata-containers/pci-map";
 
 /// FABRIC_MODE=0: full GPU passthrough, FM manages NVSwitches directly.

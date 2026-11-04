@@ -108,8 +108,8 @@ skips setup.
 `nvrc.dcgm=on` also starts the exporter with
 `--pci-mapping-file /run/kata-containers/pci-map`. kata-agent writes that file
 once a container holds a passed-through device: the VM's host to guest PCI
-address pairs, one per line. The exporter re-reads it on every scrape, so each
-GPU's metrics carry its host PCI address without a restart.
+address pairs, one per line. The exporter re-reads it on every scrape, so the
+metrics of each GPU include its host PCI address without a restart.
 
 ### Example Configurations
 
