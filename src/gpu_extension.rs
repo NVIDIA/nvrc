@@ -118,18 +118,10 @@ pub fn setup() {
     refresh_ldcache();
 }
 
-/// Make a daemon's runtime directory (its socket lives inside) visible to
-/// `nvidia-ctk cdi generate` under the extension root. nvidia-ctk discovers
-/// IPC sockets below `<driver-root>/run` and `<driver-root>/var/run`
-/// (internal/discover/ipc.go), so with `--driver-root` it never sees
-/// `/var/run/nvidia-persistenced/socket` and the spec carries no socket
-/// mount. NVML in the container then falls back to the driver's own
-/// persistence query, which under CC answers Off while the daemon holds the
-/// GPU. The daemon's path is compiled in and the extension is read-only, so
-/// the Kata builder bakes an empty `run/<daemon>` mount point into the
-/// extension and the directory is bound there before the daemon starts. An
-/// extension without the mount point predates that contract: the GPU still
-/// works, only the report is wrong, so this warns instead of failing.
+/// nvidia-ctk discovers daemon sockets below the driver root only, and the
+/// extension is read-only, so the daemon's directory is bound onto a mount
+/// point the Kata builder bakes in. Without that mount point only the
+/// container's persistence report is wrong, hence a warning, not a panic.
 pub fn expose_run_dir(src: &str) {
     expose_run_dir_in(present(), ROOT, src);
 }
