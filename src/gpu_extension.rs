@@ -345,7 +345,11 @@ mod tests {
 
     #[test]
     fn test_expose_run_dir_skips_without_extension() {
-        expose_run_dir_in(false, "/nonexistent", "/nonexistent/run/nvidia-persistenced");
+        expose_run_dir_in(
+            false,
+            "/nonexistent",
+            "/nonexistent/run/nvidia-persistenced",
+        );
     }
 
     #[test]
