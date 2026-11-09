@@ -105,6 +105,12 @@ skips setup.
 | `nvrc.fm.mode`              | `0`, `1`                                | -        | Fabric Manager mode: 0=bare metal, 1=servicevm (shared nvswitch). Auto-set in nvswitch modes.      |
 | `nvrc.fm.rail.policy`       | `greedy`, `symmetric`                   | `greedy` | Partition rail policy. Symmetric required for Confidential Computing on Blackwell.                 |
 
+`nvrc.dcgm=on` also starts the exporter with
+`--pci-mapping-file /run/kata-containers/pci-map`. kata-agent writes that file
+once a container holds a passed-through device: the VM's host to guest PCI
+address pairs, one per line. The exporter re-reads it on every scrape, so the
+metrics of each GPU include its host PCI address without a restart.
+
 ### Example Configurations
 
 **Minimal GPU setup (defaults):**
