@@ -115,6 +115,8 @@ Each release includes per-architecture:
 | `NVRC-{arch}.tar.xz.cert`                  | Cosign certificate for tarball           |
 | `NVRC-{arch}.tar.xz.bundle.json`           | Rekor bundle for offline verification    |
 | `NVRC-{arch}.intoto.jsonl`                 | SLSA provenance attestation              |
+| `sbom-NVRC-{arch}.spdx.json`               | SBOM (SPDX JSON) of locked dependencies  |
+| `sbom-NVRC-{arch}.spdx.json.bundle.json`   | Sigstore bundle for the SBOM             |
 
 Inside each tarball:
 
