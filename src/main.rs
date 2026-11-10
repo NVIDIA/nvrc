@@ -81,7 +81,7 @@ fn main() {
     hash::self_exe();
 
     // Before disable_modules_loading() so dm-verity/erofs modules can still load.
-    guest_extension_image::mount_all();
+    let _ = guest_extension_image::mount_all();
 
     // Expose gpu-extension libs/firmware before any driver load. No-op if absent.
     gpu_extension::setup();

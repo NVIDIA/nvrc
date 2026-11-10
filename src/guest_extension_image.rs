@@ -51,13 +51,17 @@ struct VerityParams {
 }
 
 /// Mount every cold-plugged extension; no-op on non-composable images.
-pub fn mount_all() {
+pub fn mount_all() -> Vec<std::path::PathBuf> {
     let cmdline = kernel_cmdline().or_panic("read kernel command line");
     let params = parse_extensions(cmdline);
     let devices = discover_extensions(SYS_BLOCK);
-    for (name, dev, verity) in plan_mounts(&params, &devices) {
-        mount_extension(name, dev, verity);
-    }
+    plan_mounts(&params, &devices)
+        .into_iter()
+        .map(|(name, dev, verity)| {
+            mount_extension(name, dev, verity);
+            std::path::PathBuf::from(MOUNT_BASE).join(name)
+        })
+        .collect()
 }
 
 /// Reconcile discovered devices against command-line params, failing closed:
