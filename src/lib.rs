@@ -9,6 +9,7 @@ pub mod config;
 pub mod daemon;
 pub mod device;
 pub mod execute;
+pub mod extension_services;
 pub mod gpu_extension;
 pub mod guest_extension_image;
 pub mod hash;

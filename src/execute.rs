@@ -7,7 +7,7 @@ use crate::kmsg::kmsg;
 use crate::macros::ResultExt;
 
 /// Command with output sent to kmsg.
-fn command<S: AsRef<str>>(program: &str, args: &[S]) -> Command {
+pub(crate) fn command<S: AsRef<str>>(program: &str, args: &[S]) -> Command {
     let args = args.iter().map(AsRef::as_ref);
     debug!("{} {}", program, args.clone().collect::<Vec<_>>().join(" "));
 

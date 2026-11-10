@@ -42,7 +42,7 @@ impl NVRC {
         self.track_daemon(name, background(program, args));
     }
 
-    fn track_daemon(&mut self, name: &str, child: Child) {
+    pub(crate) fn track_daemon(&mut self, name: &str, child: Child) {
         self.children.push((name.into(), child));
     }
 
