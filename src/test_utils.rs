@@ -96,6 +96,32 @@ fn require_root_impl(is_root: bool) {
     }
 }
 
+// Only some management PFs carry the role; siblings must still be discovered.
+pub fn add_management_pf(f: &pcilibs_rs::testfs::Fake, bdf: &str, marked: bool) {
+    f.add_pci_device(bdf, 0x15b3, 0x1021, 0x020700, None);
+    let vpd: &[u8] = if marked {
+        b"\x90\x0e\x00VA\x0bSMDL=SW_MNG\x78"
+    } else {
+        b"\x78"
+    };
+    std::fs::write(f.device(bdf).join("vpd"), vpd).unwrap();
+}
+
+/// A port of a registered InfiniBand device; `cap_mask` bit 10 set means its
+/// SM is disabled, and the GUID is the low half of GID 0.
+pub fn add_ib_port(f: &pcilibs_rs::testfs::Fake, ib: &str, port: u32, cap_mask: &str, gid: &str) {
+    let path = f
+        .sysfs
+        .infiniband()
+        .join(ib)
+        .join("ports")
+        .join(port.to_string());
+    std::fs::create_dir_all(path.join("gids")).unwrap();
+    std::fs::write(path.join("link_layer"), "InfiniBand\n").unwrap();
+    std::fs::write(path.join("cap_mask"), cap_mask).unwrap();
+    std::fs::write(path.join("gids/0"), gid).unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
