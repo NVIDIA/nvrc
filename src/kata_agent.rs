@@ -3,13 +3,13 @@
 
 use crate::gpu_extension;
 use log::debug;
+use nix::poll::{poll, PollFd, PollFlags};
 use nix::unistd::{fork, ForkResult};
 use rlimit::{setrlimit, Resource};
 use std::fs;
+use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
-use std::thread::sleep;
-use std::time::Duration;
 
 const KATA_AGENT_PATH: &str = "/usr/bin/kata-agent";
 
@@ -69,11 +69,32 @@ fn kata_agent(path: &str, attester_variant: Option<&str>) {
 /// Uses `try_poll()` not `poll()`: this child inherits NVRC's power-off panic
 /// hook, and a transient drain I/O error must not reboot the VM while
 /// kata-agent is still running (kata exit 255).
+#[cfg(test)]
 fn syslog_loop(timeout_secs: u32) {
+    syslog_loop_with_services(timeout_secs, &[]);
+}
+
+fn syslog_loop_with_services(timeout_secs: u32, services: &[OwnedFd]) {
     let iterations = (timeout_secs as u64) * 2; // 500ms per iteration
     for _ in 0..iterations {
-        sleep(Duration::from_millis(500));
+        check_service_exits(services, 500);
         crate::syslog::try_poll();
+    }
+}
+
+fn check_service_exits(services: &[OwnedFd], timeout_ms: u16) {
+    let mut fds: Vec<_> = services
+        .iter()
+        .map(|fd| PollFd::new(fd.as_fd(), PollFlags::POLLIN))
+        .collect();
+    handle_service_poll(poll(&mut fds, timeout_ms));
+}
+
+fn handle_service_poll(result: nix::Result<libc::c_int>) {
+    match result {
+        Ok(0) | Err(nix::errno::Errno::EINTR) => {}
+        Ok(_) => panic!("extension service exited; powering off VM"),
+        Err(error) => panic!("extension service exit detection failed: {error}"),
     }
 }
 
@@ -81,17 +102,23 @@ fn syslog_loop(timeout_secs: u32) {
 /// This way kata-agent inherits our PID and becomes the main guest process.
 /// Timeout parameter allows tests to verify the fork/syslog logic exits cleanly
 pub fn fork_agent(timeout_secs: u32) {
+    fork_agent_with_services(timeout_secs, &[]);
+}
+
+/// The syslog child retains pidfds across the parent's exec into kata-agent.
+/// Any extension service exit powers off the VM through the inherited panic hook.
+pub fn fork_agent_with_services(timeout_secs: u32, services: &[OwnedFd]) {
     // SAFETY: fork() is safe here because:
     // 1. We are PID 1 with no other threads (single-threaded process)
     // 2. Parent immediately execs kata-agent (no shared state issues)
-    // 3. Child only calls async-signal-safe functions (syslog::try_poll, sleep)
-    // 4. No locks or mutexes exist that could deadlock in child
+    // 3. The child inherits service pidfds before the parent exec closes its copies.
+    // 4. No other production threads can hold locks inherited by the child.
     match unsafe { fork() }.expect("fork agent") {
         ForkResult::Parent { .. } => {
             kata_agent(KATA_AGENT_PATH, gpu_extension::attester_variant());
         }
         ForkResult::Child => {
-            syslog_loop(timeout_secs);
+            syslog_loop_with_services(timeout_secs, services);
         }
     }
 }
@@ -119,6 +146,15 @@ mod tests {
         }
         // SAFETY: _exit is async-signal-safe.
         unsafe { libc::_exit(code) }
+    }
+
+    #[test]
+    fn service_poll_requests_poweroff_on_any_exit_or_error() {
+        handle_service_poll(Ok(0));
+        handle_service_poll(Err(nix::errno::Errno::EINTR));
+        for result in [Ok(1), Ok(2), Err(nix::errno::Errno::EBADF)] {
+            assert!(panic::catch_unwind(|| handle_service_poll(result)).is_err());
+        }
     }
 
     /// Set in forked test children.

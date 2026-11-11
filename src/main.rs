@@ -81,7 +81,7 @@ fn main() {
     hash::self_exe();
 
     // Before disable_modules_loading() so dm-verity/erofs modules can still load.
-    guest_extension_image::mount_all();
+    let extensions = guest_extension_image::mount_all();
 
     // Expose gpu-extension libs/firmware before any driver load. No-op if absent.
     gpu_extension::setup();
@@ -98,6 +98,10 @@ fn main() {
         unknown => panic!("unknown mode: {unknown}"),
     }
 
+    let service_exits = ::NVRC::extension_services::start(&mut init, &extensions)
+        .expect("start extension services");
+    init.health_checks();
+
     lockdown::disable_modules_loading();
-    kata_agent::fork_agent(POLL_FOREVER);
+    kata_agent::fork_agent_with_services(POLL_FOREVER, &service_exits);
 }

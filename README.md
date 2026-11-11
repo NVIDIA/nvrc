@@ -251,3 +251,32 @@ with Sigstore.
 ## License
 
 Apache-2.0 - Copyright (c) NVIDIA CORPORATION
+
+## Extension services
+
+Measured extensions may provide foreground services in
+`etc/nvrc/services.d/*.conf`. NVRC starts them after GPU setup and before
+kata-agent. The filename supplies the service ID; startup order is extension
+name followed by filename. Executable paths resolve inside the owning extension.
+
+```text
+path=usr/local/bin/my-helper
+arg=--socket
+arg=/run/my-helper.sock
+env.RUST_LOG=info
+wait_socket=/run/my-helper.sock
+timeout_secs=10
+```
+
+Values are literal text after the first `=`; there is no quoting, substitution,
+or shell evaluation. Only `arg` may repeat. Empty lines and lines beginning with
+`#` are ignored. Unknown or duplicate keys are errors. This format needs no
+additional parser dependencies.
+
+A readiness socket is optional. When supplied, it must be a fresh Unix socket
+under `/run`, paired with a timeout from 1 to 300 seconds. A helper without a
+socket is considered started once it is spawned. All helpers must remain in the
+foreground: any startup failure or subsequent exit, including status zero,
+requests VM power-off. Services are never restarted. The syslog child watches
+Linux process descriptors after NVRC hands PID 1 to kata-agent; it does not
+restart helpers. Existing GPU daemon configuration is independent of this path.
