@@ -19,7 +19,7 @@ const PCI_DEVICES: &str = "/sys/bus/pci/devices";
 pub struct Detection {
     /// Operating mode: "cpu", "gpu", "servicevm-nvl4", or "servicevm-nvl5"
     pub mode: &'static str,
-    /// NVSwitch generation when present: "nvl4" or "nvl5"
+    /// NVSwitch generation when present: "nvl3", "nvl4" or "nvl5"
     pub nvswitch: Option<&'static str>,
 }
 
@@ -51,6 +51,17 @@ fn detect_from(pci_path: &str) -> Detection {
             Detection {
                 mode: "gpu",
                 nvswitch: None,
+            }
+        }
+        // HGX A100 8-GPU: 6 second-generation NVSwitch chips (NVLink 3).
+        (6, 8, 0) => {
+            debug!(
+                "mode: gpu FABRIC_MODE=0, {} GPU + {} NVSWITCH",
+                gpus, nvswitches
+            );
+            Detection {
+                mode: "gpu",
+                nvswitch: Some("nvl3"),
             }
         }
         (4, 8, 0) => {
@@ -337,6 +348,20 @@ mod tests {
         let d = detect_from(pci.path().to_str().unwrap());
         assert_eq!(d.mode, "gpu");
         assert_eq!(d.nvswitch, Some("nvl4"));
+    }
+
+    #[test]
+    fn test_detect_gpu_bare_metal_hgx_a100() {
+        let pci = TempDir::new().unwrap();
+        for i in 0..6 {
+            create_pci_device(&pci, &format!("0000:0{}:00.0", i), "0x10de\n", "0x068000\n");
+        }
+        for i in 0..8 {
+            create_pci_device(&pci, &format!("0000:4{}:00.0", i), "0x10de\n", "0x030200\n");
+        }
+        let d = detect_from(pci.path().to_str().unwrap());
+        assert_eq!(d.mode, "gpu");
+        assert_eq!(d.nvswitch, Some("nvl3"));
     }
 
     #[test]
