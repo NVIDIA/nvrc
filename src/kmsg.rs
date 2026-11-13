@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
+// Portions Copyright (c) Microsoft Corporation.
 
 use crate::macros::ResultExt;
 use std::fs::{self, File, OpenOptions};
@@ -78,11 +79,18 @@ pub fn open_kmsg(path: &str) -> BufReader<File> {
 }
 
 /// Run `start` (spawning a daemon), then wait for its `marker`. The log is
-/// opened first so the marker cannot be missed.
-pub fn wait_for_marker_after(marker: &str, timeout_secs: u32, start: impl FnOnce()) {
+/// opened first so the marker cannot be missed. `start` returns a check that
+/// runs whenever the wait idles (typically the daemon health check), so a
+/// daemon that exits with an error fails the wait at once instead of at the
+/// timeout.
+pub fn wait_for_marker_after<C: FnMut()>(
+    marker: &str,
+    timeout_secs: u32,
+    start: impl FnOnce() -> C,
+) {
     let mut reader = open_kmsg("/dev/kmsg");
-    start();
-    wait_for_marker(&mut reader, marker, timeout_secs);
+    let check = start();
+    wait_for_marker_checked(&mut reader, marker, timeout_secs, check);
 }
 
 /// Cap on one syslog wait: the file can also be appended to directly.
@@ -91,6 +99,16 @@ const MAX_WAIT: Duration = Duration::from_millis(500);
 /// Block until `marker` appears in `reader` or `timeout_secs` expires.
 /// At end of file, waits on /dev/log (which feeds the file) instead of sleeping.
 pub fn wait_for_marker(reader: &mut BufReader<File>, marker: &str, timeout_secs: u32) {
+    wait_for_marker_checked(reader, marker, timeout_secs, || {});
+}
+
+/// [`wait_for_marker`], running `check` each time no new line is available.
+pub(crate) fn wait_for_marker_checked(
+    reader: &mut BufReader<File>,
+    marker: &str,
+    timeout_secs: u32,
+    mut check: impl FnMut(),
+) {
     let deadline = Instant::now() + Duration::from_secs(timeout_secs as u64);
     let mut line = String::new();
 
@@ -106,7 +124,10 @@ pub fn wait_for_marker(reader: &mut BufReader<File>, marker: &str, timeout_secs:
             }
             Ok(n) if n > 0 => {}
             // EOF, WouldBlock or error: wait for the next message.
-            _ => crate::syslog::try_poll_for(remaining.min(MAX_WAIT)),
+            _ => {
+                check();
+                crate::syslog::try_poll_for(remaining.min(MAX_WAIT));
+            }
         }
     }
 }
@@ -301,6 +322,41 @@ mod tests {
                 .open(crate::syslog::SYSLOG_FILE_PATH)
                 .expect("open syslog file");
             writeln!(file, "{}", marker).expect("write marker");
+            || {}
         });
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
+    fn test_wait_for_marker_check_fails_the_wait_at_once() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut reader = open_kmsg(tmp.path().to_str().unwrap());
+
+        let start = Instant::now();
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            wait_for_marker_checked(&mut reader, MARKER, 30, || panic!("daemon exited"))
+        }));
+
+        assert!(result.is_err());
+        assert!(start.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
+    fn test_wait_for_marker_check_skipped_when_marker_is_ready() {
+        let mut tmp = NamedTempFile::new().unwrap();
+        writeln!(tmp, "{MARKER}").unwrap();
+        let mut reader = open_kmsg(tmp.path().to_str().unwrap());
+
+        let mut checks = 0;
+        wait_for_marker_checked(&mut reader, MARKER, 5, || checks += 1);
+
+        assert_eq!(checks, 0);
     }
 }

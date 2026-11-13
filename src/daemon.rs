@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
+// Portions Copyright (c) Microsoft Corporation.
 
 use crate::config::update_config_file;
 use crate::gpu_extension;
@@ -54,11 +55,12 @@ impl NVRC {
     /// reducing cold-start latency. UVM persistence mode enables unified memory
     /// optimizations. Enabled by default since most workloads benefit from it.
     pub fn nvidia_persistenced(&mut self) {
-        kmsg::wait_for_marker_after("Local RPC services initialized", 600, || {
+        kmsg::wait_for_marker_after("Local RPC services initialized", 600, move || {
             self.spawn_persistenced(
                 "/var/run/nvidia-persistenced",
                 &gpu_extension::path("/bin/nvidia-persistenced"),
-            )
+            );
+            move || self.health_checks()
         });
     }
 
@@ -105,8 +107,9 @@ impl NVRC {
         self.configure_fabricmanager(FM_RUNTIME_CONFIG, fabric_mode, rail_policy);
         fs::set_permissions(FM_RUNTIME_CONFIG, fs::Permissions::from_mode(0o400))
             .or_panic(format_args!("set permissions {FM_RUNTIME_CONFIG}"));
-        kmsg::wait_for_marker_after("FM starting NvLink Inband", 120, || {
-            self.spawn_fabricmanager(&gpu_extension::path("/bin/nv-fabricmanager"))
+        kmsg::wait_for_marker_after("FM starting NvLink Inband", 120, move || {
+            self.spawn_fabricmanager(&gpu_extension::path("/bin/nv-fabricmanager"));
+            move || self.health_checks()
         });
     }
 
@@ -195,6 +198,27 @@ mod tests {
     fn test_dcgm_exporter_skipped_by_default() {
         let mut nvrc = NVRC::default();
         nvrc.dcgm_exporter();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
+    fn test_marker_wait_fails_at_once_when_daemon_exits_with_error() {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        use std::time::{Duration, Instant};
+        use tempfile::NamedTempFile;
+
+        let log = NamedTempFile::new().unwrap();
+        let mut reader = kmsg::open_kmsg(log.path().to_str().unwrap());
+        let mut nvrc = NVRC::default();
+        nvrc.spawn_daemon("false", "/bin/false", &[]);
+
+        let start = Instant::now();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            kmsg::wait_for_marker_checked(&mut reader, "never logged", 30, || nvrc.health_checks())
+        }));
+
+        assert!(result.is_err());
+        assert!(start.elapsed() < Duration::from_secs(10));
     }
 
     #[test]
