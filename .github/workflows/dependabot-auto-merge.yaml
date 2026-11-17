@@ -1,19 +1,35 @@
 name: Dependabot automation
 
-# Enables auto-merge for Cargo crate updates. ci-on-push.yaml gates the
+# Enables auto-merge for Dependabot pull requests. ci-on-push.yaml gates the
 # self-hosted runner via the ok-to-test label for human PRs, but bypasses
 # the label check for dependabot[bot] directly, so no label is needed here.
+#
+#   - Cargo crate updates are enabled unconditionally.
+#   - GitHub Actions updates are enabled only when every action reference the
+#     PR adds matches the repository's allowed-actions policy. The policy is
+#     managed outside this repository and pins most third-party actions by
+#     SHA, so a bump usually needs a policy update first. Blocked PRs get a
+#     comment listing the missing patterns and are re-checked on a schedule,
+#     because a policy change raises no event on the PR itself.
 #
 # Security notes:
 #   - pull_request_target runs the BASE branch's workflow file, never PR code.
 #   - The author check uses pull_request.user.login (set by GitHub internally),
 #     not github.actor, which is spoofable via "@dependabot rebase" comments.
+#   - The checkout only provides .github/scripts from the base branch; PR
+#     content is read through `gh pr diff`, never checked out or executed.
 #   - contents:write is scoped to GITHUB_TOKEN (this repo only) and is used
 #     solely to call enablePullRequestAutoMerge via `gh pr merge --auto`.
 #   - No merge happens here; GitHub enforces all required checks first.
 #
-# Pre-requisite: "Allow auto-merge" must be enabled in repository Settings →
-# General. Without it gh pr merge --auto returns an error and the step fails.
+# Pre-requisites:
+#   - "Allow auto-merge" must be enabled in repository Settings → General.
+#     Without it gh pr merge --auto returns an error and the step fails.
+#   - The ACTIONS_POLICY_READ_TOKEN secret must hold a fine-grained token (or
+#     a GitHub App installation token) scoped to this repository with
+#     "Administration: read" permission. GITHUB_TOKEN cannot read the policy
+#     endpoint. Without the secret the GitHub Actions job logs a notice and
+#     leaves those PRs for manual merge.
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers]
     types:
@@ -21,26 +37,138 @@ on:
       - reopened
       # Re-enable after each rebase: GitHub clears auto-merge on force-push.
       - synchronize
+  schedule:
+    # Re-check open GitHub Actions bumps after allowed-actions policy updates.
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  group: dependabot-automation-${{ github.event.pull_request.number }}
+  group: dependabot-automation-${{ github.event.pull_request.number || github.event_name }}
   cancel-in-progress: true
 
 jobs:
   auto-merge:
+    name: Auto-merge Cargo updates
     runs-on: ubuntu-latest
-    # Only auto-merge Cargo crate updates; GitHub Actions bumps require manual review.
     if: |
+      github.event_name == 'pull_request_target' &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/cargo/')
     permissions:
-      contents: write
-      pull-requests: write
+      contents: write # enablePullRequestAutoMerge
+      pull-requests: write # enablePullRequestAutoMerge
     steps:
       - name: Enable auto-merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --auto --squash "$PR_URL"
+
+  actions-allowlist:
+    name: Auto-merge allowed GitHub Actions updates
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.user.login == 'dependabot[bot]' &&
+       startsWith(github.head_ref, 'dependabot/github_actions/'))
+    permissions:
+      contents: write # enablePullRequestAutoMerge
+      pull-requests: write # enablePullRequestAutoMerge, PR list/diff, status comment
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout base branch scripts
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Fetch allowed-actions policy
+        id: policy
+        env:
+          GH_TOKEN: ${{ secrets.ACTIONS_POLICY_READ_TOKEN }}
+        run: |
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "::notice::ACTIONS_POLICY_READ_TOKEN is not set; GitHub Actions bumps stay on manual merge"
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          gh api "repos/${GH_REPO}/actions/permissions/selected-actions" > "${RUNNER_TEMP}/allowlist.json"
+          echo "skip=false" >> "${GITHUB_OUTPUT}"
+          echo "github_owned_allowed=$(jq -r .github_owned_allowed "${RUNNER_TEMP}/allowlist.json"), $(jq '.patterns_allowed | length' "${RUNNER_TEMP}/allowlist.json") patterns"
+
+      - name: Select pull requests
+        id: select
+        if: steps.policy.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [[ -n "${PR_NUMBER}" ]]; then
+            prs="${PR_NUMBER}"
+          else
+            # Scheduled or manual run: every open Dependabot Actions bump that
+            # is not already queued for auto-merge.
+            prs=$(gh pr list --state open --author 'app/dependabot' \
+              --json number,headRefName,autoMergeRequest \
+              --jq '.[] | select(.headRefName | startswith("dependabot/github_actions/"))
+                         | select(.autoMergeRequest == null) | .number')
+          fi
+          echo "pull requests to check: ${prs:-none}"
+          {
+            echo "prs<<PRS_EOF"
+            echo "${prs}"
+            echo "PRS_EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Check policy and enable auto-merge
+        if: steps.policy.outputs.skip != 'true' && steps.select.outputs.prs != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALLOWLIST_JSON: ${{ runner.temp }}/allowlist.json
+          PRS: ${{ steps.select.outputs.prs }}
+        run: |
+          marker='<!-- dependabot-actions-allowlist -->'
+          while read -r pr; do
+            [[ -z "${pr}" ]] && continue
+            echo "::group::PR #${pr}"
+            rc=0
+            result=$(.github/scripts/check-actions-allowlist.sh "${pr}") || rc=$?
+            printf '%s\n' "${result}"
+            case "${rc}" in
+              0)
+                if [[ "$(gh pr view "${pr}" --json autoMergeRequest --jq '.autoMergeRequest != null')" == "true" ]]; then
+                  echo "auto-merge already enabled"
+                else
+                  gh pr merge --auto --squash "${pr}"
+                  echo "auto-merge enabled"
+                fi
+                echo "- #${pr}: auto-merge enabled" >> "${GITHUB_STEP_SUMMARY}"
+                ;;
+              1)
+                denied=$(printf '%s\n' "${result}" | awk -F'\t' '$1 == "denied" { printf "- `%s`\n", $2 }')
+                body="${marker}"$'\n'
+                body+="Auto-merge was **not** enabled. These action references added by this PR do not match the repository's allowed-actions policy (GitHub-owned actions plus the explicit pattern list):"$'\n\n'
+                body+="${denied}"$'\n\n'
+                body+="Once a matching pattern is added, this check runs again every six hours and on \`workflow_dispatch\` of the *Dependabot automation* workflow. "
+                body+="Actions from Marketplace verified creators may run without being listed, but the API does not expose that status, so such bumps need an explicit pattern or a manual merge."
+                last=$(gh api "repos/${GH_REPO}/issues/${pr}/comments" --paginate \
+                  --jq "[.[] | select(.body | startswith(\"${marker}\"))] | last | .body // \"\"")
+                if [[ "$(grep -E '^- `' <<< "${last}" | sort)" == "$(sort <<< "${denied}")" ]]; then
+                  echo "comment with the same list already posted"
+                else
+                  gh pr comment "${pr}" --body "${body}"
+                  echo "comment posted"
+                fi
+                echo "- #${pr}: blocked, not in policy:"$'\n'"${denied}" >> "${GITHUB_STEP_SUMMARY}"
+                ;;
+              *)
+                echo "::error::check-actions-allowlist.sh failed with status ${rc} on PR #${pr}"
+                exit "${rc}"
+                ;;
+            esac
+            echo "::endgroup::"
+          done <<< "${PRS}"
