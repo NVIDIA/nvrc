@@ -177,7 +177,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Download all dist artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v4
         with:
           pattern: dist-*
           path: dist
@@ -206,7 +206,7 @@ jobs:
       map: ${{ steps.mkmap.outputs.map }}
     steps:
       - name: Download all dist artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v4
         with:
           pattern: dist-*
           path: dist
@@ -253,7 +253,7 @@ jobs:
           - aarch64-unknown-linux-musl
     steps:
       - name: Download provenance artifact for this target
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v4
         with:
           name: NVRC-${{ matrix.target }}.intoto.jsonl
           path: prov
