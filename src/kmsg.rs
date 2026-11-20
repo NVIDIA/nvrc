@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
+// Portions Copyright (c) Microsoft Corporation.
 
 use crate::macros::ResultExt;
 use std::fs::{self, File, OpenOptions};
@@ -77,20 +78,19 @@ pub fn open_kmsg(path: &str) -> BufReader<File> {
     BufReader::new(file)
 }
 
-/// Run `start` (spawning a daemon), then wait for its `marker`. The log is
-/// opened first so the marker cannot be missed.
-pub fn wait_for_marker_after(marker: &str, timeout_secs: u32, start: impl FnOnce()) {
-    let mut reader = open_kmsg("/dev/kmsg");
-    start();
-    wait_for_marker(&mut reader, marker, timeout_secs);
-}
-
 /// Cap on one syslog wait: the file can also be appended to directly.
 const MAX_WAIT: Duration = Duration::from_millis(500);
 
 /// Block until `marker` appears in `reader` or `timeout_secs` expires.
-/// At end of file, waits on /dev/log (which feeds the file) instead of sleeping.
-pub fn wait_for_marker(reader: &mut BufReader<File>, marker: &str, timeout_secs: u32) {
+/// Whenever no new line is available, runs `check` (so the caller can fail
+/// early, e.g. when the daemon it waits on has died), then waits on /dev/log
+/// (which feeds the file) instead of sleeping.
+pub fn wait_for_marker(
+    reader: &mut BufReader<File>,
+    marker: &str,
+    timeout_secs: u32,
+    mut check: impl FnMut(),
+) {
     let deadline = Instant::now() + Duration::from_secs(timeout_secs as u64);
     let mut line = String::new();
 
@@ -105,8 +105,11 @@ pub fn wait_for_marker(reader: &mut BufReader<File>, marker: &str, timeout_secs:
                 return;
             }
             Ok(n) if n > 0 => {}
-            // EOF, WouldBlock or error: wait for the next message.
-            _ => crate::syslog::try_poll_for(remaining.min(MAX_WAIT)),
+            // EOF, WouldBlock or error: run the check, then wait for the next message.
+            _ => {
+                check();
+                crate::syslog::try_poll_for(remaining.min(MAX_WAIT));
+            }
         }
     }
 }
@@ -234,7 +237,7 @@ mod tests {
 
         let start = Instant::now();
         let found = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            wait_for_marker(&mut reader, MARKER, timeout_secs)
+            wait_for_marker(&mut reader, MARKER, timeout_secs, || {})
         }))
         .is_ok();
         (found, start.elapsed())
@@ -274,7 +277,7 @@ mod tests {
     )]
     fn test_wait_for_marker_nonexistent_file_panics() {
         let result = panic::catch_unwind(|| {
-            wait_for_marker(&mut open_kmsg("/nonexistent/path"), "marker", 1);
+            wait_for_marker(&mut open_kmsg("/nonexistent/path"), "marker", 1, || {});
         });
         assert!(result.is_err());
     }
@@ -294,7 +297,7 @@ mod tests {
         let marker = "NVRC_TEST_MARKER_12345";
 
         // /dev/kmsg is read from the syslog file; log the marker as syslog.rs would.
-        wait_for_marker_after(marker, 5, || {
+        crate::nvrc::NVRC::default().spawn_until_marker(marker, 5, |_| {
             let mut file = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -302,5 +305,23 @@ mod tests {
                 .expect("open syslog file");
             writeln!(file, "{}", marker).expect("write marker");
         });
+    }
+
+    #[test]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
+    fn test_wait_for_marker_check_fails_the_wait_at_once() {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut reader = open_kmsg(tmp.path().to_str().unwrap());
+
+        let start = Instant::now();
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            wait_for_marker(&mut reader, MARKER, 30, || panic!("daemon exited"))
+        }));
+
+        assert!(result.is_err());
+        assert!(start.elapsed() < Duration::from_secs(5));
     }
 }
