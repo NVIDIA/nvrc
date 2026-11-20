@@ -21,6 +21,7 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     init.setup_uvm_tools();
 
     match nvswitch {
+        Some("nvl3") => mode_nvl3(init, FABRIC_MODE_FULL),
         Some("nvl4") => mode_nvl4(init, FABRIC_MODE_FULL),
         Some("nvl5") => mode_nvl5(init, FABRIC_MODE_FULL),
         _ => {}
@@ -39,11 +40,19 @@ fn mode_gpu(init: &mut NVRC, nvswitch: Option<&str>) {
     init.health_checks();
 }
 
+/// NVSwitch NVL3 mode for HGX A100 systems (second-gen NVSwitch).
+/// Fabric manager rejects PARTITION_RAIL_POLICY on this generation, so none is set.
+/// Starts fabric manager; the caller has already loaded the NVIDIA driver.
+fn mode_nvl3(init: &mut NVRC, fabric_mode: u8) {
+    init.nv_fabricmanager(fabric_mode, None);
+    init.health_checks();
+}
+
 /// NVSwitch NVL4 mode for HGX H100/H200/H800 systems (third-gen NVSwitch).
 /// Service VM mode for NVLink 4.0 topologies in shared virtualization.
 /// Starts fabric manager; the caller has already loaded the NVIDIA driver.
 fn mode_nvl4(init: &mut NVRC, fabric_mode: u8) {
-    init.nv_fabricmanager(fabric_mode, "greedy");
+    init.nv_fabricmanager(fabric_mode, Some("greedy"));
     init.health_checks();
 }
 
@@ -64,7 +73,7 @@ fn mode_nvl5(init: &mut NVRC, fabric_mode: u8) {
     // NVLSM must initialize the NVLink subnet before FM can manage the fabric
     init.nv_nvlsm();
     init.health_checks();
-    init.nv_fabricmanager(fabric_mode, "symmetric");
+    init.nv_fabricmanager(fabric_mode, Some("symmetric"));
     init.health_checks();
 }
 
