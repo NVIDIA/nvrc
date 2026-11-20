@@ -106,8 +106,11 @@ fn nvrc_log(value: &str) -> Result<(), String> {
 
     log::set_max_level(lvl);
     debug!("nvrc.log: {}", log::max_level());
-    fs::write("/proc/sys/kernel/printk_devkmsg", b"on\n")
-        .map_err(|e| format!("printk_devkmsg: {e}"))
+    const DEVKMSG: &str = "/proc/sys/kernel/printk_devkmsg";
+    if fs::read_to_string(DEVKMSG).is_ok_and(|v| v.trim() == "on") {
+        return Ok(());
+    }
+    fs::write(DEVKMSG, b"on\n").map_err(|e| format!("printk_devkmsg: {e}"))
 }
 
 /// nvidia-smi only accepts 0 or 1 for the ready state, so an unrecognized
