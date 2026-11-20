@@ -8,7 +8,6 @@ use std::fs;
 use crate::nvrc::NVRC;
 
 const CMDLINE: &str = "/proc/cmdline";
-const PRINTK_DEVKMSG: &str = "/proc/sys/kernel/printk_devkmsg";
 
 static CMDLINE_CONTENT: OnceCell<String> = OnceCell::new();
 
@@ -65,7 +64,7 @@ impl NVRC {
 
         for (k, v) in content.split_whitespace().filter_map(|p| p.split_once('=')) {
             match k {
-                "nvrc.log" => nvrc_log(v, content, PRINTK_DEVKMSG)?,
+                "nvrc.log" => nvrc_log(v)?,
                 "nvrc.uvm.persistence.mode" => uvm_persistenced_mode(v, self),
                 "nvrc.uvm.tools" => {
                     self.uvm_tools_enabled = parse_boolean(v);
@@ -94,7 +93,7 @@ fn nvrc_dcgm(value: &str, ctx: &mut NVRC) {
 
 /// Control log verbosity at runtime. Defaults to off to minimize noise.
 /// Enabling devkmsg allows kernel log output even in minimal init environments.
-fn nvrc_log(value: &str, cmdline: &str, devkmsg: &str) -> Result<(), String> {
+fn nvrc_log(value: &str) -> Result<(), String> {
     let lvl = match value.to_ascii_lowercase().as_str() {
         "off" | "0" | "" => log::LevelFilter::Off,
         "error" => log::LevelFilter::Error,
@@ -107,21 +106,11 @@ fn nvrc_log(value: &str, cmdline: &str, devkmsg: &str) -> Result<(), String> {
 
     log::set_max_level(lvl);
     debug!("nvrc.log: {}", log::max_level());
-    if devkmsg_pinned(cmdline) {
-        debug!("printk_devkmsg: pinned by printk.devkmsg=, left as is");
+    const DEVKMSG: &str = "/proc/sys/kernel/printk_devkmsg";
+    if fs::read_to_string(DEVKMSG).is_ok_and(|v| v.trim() == "on") {
         return Ok(());
     }
-    fs::write(devkmsg, b"on\n").map_err(|e| format!("printk_devkmsg: {e}"))
-}
-
-/// printk.devkmsg= with a value the kernel accepts (prefix on, off or
-/// ratelimit) pins printk_devkmsg for the whole boot; the kernel then fails
-/// every sysctl write with EINVAL (Documentation/admin-guide/sysctl/kernel.rst).
-fn devkmsg_pinned(cmdline: &str) -> bool {
-    cmdline
-        .split_whitespace()
-        .filter_map(|p| p.strip_prefix("printk.devkmsg="))
-        .any(|v| ["on", "off", "ratelimit"].iter().any(|o| v.starts_with(o)))
+    fs::write(DEVKMSG, b"on\n").map_err(|e| format!("printk_devkmsg: {e}"))
 }
 
 /// nvidia-smi only accepts 0 or 1 for the ready state, so an unrecognized
@@ -168,7 +157,7 @@ mod tests {
         require_root();
         log_setup();
 
-        nvrc_log("debug", "", PRINTK_DEVKMSG).unwrap();
+        nvrc_log("debug").unwrap();
         assert!(log_enabled!(log::Level::Debug));
     }
 
@@ -497,41 +486,5 @@ mod tests {
 
         assert_eq!(c.uvm_persistence_mode, Some(true));
         assert_eq!(c.nvidia_smi_srs, Some(true));
-    }
-
-    /// Sets up a stand-in printk_devkmsg sysctl at its boot default, runs
-    /// nvrc.log=debug under `cmdline` and returns what NVRC left in it.
-    fn devkmsg_after_nvrc_log(cmdline: &str) -> String {
-        let devkmsg = tempfile::NamedTempFile::new().unwrap();
-        fs::write(devkmsg.path(), "ratelimit\n").unwrap();
-        nvrc_log("debug", cmdline, devkmsg.path().to_str().unwrap()).unwrap();
-        fs::read_to_string(devkmsg.path()).unwrap()
-    }
-
-    #[test]
-    #[cfg_attr(not(miri), serial)]
-    fn nvrc_log_enables_devkmsg() {
-        for cmdline in [
-            "nvrc.log=debug",
-            "printk.devkmsg=bogus nvrc.log=debug",
-            "xprintk.devkmsg=on nvrc.log=debug",
-        ] {
-            assert_eq!(devkmsg_after_nvrc_log(cmdline), "on\n", "{cmdline}");
-        }
-    }
-
-    /// printk.devkmsg= pins the sysctl for the whole boot and the kernel then
-    /// fails every write with EINVAL, so nvrc.log must leave it alone.
-    #[test]
-    #[cfg_attr(not(miri), serial)]
-    fn nvrc_log_leaves_devkmsg_pinned_by_cmdline() {
-        for cmdline in [
-            "printk.devkmsg=on nvrc.log=debug",
-            "nvrc.log=debug printk.devkmsg=on",
-            "printk.devkmsg=off nvrc.log=debug",
-            "printk.devkmsg=ratelimit nvrc.log=debug",
-        ] {
-            assert_eq!(devkmsg_after_nvrc_log(cmdline), "ratelimit\n", "{cmdline}");
-        }
     }
 }
