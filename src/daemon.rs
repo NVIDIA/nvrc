@@ -53,13 +53,13 @@ pub const FABRIC_MODE_SHARED: u8 = 1;
 /// announces it. On NVL5 the subnet belongs to NVLSM and FM reports its own
 /// state machine instead; the full literal keeps the "global fabric manager
 /// state" and "subnet manager state" lines, logged by the same monitor, from
-/// matching. Both arrive through syslog: FM mirrors INFO and above there
-/// whatever LOG_USE_SYSLOG says, and NVRC's shim forwards /dev/log to kmsg.
-/// Measured on a DGX with FM 615.71.09 in Service VM mode: configured 26 s
-/// after start. The configured state also covers NVLSM: on NVL5 the subnet
-/// manager becomes master only after FM has connected and synced partitions
-/// with it (70 ms after FM's sync request on that DGX), so NVLSM cannot be
-/// waited for before FM starts, and FM configured implies NVLSM master.
+/// matching. Both reach kmsg through syslog: the guest image sets
+/// LOG_USE_SYSLOG=1 in fabricmanager.cfg and NVRC's shim forwards /dev/log to
+/// kmsg. Without that setting the marker line may not reach syslog. The
+/// configured state also covers NVLSM: on NVL5 the subnet manager becomes
+/// master only after FM has connected and synced partitions with it, so NVLSM
+/// cannot be waited for before FM starts, and FM configured implies NVLSM
+/// master.
 pub const FM_READY_NVL4: &str = "FM starting NvLink Inband";
 pub const FM_READY_NVL5: &str = "fabric manager state is `3` (configured)";
 

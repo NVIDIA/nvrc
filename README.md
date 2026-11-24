@@ -106,18 +106,17 @@ unrelated to the fabric; only a missing `vpd` attribute is tolerated.
 
 Fabric Manager is started and then waited for on the line it logs when the
 fabric is configured; nvidia-persistenced on `Local RPC services initialized`.
-Every marker is a syslog line: Fabric Manager mirrors INFO and above to syslog,
-nvidia-persistenced logs there with `--verbose`, and NVRC's shim forwards
-`/dev/log` to kmsg. Fabric Manager is ready at `FM starting NvLink Inband` on
-direct NVSwitches, where it drives the inband path itself, and at
+Every marker is a syslog line: the guest image sets `LOG_USE_SYSLOG=1` in
+`fabricmanager.cfg`, nvidia-persistenced logs there with `--verbose`, and
+NVRC's shim forwards `/dev/log` to kmsg. Fabric Manager is ready at
+`FM starting NvLink Inband` on direct NVSwitches, where it drives the inband
+path itself, and at
 ``fabric manager state is `3` (configured)`` on ConnectX management PFs, where
 the subnet belongs to NVLSM and FM reports its state machine instead. NVLSM is
 not waited for on its own: on these systems the subnet manager becomes master
 only after Fabric Manager has connected to it and synced partitions, so FM
 configured implies NVLSM master, and a wait for NVLSM before FM starts never
-ends. Measured on a DGX with Fabric Manager 615.71.09 in Service VM mode: FM
-synced with the subnet manager 3.8 s after start, NVLSM was master 70 ms
-later, FM configured 26 s after start.
+ends.
 
 ## Kernel Parameters
 
