@@ -3,15 +3,15 @@
 
 //! The CDI spec for the VM's ConnectX functions.
 //!
-//! kata runtime-rs annotates every ConnectX function it passes through as
-//! `nvidia.com/nic=<index>`, indices in guest PCI order, and kata-agent
-//! resolves those names against `/var/run/cdi` before it creates the
-//! container, failing it after 100 s without a match. No other component
-//! writes that spec yet. This module is the bridge until `nvidia-ctk cdi
-//! generate` gains a NIC mode (NVIDIA/nvidia-container-toolkit#2197); then
-//! the NIC spec comes the way the GPU spec does, one command and no code
-//! here. The indices are per VM, as nvidia-ctk's GPU indices are, so the
-//! contract holds when one container holds the kind's functions.
+//! kata runtime-rs names every ConnectX function it passes through
+//! `nvidia.com/nic=<index>`, indexed in guest PCI order. kata-agent needs a
+//! spec under `/var/run/cdi` that defines those names before it creates the
+//! container, and no other component writes one. This module writes it until
+//! `nvidia-ctk cdi generate` has a NIC mode
+//! (NVIDIA/nvidia-container-toolkit#2197); NVRC then runs that command, as it
+//! does for the GPU spec. The indices are per VM, as nvidia-ctk's GPU indices
+//! are. They match the runtime's indices when one container holds all of the
+//! VM's ConnectX functions.
 
 use std::fs;
 use std::path::Path;
@@ -26,6 +26,10 @@ pub const DIR: &str = "/var/run/cdi";
 const FILE: &str = "nvidia-nic.json";
 pub const KIND: &str = "nvidia.com/nic";
 const MELLANOX: u16 = 0x15b3;
+/// The version tested with kata-agent. The spec uses only `env` and
+/// `deviceNodes.path`, which every CDI version since 0.3.0 defines, so a
+/// newer agent reads it unchanged.
+const CDI_VERSION: &str = "0.6.0";
 /// PCI base class of network controllers: Ethernet (0x0200) and InfiniBand
 /// (0x0207) functions alike, PF or VF.
 const NETWORK: u32 = 0x02;
@@ -122,7 +126,7 @@ pub fn nic_spec(functions: &[Function], rdma_cm: bool) -> String {
         })
         .collect();
     format!(
-        "{{\n  \"cdiVersion\": \"0.6.0\",\n  \"kind\": \"{KIND}\",\n  \"devices\": [\n{}\n  ]\n}}\n",
+        "{{\n  \"cdiVersion\": \"{CDI_VERSION}\",\n  \"kind\": \"{KIND}\",\n  \"devices\": [\n{}\n  ]\n}}\n",
         devices.join(",\n")
     )
 }

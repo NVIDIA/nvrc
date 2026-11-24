@@ -167,10 +167,11 @@ functions, PF or VF, Ethernet or InfiniBand: one `nvidia.com/nic=<index>`
 device per function in PCI order, the order kata runtime-rs indexes them in,
 with the function's `uverbs`, `umad` and `issm` nodes, `rdma_cm`, and
 `NVIDIA_NIC_<index>=<PCI address>` in the container's environment. The agent
-fails a container after 100 s when a name has no spec, so the spec is written
-before the agent starts. This is a bridge until `nvidia-ctk cdi generate` gains
-a NIC mode (NVIDIA/nvidia-container-toolkit#2197); then NVRC runs that, as it
-does for the GPUs.
+cannot create a container whose device name has no spec, so NVRC writes the
+spec before it starts the agent. This is temporary: once
+`nvidia-ctk cdi generate` has a NIC mode
+(NVIDIA/nvidia-container-toolkit#2197), NVRC runs that, as it does for the
+GPUs.
 
 ### Example Configurations
 
