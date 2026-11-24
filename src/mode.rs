@@ -38,7 +38,7 @@ impl Mode {
         )
     }
 
-    /// One GPU and no fabric: nothing sits at the other end of its NVLinks.
+    /// A single GPU with no fabric has no NVLink peer.
     pub fn nvlink_disabled(&self) -> bool {
         matches!(
             self,
@@ -104,13 +104,22 @@ fn management_port_guid_from(sysfs: &Sysfs) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{add_ib_port, add_management_pf};
-    use pcilibs_rs::testfs::fake;
+    use crate::test_utils::add_ib_port;
+    use pcilibs_rs::testfs::{fake, Fake};
     use rstest::rstest;
     use std::fs;
 
     fn gpu(fabric: Option<Fabric>, gpus: usize) -> Mode {
         Mode::Gpu { fabric, gpus }
+    }
+
+    // Mode selection reads vendor and class only; the device IDs are examples.
+    fn add_gpu(f: &Fake, bdf: &str) {
+        f.add_pci_device(bdf, NVIDIA as u16, 0x2330, 0x030200, None);
+    }
+
+    fn add_switch(f: &Fake, bdf: &str) {
+        f.add_pci_device(bdf, NVIDIA as u16, 0x22a3, 0x068000, None);
     }
 
     #[rstest]
@@ -138,25 +147,13 @@ mod tests {
     ) {
         let f = fake();
         for i in 0..gpus {
-            f.add_pci_device(
-                &format!("0000:01:{i:02x}.0"),
-                0x10de,
-                0x2330,
-                0x030200,
-                None,
-            );
+            add_gpu(&f, &format!("0000:01:{i:02x}.0"));
         }
         for i in 0..switches {
-            f.add_pci_device(
-                &format!("0000:02:{i:02x}.0"),
-                0x10de,
-                0x22a3,
-                0x068000,
-                None,
-            );
+            add_switch(&f, &format!("0000:02:{i:02x}.0"));
         }
         for i in 0..management_pfs {
-            add_management_pf(&f, &format!("0000:03:00.{i}"), i % 2 == 0);
+            f.add_connectx(&format!("0000:03:00.{i}"), i % 2 == 0);
         }
         assert_eq!(detect_from(&f.sysfs), expected);
     }
@@ -164,7 +161,7 @@ mod tests {
     #[test]
     fn ordinary_nic_does_not_select_fabric_services() {
         let f = fake();
-        add_management_pf(&f, "0000:03:00.0", false);
+        f.add_connectx("0000:03:00.0", false);
         assert_eq!(detect_from(&f.sysfs), Mode::Cpu);
     }
 
@@ -175,10 +172,10 @@ mod tests {
     fn guest_layout_with_one_pf_per_slot_selects_connectx() {
         let f = fake();
         for (i, marked) in [true, true, false, false].into_iter().enumerate() {
-            add_management_pf(&f, &format!("0000:{:02x}:00.0", 5 + i), marked);
+            f.add_connectx(&format!("0000:{:02x}:00.0", 5 + i), marked);
         }
         assert_eq!(detect_from(&f.sysfs), Mode::ServiceVm(Fabric::ConnectX));
-        f.add_pci_device("0000:09:00.0", 0x10de, 0x2901, 0x030200, None);
+        add_gpu(&f, "0000:09:00.0");
         assert_eq!(detect_from(&f.sysfs), gpu(Some(Fabric::ConnectX), 1));
     }
 
@@ -204,7 +201,7 @@ mod tests {
         let f = fake();
         f.add_pci_device("0000:01:00.0", 0x1002, 0x2330, 0x030000, None);
         assert_eq!(detect_from(&f.sysfs), Mode::Cpu);
-        f.add_pci_device("0000:02:00.0", 0x10de, 0x2330, 0x030200, None);
+        add_gpu(&f, "0000:02:00.0");
         assert_eq!(detect_from(&f.sysfs), gpu(None, 1));
     }
 
@@ -212,8 +209,8 @@ mod tests {
     #[should_panic(expected = "mixed direct NVSwitch and ConnectX")]
     fn mixed_interfaces_are_rejected() {
         let f = fake();
-        f.add_pci_device("0000:02:00.0", 0x10de, 0x22a3, 0x068000, None);
-        add_management_pf(&f, "0000:03:00.0", true);
+        add_switch(&f, "0000:02:00.0");
+        f.add_connectx("0000:03:00.0", true);
         detect_from(&f.sysfs);
     }
 
@@ -229,7 +226,7 @@ mod tests {
     #[should_panic(expected = "discover PCI topology")]
     fn malformed_vpd_cannot_hide_fabric_hardware() {
         let f = fake();
-        add_management_pf(&f, "0000:03:00.0", true);
+        f.add_connectx("0000:03:00.0", true);
         fs::write(f.device("0000:03:00.0").join("vpd"), [0x90]).unwrap();
         detect_from(&f.sysfs);
     }
@@ -238,13 +235,13 @@ mod tests {
     fn management_port_is_the_first_sm_enabled_port_of_a_management_pf() {
         let f = fake();
         // An ordinary NIC with an SM-enabled port on the lowest address.
-        add_management_pf(&f, "0000:01:00.0", false);
+        f.add_connectx("0000:01:00.0", false);
         f.add_infiniband("mlx5_0", "0000:01:00.0", "1: CA", "");
         add_ib_port(&f, "mlx5_0", 1, "0x0", "fe80::9");
-        add_management_pf(&f, "0000:05:00.0", true);
+        f.add_connectx("0000:05:00.0", true);
         f.add_infiniband("mlx5_1", "0000:05:00.0", "1: CA", "");
         add_ib_port(&f, "mlx5_1", 1, "0x0", "fe80::5");
-        add_management_pf(&f, "0000:03:00.0", true);
+        f.add_connectx("0000:03:00.0", true);
         f.add_infiniband("mlx5_2", "0000:03:00.0", "1: CA", "");
         // SM disabled on the first port of the lowest management PF.
         add_ib_port(&f, "mlx5_2", 1, "0x400", "fe80::2");
@@ -256,7 +253,7 @@ mod tests {
     #[should_panic(expected = "SM-enabled management port")]
     fn sm_disabled_ports_cannot_start_nvlsm() {
         let f = fake();
-        add_management_pf(&f, "0000:05:00.0", true);
+        f.add_connectx("0000:05:00.0", true);
         f.add_infiniband("mlx5_0", "0000:05:00.0", "1: CA", "");
         add_ib_port(&f, "mlx5_0", 1, "0x400", "fe80::5");
         management_port_guid_from(&f.sysfs);
@@ -266,7 +263,7 @@ mod tests {
     #[should_panic(expected = "discover NVLink management ports")]
     fn missing_rdma_tree_is_an_error_not_an_empty_fabric() {
         let f = fake();
-        add_management_pf(&f, "0000:05:00.0", true);
+        f.add_connectx("0000:05:00.0", true);
         management_port_guid_from(&f.sysfs);
     }
 }

@@ -88,8 +88,7 @@ select the Bx00/Rx00-style RDMA/NVLSM/FM path. GPU device and subsystem IDs do
 not influence mode selection, and no SMBIOS or OEM model mapping is used.
 
 A single GPU with no fabric has no NVLink peer, so its driver loads with
-`NVreg_NvLinkDisable=1`. Any other assignment keeps NVLink enabled. Rx00
-hardware and its driver/service stack still require validation.
+`NVreg_NvLinkDisable=1`. Any other assignment keeps NVLink enabled.
 
 PF visibility can change with firmware and VM assignment, so neither four PFs
 nor a marker on every PF is required. `ib_umad` and `mlx5_ib` are loaded only
@@ -106,18 +105,17 @@ unrelated to the fabric; only a missing `vpd` attribute is tolerated.
 
 Fabric Manager is started and then waited for on the line it logs when the
 fabric is configured; nvidia-persistenced on `Local RPC services initialized`.
-Every marker is a syslog line: Fabric Manager mirrors INFO and above to syslog,
-nvidia-persistenced logs there with `--verbose`, and NVRC's shim forwards
-`/dev/log` to kmsg. Fabric Manager is ready at `FM starting NvLink Inband` on
-direct NVSwitches, where it drives the inband path itself, and at
+Every marker is a syslog line: the guest image sets `LOG_USE_SYSLOG=1` in
+`fabricmanager.cfg`, nvidia-persistenced logs there with `--verbose`, and
+NVRC's shim forwards `/dev/log` to kmsg. Fabric Manager is ready at
+`FM starting NvLink Inband` on direct NVSwitches, where it drives the inband
+path itself, and at
 ``fabric manager state is `3` (configured)`` on ConnectX management PFs, where
 the subnet belongs to NVLSM and FM reports its state machine instead. NVLSM is
 not waited for on its own: on these systems the subnet manager becomes master
 only after Fabric Manager has connected to it and synced partitions, so FM
 configured implies NVLSM master, and a wait for NVLSM before FM starts never
-ends. Measured on a DGX with Fabric Manager 615.71.09 in Service VM mode: FM
-synced with the subnet manager 3.8 s after start, NVLSM was master 70 ms
-later, FM configured 26 s after start.
+ends.
 
 ## Kernel Parameters
 
@@ -275,7 +273,7 @@ Check kernel logs for panic messages. Common causes:
 
 ### GPU not available in container
 
-- Check detected topology with `nvrc.log=debug`
+- Check the detected mode with `nvrc.log=info`; `debug` adds the topology
 - Check that GPU is passed through to VM
 - Ensure nvidia kernel modules are present
 - Verify CDI spec generation succeeded
