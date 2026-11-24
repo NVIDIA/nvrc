@@ -227,6 +227,10 @@ mod tests {
     /// Whether wait_for_marker found the marker in `contents` (a timeout
     /// panics), and how long it took.
     fn wait_over(contents: &str, timeout_secs: u32) -> (bool, Duration) {
+        wait_over_marker(contents, MARKER, timeout_secs)
+    }
+
+    fn wait_over_marker(contents: &str, marker: &str, timeout_secs: u32) -> (bool, Duration) {
         let mut tmp = NamedTempFile::new().unwrap();
         tmp.write_all(contents.as_bytes()).unwrap();
         tmp.flush().unwrap();
@@ -234,7 +238,7 @@ mod tests {
 
         let start = Instant::now();
         let found = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-            wait_for_marker(&mut reader, MARKER, timeout_secs)
+            wait_for_marker(&mut reader, marker, timeout_secs)
         }))
         .is_ok();
         (found, start.elapsed())
@@ -265,6 +269,34 @@ mod tests {
         assert!(!found);
         assert!(elapsed >= Duration::from_secs(1));
         assert!(elapsed < Duration::from_secs(5), "took {elapsed:?}");
+    }
+
+    /// Lines captured on a DGX (FM 615.71.09, Service VM mode) as NVRC's
+    /// syslog shim wrote them to kmsg.
+    const FM_CONFIGURED_LINE: &str = "[   32.323834] NVRC::syslog[1]: Nov  1 02:00:31 nv-fabricmanager: [Nov 01 2026 02:00:31] [INFO] [tid 280] fabric management state monitor detected fabric manager state update; fabric manager state is `3` (configured)\n";
+    const FM_OPERATIONAL_LINE: &str = "[   29.1] NVRC::syslog[1]: Nov  1 02:00:28 nv-fabricmanager: [Nov 01 2026 02:00:28] [INFO] [tid 280] global fabric manager state monitor detected global fabric manager state update; global fabric manager state is `1` (operational)\n";
+    const SM_MASTER_SEEN_BY_FM_LINE: &str = "[   29.2] NVRC::syslog[1]: Nov  1 02:00:28 nv-fabricmanager: [Nov 01 2026 02:00:28] [INFO] [tid 279] subnet manager state monitor received subnet manager get state response with ok status; subnet manager state is `4` (master)\n";
+
+    #[rstest]
+    #[cfg_attr(
+        miri,
+        ignore = "open_kmsg uses O_NONBLOCK, an open flag miri does not support"
+    )]
+    #[case::fm_configured_on_nvl5(crate::daemon::FM_READY_NVL5, FM_CONFIGURED_LINE)]
+    fn test_each_fabric_marker_matches_its_captured_line(#[case] marker: &str, #[case] line: &str) {
+        assert!(wait_over_marker(line, marker, 5).0);
+    }
+
+    /// The same monitor logs neighbouring states; the marker must select
+    /// exactly its line.
+    #[rstest]
+    #[case::global_state_is_not_configured(crate::daemon::FM_READY_NVL5, FM_OPERATIONAL_LINE)]
+    #[case::subnet_manager_master_is_not_fm(
+        crate::daemon::FM_READY_NVL5,
+        SM_MASTER_SEEN_BY_FM_LINE
+    )]
+    fn test_fabric_markers_skip_their_neighbours(#[case] marker: &str, #[case] line: &str) {
+        assert!(!line.contains(marker));
     }
 
     #[test]
