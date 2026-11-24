@@ -88,8 +88,7 @@ select the Bx00/Rx00-style RDMA/NVLSM/FM path. GPU device and subsystem IDs do
 not influence mode selection, and no SMBIOS or OEM model mapping is used.
 
 A single GPU with no fabric has no NVLink peer, so its driver loads with
-`NVreg_NvLinkDisable=1`. Any other assignment keeps NVLink enabled. Rx00
-hardware and its driver/service stack still require validation.
+`NVreg_NvLinkDisable=1`. Any other assignment keeps NVLink enabled.
 
 PF visibility can change with firmware and VM assignment, so neither four PFs
 nor a marker on every PF is required. `ib_umad` and `mlx5_ib` are loaded only
@@ -259,7 +258,7 @@ Check kernel logs for panic messages. Common causes:
 
 ### GPU not available in container
 
-- Check detected topology with `nvrc.log=debug`
+- Check the detected mode with `nvrc.log=info`; `debug` adds the topology
 - Check that GPU is passed through to VM
 - Ensure nvidia kernel modules are present
 - Verify CDI spec generation succeeded
