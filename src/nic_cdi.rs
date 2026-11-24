@@ -44,7 +44,7 @@ pub struct Function {
 /// Write the spec when the VM holds ConnectX functions; a no-op otherwise.
 /// Runs before the mode's services, so `/var/run/cdi` is created here once
 /// and `nvidia-ctk` writes the GPU spec into it afterwards.
-pub fn write_nic_spec() {
+pub fn write_spec() {
     let sysfs = Sysfs::default();
     let bdfs = connectx_functions(&sysfs);
     if bdfs.is_empty() {

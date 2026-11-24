@@ -5,7 +5,6 @@
 
 #![allow(non_snake_case)]
 
-pub mod cdi;
 pub mod config;
 pub mod daemon;
 pub mod device;
@@ -23,6 +22,7 @@ pub mod mode;
 pub mod modprobe;
 pub mod mount;
 pub mod net;
+pub mod nic_cdi;
 pub mod nvrc;
 pub mod smi;
 pub mod syslog;

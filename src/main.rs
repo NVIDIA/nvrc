@@ -7,8 +7,8 @@ use ::NVRC::mode::{Fabric, Mode};
 use ::NVRC::nvrc::NVRC;
 use ::NVRC::toolkit::nvidia_ctk_cdi;
 use ::NVRC::{
-    cdi, gpu_extension, guest_extension_image, hash, init, kmsg, lockdown, mode, modprobe, mount,
-    net, syslog,
+    gpu_extension, guest_extension_image, hash, init, kmsg, lockdown, mode, modprobe, mount, net,
+    nic_cdi, syslog,
 };
 use log::info;
 
@@ -46,7 +46,7 @@ fn start_fabric(init: &mut NVRC, fabric: Fabric, fabric_mode: u8) {
         Fabric::DirectNvSwitch => init.nv_fabricmanager(fabric, fabric_mode, None),
         Fabric::ConnectX => {
             // Port GUIDs exist only once the RDMA drivers have registered the
-            // management PFs; cdi::write_nic_spec loaded them, a ConnectX
+            // management PFs; nic_cdi::write_spec loaded them, a ConnectX
             // fabric being ConnectX functions.
             let guid = mode::management_port_guid();
             init.nv_nvlsm(&guid);
@@ -77,7 +77,7 @@ fn main() {
 
     // A NIC can be assigned to any VM; the spec needs the RDMA drivers, loaded
     // while modules still may be.
-    cdi::write_nic_spec();
+    nic_cdi::write_spec();
 
     let mode = mode::detect();
     if mode.needs_nvidia_driver() {
