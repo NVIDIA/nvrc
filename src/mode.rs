@@ -38,7 +38,7 @@ impl Mode {
         )
     }
 
-    /// One GPU and no fabric: nothing sits at the other end of its NVLinks.
+    /// A single GPU with no fabric has no NVLink peer.
     pub fn nvlink_disabled(&self) -> bool {
         matches!(
             self,
