@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) NVIDIA CORPORATION
+// Portions Copyright (c) Microsoft Corporation.
 
 //! NVRC configuration state and daemon lifecycle management.
 
 use std::process::Child;
 
 use crate::execute::background;
+use crate::kmsg;
 
 /// Central configuration state for the NVIDIA Runtime Container init.
 /// Fields are populated from kernel command-line parameters and control
@@ -44,6 +46,21 @@ impl NVRC {
 
     fn track_daemon(&mut self, name: &str, child: Child) {
         self.children.push((name.into(), child));
+    }
+
+    /// Start a daemon through `spawn`, then wait for its readiness `marker`.
+    /// The log is opened first so the marker cannot be missed. The health
+    /// check runs while waiting: a daemon that dies on startup fails init at
+    /// once with its exit status, instead of as a timeout on the marker.
+    pub fn spawn_until_marker(
+        &mut self,
+        marker: &str,
+        timeout_secs: u32,
+        spawn: impl FnOnce(&mut Self),
+    ) {
+        let mut log = kmsg::open_kmsg("/dev/kmsg");
+        spawn(self);
+        kmsg::wait_for_marker(&mut log, marker, timeout_secs, || self.health_checks());
     }
 
     /// Check all background daemons haven't failed.
@@ -147,5 +164,24 @@ mod tests {
         nvrc.track_daemon("d2", Command::new("/bin/true").spawn().unwrap());
         std::thread::sleep(std::time::Duration::from_millis(50));
         nvrc.health_checks();
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "miri cannot emulate process spawn")]
+    fn test_marker_wait_fails_at_once_when_daemon_exits_with_error() {
+        use std::time::{Duration, Instant};
+
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let mut reader = kmsg::open_kmsg(log.path().to_str().unwrap());
+        let mut nvrc = NVRC::default();
+        nvrc.spawn_daemon("false", "/bin/false", &[]);
+
+        let start = Instant::now();
+        let result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            kmsg::wait_for_marker(&mut reader, "never logged", 30, || nvrc.health_checks())
+        }));
+
+        assert!(result.is_err());
+        assert!(start.elapsed() < Duration::from_secs(10));
     }
 }

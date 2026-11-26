@@ -3,7 +3,6 @@
 
 use crate::config::update_config_file;
 use crate::gpu_extension;
-use crate::kmsg;
 use crate::macros::ResultExt;
 use crate::nvrc::NVRC;
 use std::fs;
@@ -54,8 +53,8 @@ impl NVRC {
     /// reducing cold-start latency. UVM persistence mode enables unified memory
     /// optimizations. Enabled by default since most workloads benefit from it.
     pub fn nvidia_persistenced(&mut self) {
-        kmsg::wait_for_marker_after("Local RPC services initialized", 600, || {
-            self.spawn_persistenced(
+        self.spawn_until_marker("Local RPC services initialized", 600, |nvrc| {
+            nvrc.spawn_persistenced(
                 "/var/run/nvidia-persistenced",
                 &gpu_extension::path("/bin/nvidia-persistenced"),
             )
@@ -105,8 +104,8 @@ impl NVRC {
         self.configure_fabricmanager(FM_RUNTIME_CONFIG, fabric_mode, rail_policy);
         fs::set_permissions(FM_RUNTIME_CONFIG, fs::Permissions::from_mode(0o400))
             .or_panic(format_args!("set permissions {FM_RUNTIME_CONFIG}"));
-        kmsg::wait_for_marker_after("FM starting NvLink Inband", 120, || {
-            self.spawn_fabricmanager(&gpu_extension::path("/bin/nv-fabricmanager"))
+        self.spawn_until_marker("FM starting NvLink Inband", 120, |nvrc| {
+            nvrc.spawn_fabricmanager(&gpu_extension::path("/bin/nv-fabricmanager"))
         });
     }
 
