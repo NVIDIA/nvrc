@@ -1,19 +1,36 @@
 name: Dependabot automation
 
-# Enables auto-merge for Cargo crate updates. ci-on-push.yaml gates the
+# Enables auto-merge for Dependabot pull requests. ci-on-push.yaml gates the
 # self-hosted runner via the ok-to-test label for human PRs, but bypasses
 # the label check for dependabot[bot] directly, so no label is needed here.
+#
+# Cargo updates are always auto-merged. GitHub Actions updates are auto-merged
+# per the repository's allowed-actions policy. A policy flag allows all
+# GitHub-owned actions. Other actions must be on the enterprise operator's
+# list. A `!` entry on the list blocks an action. Any added line other than
+# a plain `uses:` line keeps the update on manual merge. A list change raises
+# no event here. A schedule re-checks open updates.
+# Marketplace verified creators also run unlisted. The API does not expose
+# that status. Their updates stay on manual merge.
 #
 # Security notes:
 #   - pull_request_target runs the BASE branch's workflow file, never PR code.
 #   - The author check uses pull_request.user.login (set by GitHub internally),
 #     not github.actor, which is spoofable via "@dependabot rebase" comments.
+#   - The policy check reads the PR as diff text through the API. PR content
+#     is never checked out or executed.
 #   - contents:write is scoped to GITHUB_TOKEN (this repo only) and is used
 #     solely to call enablePullRequestAutoMerge via `gh pr merge --auto`.
 #   - No merge happens here; GitHub enforces all required checks first.
 #
-# Pre-requisite: "Allow auto-merge" must be enabled in repository Settings →
-# General. Without it gh pr merge --auto returns an error and the step fails.
+# Pre-requisites:
+#   - "Allow auto-merge" must be enabled in repository Settings → General.
+#     Without it gh pr merge --auto returns an error and the step fails.
+#   - The ACTIONS_POLICY_READ_TOKEN secret holds a token for this repository
+#     with "Administration: read". The policy endpoint requires that
+#     permission. GITHUB_TOKEN cannot carry it. Without the secret, the
+#     step assumes the flag is set and the list is empty. Only updates of
+#     GitHub-owned actions are enabled then.
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers]
     types:
@@ -21,6 +38,10 @@ on:
       - reopened
       # Re-enable after each rebase: GitHub clears auto-merge on force-push.
       - synchronize
+  schedule:
+    # A policy change triggers nothing here. The schedule re-checks open updates.
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
 
 permissions: {}
 
@@ -31,7 +52,6 @@ concurrency:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    # Only auto-merge Cargo crate updates; GitHub Actions bumps require manual review.
     if: |
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       startsWith(github.head_ref, 'dependabot/cargo/')
@@ -44,3 +64,98 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --auto --squash "$PR_URL"
+
+  auto-merge-actions:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.user.login == 'dependabot[bot]' &&
+       startsWith(github.head_ref, 'dependabot/github_actions/'))
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable auto-merge per policy
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          POLICY_TOKEN: ${{ secrets.ACTIONS_POLICY_READ_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        # `shell: bash` turns on pipefail. Without it a failed `gh pr diff` goes unnoticed.
+        shell: bash
+        run: |
+          # GitHub ignores case in action names.
+          shopt -s nocasematch
+
+          policy='{"github_owned_allowed": true, "patterns_allowed": []}'
+          if [[ -n "${POLICY_TOKEN}" ]]; then
+            policy=$(GH_TOKEN="${POLICY_TOKEN}" gh api \
+              "repos/${GH_REPO}/actions/permissions/selected-actions")
+          fi
+          github_owned=$(jq -r '.github_owned_allowed' <<< "${policy}")
+          # `*` is the only wildcard. An entry with another pattern character
+          # is dropped. No reference can contain such a character.
+          patterns=$(jq -r '.patterns_allowed[]
+            | select(test("^!?[A-Za-z0-9_./@*-]+$"))' <<< "${policy}")
+
+          allowed() {
+            local pattern hit=1
+            [[ "${github_owned}" == true && ("$1" == actions/* || "$1" == github/*) ]] && hit=0
+            while read -r pattern; do
+              # shellcheck disable=SC2053 # unquoted: `*` is the policy's wildcard
+              if [[ "${pattern}" == '!'* ]]; then
+                # A `!` entry blocks the action. No other entry and no flag overrides it.
+                [[ "$1" == ${pattern#!} ]] && return 1
+              elif [[ -n "${pattern}" && "$1" == ${pattern} ]]; then
+                hit=0
+              fi
+            done <<< "${patterns}"
+            return "${hit}"
+          }
+
+          # A Dependabot update adds only lines of this form.
+          uses_line='^\+[[:blank:]]*(-[[:blank:]]+)?uses:[[:blank:]]+([A-Za-z0-9_./@-]+)([[:blank:]]+#[[:print:]]*)?[[:blank:]]*$'
+          # Tells who enabled auto-merge. Only this job's own request is withdrawn.
+          queued_by='.autoMergeRequest | if . == null then "nobody"
+            elif (.enabledBy.login // "" | test("github-actions")) then "job"
+            else "person" end'
+
+          # A scheduled or manual run has no pull request. Take all open
+          # updates. The policy may have changed for a queued one.
+          prs="${PR_NUMBER:-$(gh pr list --author app/dependabot \
+            --json number,headRefName --jq '.[]
+              | select(.headRefName | startswith("dependabot/github_actions/"))
+              | .number')}"
+
+          # A failing pull request must not block the others. The step still
+          # fails at the end.
+          failed=0
+          for pr in ${prs}; do
+            if ! added=$(gh pr diff "${pr}" \
+                | awk '/^diff --git /{hunk=0} /^@@ /{hunk=1; next} hunk && /^\+/') ||
+              ! queued=$(gh pr view "${pr}" --json autoMergeRequest --jq "${queued_by}"); then
+              echo "- #${pr}: reading the pull request failed" >> "${GITHUB_STEP_SUMMARY}"
+              failed=1
+              continue
+            fi
+            blocked=$(while IFS= read -r line; do
+              if [[ ! "${line}" =~ ${uses_line} ]]; then
+                echo "a change other than a plain \`uses:\` line"
+              elif ! allowed "${BASH_REMATCH[2]}"; then
+                echo "\`${BASH_REMATCH[2]}\`"
+              fi
+            done <<< "${added}" | sort -u | tr '\n' ' ')
+            if [[ -n "${blocked}" ]]; then
+              # The policy or the pull request changed after this job queued it.
+              if [[ "${queued}" == job ]] && ! gh pr merge --disable-auto "${pr}"; then
+                failed=1
+              fi
+              echo "- #${pr}: manual merge, blocked by: ${blocked}" >> "${GITHUB_STEP_SUMMARY}"
+            elif [[ "${queued}" != nobody ]] || gh pr merge --auto --squash "${pr}"; then
+              echo "- #${pr}: auto-merge enabled" >> "${GITHUB_STEP_SUMMARY}"
+            else
+              echo "- #${pr}: enabling auto-merge failed" >> "${GITHUB_STEP_SUMMARY}"
+              failed=1
+            fi
+          done
+          exit "${failed}"
